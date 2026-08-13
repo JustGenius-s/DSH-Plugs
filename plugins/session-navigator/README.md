@@ -1,25 +1,41 @@
 # @just-genius/dsh-session-navigator
 
-Codex 风格的会话消息导航轨道（message navigator rail），挂在 DSH 网页会话面板。
+A Codex-style message navigator rail for the DeepSeek Harness (DSH) web surface:
+a vertical tick rail on the left edge of the conversation transcript, one tick
+per user message. It shows where you are in a long session and jumps to any
+message in one click.
 
-## 现状：可运行的骨架
+## Features
 
-当前是「可运行的骨架」：在输入区下方（`conversation.composer.dock` 插槽）渲染一条
-proof-of-life 读数，证明整条链路已打通 —— tsdown 构建、`dsh.client` 注入、
-`ctx.slots.register` 挂载、React 渲染。
+- **One tick per user message**, clustered in a fixed rail on the transcript's
+  left edge.
+- **Active indicator** — the tick whose message sits at the top of the viewport
+  is highlighted in the brand color (same size, different color).
+- **Stepped hover** — hovering a tick elongates it with a stepped gradient across
+  its neighbors, highlights it, and shows the message text in a tooltip.
+- **Smooth jump** — clicking a tick smoothly scrolls to that message, leaving a
+  small margin above it (`JUMP_MARGIN`).
+- **Continuous hit areas** — each tick has a 16px transparent hit target that
+  overlaps its neighbors, so there are no dead zones between ticks.
 
-## 路线图（下一步）
+## How it works
 
-参考 `/Users/morisi/Space/e-pi` 的 `MessageNavigator`，在会话 transcript 左侧渲染一条
-竖向导航轨道：
+The plugin is a Cordis client-UI plugin. Its browser half registers into the
+`conversation.chat.turnTail` slot (session-scoped, so it receives the
+conversation snapshot through `useSession`), reads the ordered user-message
+nodes (`chat.order` + `chat.nodes`, filtering `kind === "user"`), and
+renders one `position: fixed` rail (ported to `document.body`) per session.
 
-- 每个用户消息一条刻度条，刻度条聚集在轨道中部；
-- 视口顶部的消息高亮，hover 拉长并显示该消息标题；
-- 点击跳转到对应消息。
+It locates the conversation scrollport via the `[data-conversation-scroll]`
+anchor and each message row via `[data-chat-anchor-key]`, measures each
+message's content offset, tracks `scrollTop` through scroll / resize /
+`MutationObserver` listeners, and jumps with an rAF-driven animation.
 
-## 开发
+## Development
 
 ```bash
 pnpm build && pnpm typecheck
 dsh plugin --profile web add ./plugins/session-navigator
 ```
+
+Restart the web profile (or the DSH app) after rebuilding, then refresh the page.
