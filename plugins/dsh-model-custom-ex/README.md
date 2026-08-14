@@ -34,6 +34,40 @@
 
 3. 重启 DSH web（改动了 bundle 栈 + cordis patch，刷新页面不够，必须重启）。
 
+## 用 LLM 安装
+
+也可以直接把下面这段提示词发给 DSH 的 agent，让它自动完成以上全部步骤（路径不同请自行替换）：
+
+```text
+帮我安装本地插件 @just-genius/dsh-model-custom-ex 到 DSH 的 web profile。
+
+插件源码在 /Users/morisi/Space/DSH-Plugs/plugins/dsh-model-custom-ex。它 fork 了官方
+@deepseek-ai/dsh-client-ui-settings-models，在官方 Models 设置页为自定义模型增加
+「视觉」和「思考强度」两个下拉多选，因此安装时必须同时 disable 官方插件，
+否则会出现两个「模型」tab。
+
+步骤：
+1. 构建插件：
+   cd /Users/morisi/Space/DSH-Plugs/plugins/dsh-model-custom-ex && pnpm install && pnpm run build
+2. 编辑 ~/.dsh/profiles/web/package.json：
+   - dsh.profile.bundles 数组加入 "@just-genius/dsh-model-custom-ex"；
+   - dependencies 加入 "@just-genius/dsh-model-custom-ex":
+     "link:/Users/morisi/Space/DSH-Plugs/plugins/dsh-model-custom-ex"。
+3. 编辑 ~/.dsh/profiles/web/cordis.patch.yml，加入：
+   - id: ui-settings-models
+     disabled: true
+   （必须：让本插件成为 Models 页唯一 owner，避免重复 tab。）
+4. 在 ~/.dsh/profiles/web 目录执行 pnpm install。
+5. 重启 DSH web（改了 bundle 栈 + cordis patch，必须重启，刷新不够）。
+
+验证：设置 → 模型 只有一个「模型」tab；编辑自定义 provider（如 tt / shuai-api）→
+自定义设置 → 模型行「容量」折叠区出现「输入模态」「思考强度」两个下拉多选。
+
+注意：写 ~/.dsh/profiles/web 需要 danger-full-access 权限，遇 sandbox 拒绝时
+用 sandbox_permissions 重试一次。卸载时务必同时撤掉 cordis.patch.yml 里的
+ui-settings-models disable，否则官方 Models 页会消失。
+```
+
 ## 使用
 
 1. 打开 **设置 → 模型**（只有一个「模型」tab）；

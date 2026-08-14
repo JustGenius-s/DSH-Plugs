@@ -39,3 +39,29 @@ dsh plugin --profile web add ./plugins/session-navigator
 ```
 
 Restart the web profile (or the DSH app) after rebuilding, then refresh the page.
+
+## Install via LLM
+
+Paste this prompt into a DSH agent and it will install the plugin for you
+(adjust the source path if your checkout lives elsewhere):
+
+```text
+帮我安装本地插件 @just-genius/dsh-session-navigator 到 DSH 的 web profile。
+
+插件源码在 /Users/morisi/Space/DSH-Plugs/plugins/session-navigator（纯 client-UI 插件，
+不 fork 官方功能，无需 disable 任何官方插件）。
+
+步骤：
+1. 编辑 ~/.dsh/profiles/web/package.json：
+   - dsh.profile.bundles 数组加入 "@just-genius/dsh-session-navigator"；
+   - dependencies 加入 "@just-genius/dsh-session-navigator":
+     "link:/Users/morisi/Space/DSH-Plugs/plugins/session-navigator"。
+2. 在 ~/.dsh/profiles/web 目录执行 pnpm install。
+3. 重启 DSH web（改了 bundle 栈，刷新页面不够，必须重启）。
+
+验证：重启后打开一个会话，对话记录左侧应出现一条竖向的 tick 导航条，
+每个用户消息一个刻度，点击可跳转到该消息。
+
+注意：写 ~/.dsh/profiles/web 需要 danger-full-access 权限；
+遇到 sandbox 拒绝时，用 sandbox_permissions 重试一次即可。
+```
