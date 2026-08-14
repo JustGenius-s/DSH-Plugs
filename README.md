@@ -20,6 +20,12 @@ Replaces the official Models settings page (fork of `ui-settings-models`) to add
 
 Adds a Marketplace tab to **Settings → Plugins**. It browses this repo plus the [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) catalog, marks already-installed plugins, and can copy or run the catalog install command (restart required).
 
+### [@just-genius/dsh-desktop-update](plugins/dsh-desktop-update)
+
+A DSH-Desktop update badge next to the sidebar Settings button, driven by `window.dshDesktop` (Electron preload bridge). Idle state is a quiet question-mark that opens versions and auto-check gates; when an update is available it turns into an accent arrow. App updates jump to GitHub Releases; DSH runtime updates install in place (pnpm) and ask for a restart. Skip a version and the prompt returns only when a newer one appears. In a plain browser (no bridge) it renders nothing.
+
+![Desktop update](public/desktop-update.png)
+
 ## Repository layout
 
 ```
