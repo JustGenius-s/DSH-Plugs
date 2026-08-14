@@ -27,6 +27,8 @@ export interface MultiSelectMenuProps {
   onToggle: (value: string) => void
   /** Disable the trigger (read-only deployment or pending write). */
   disabled: boolean
+  /** Placeholder shown when nothing is selected (localized). */
+  emptyLabel: string
 }
 
 /**
@@ -36,7 +38,7 @@ export interface MultiSelectMenuProps {
  * several levels can be chosen in one pass.
  */
 export function MultiSelectMenu(props: MultiSelectMenuProps): ReactNode {
-  const { label, options, selected, onToggle, disabled } = props
+  const { label, options, selected, onToggle, disabled, emptyLabel } = props
   const [open, setOpen] = useState(false)
 
   const items: readonly MenuEntry[] = options.map(option => ({
@@ -46,7 +48,7 @@ export function MultiSelectMenu(props: MultiSelectMenuProps): ReactNode {
   }))
 
   const summary = selected.length === 0
-    ? '未选择 / None'
+    ? emptyLabel
     : selected.map(value => options.find(o => o.value === value)?.label ?? value).join(' · ')
 
   return (

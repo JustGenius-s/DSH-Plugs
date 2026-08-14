@@ -474,22 +474,24 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
                   />
                 </label>
                 <MultiSelectMenu
-                  label="输入模态 / Input modalities"
+                  label={t('modelInputModalities')}
                   options={MODALITIES.map(modality => ({
                     value: modality,
-                    label: modality === 'image' ? '图片（视觉）/ Image' : '文本 / Text',
+                    label: modality === 'image' ? t('modelModalityImage') : t('modelModalityText'),
                     ...modality === 'text' ? { disabled: true } : {},
                   }))}
                   selected={modalitiesOf(model)}
                   onToggle={(modality) => { toggleModality(index, modality) }}
                   disabled={disabled}
+                  emptyLabel={t('multiSelectNone')}
                 />
                 <MultiSelectMenu
-                  label="思考强度 / Thinking strength"
+                  label={t('modelReasoningEfforts')}
                   options={THINKING_LEVELS.map(level => ({ value: level, label: level }))}
                   selected={THINKING_LEVELS.filter(level => level in effortsOf(model))}
                   onToggle={(level) => { toggleEffort(index, level) }}
                   disabled={disabled}
+                  emptyLabel={t('multiSelectNone')}
                 />
               </div>
             )
