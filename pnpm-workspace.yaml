@@ -64,3 +64,4 @@ minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-workspace@0.1.0-rc.6'
   - '@deepseek-ai/schemastery@3.18.1'
   - '@deepseek-ai/dsh-client-web-react@0.1.0-rc.6'
+  - '@deepseek-ai/dsh-client-ui-sidebar@0.1.0-rc.6'
