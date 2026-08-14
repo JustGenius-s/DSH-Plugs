@@ -12,7 +12,9 @@ A Codex-style message navigator rail: a vertical tick rail on the conversation t
 
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 
-A visual + reasoning-effort editor for custom pi-ai provider models.
+Replaces the official Models settings page (fork of `ui-settings-models`) to add per-model dropdown multi-selects for **vision** (`input`) and **thinking strength** (`reasoningEfforts`) — the two controls the stock page punts to `settings.yaml`.
+
+![Custom Models settings](public/model-custom-ex.png)
 
 ## Repository layout
 

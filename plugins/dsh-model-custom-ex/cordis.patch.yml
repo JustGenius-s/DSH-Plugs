@@ -1,0 +1,8 @@
+# Bundle patch for @just-genius/dsh-model-custom-ex.
+#
+# Installs the plugin's loader row into the tree. No host `config` is needed:
+# the host body is empty and all behavior lives in the browser half.
+
+- insert:
+    - id: dsh-model-custom-ex
+      name: '@just-genius/dsh-model-custom-ex'
