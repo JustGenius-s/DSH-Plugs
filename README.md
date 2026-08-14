@@ -16,6 +16,10 @@ Replaces the official Models settings page (fork of `ui-settings-models`) to add
 
 ![Custom Models settings](public/model-custom-ex.png)
 
+### [@just-genius/dsh-plugin-marketplace](plugins/dsh-plugin-marketplace)
+
+Adds a Marketplace tab to **Settings → Plugins**. It browses this repo plus the [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) catalog, marks already-installed plugins, and can copy or run the catalog install command (restart required).
+
 ## Repository layout
 
 ```
