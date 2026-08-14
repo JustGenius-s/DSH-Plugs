@@ -185,9 +185,10 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
     }
   }, [])
 
-  // Outside the desktop shell, state not yet loaded, or settings row not yet
-  // located: render nothing.
-  if (bridge() === undefined || state === null || anchor === null) return null
+  // Outside the desktop shell, state not yet loaded, settings row not yet
+  // located, or the sidebar is collapsed (56px 轨道里设置按钮只显示图标，
+  // 徽章会挤压它): render nothing.
+  if (bridge() === undefined || state === null || anchor === null || props.wide === false) return null
   const hasApp = state.app !== null
   const hasDsh = state.dsh !== null
   // 单徽章：任一产品有更新 → 彩色箭头；无更新/检查全关 → 主题色问号，
