@@ -47,10 +47,6 @@ export function MultiSelectMenu(props: MultiSelectMenuProps): ReactNode {
     ...option.disabled === true ? { disabled: true } : {},
   }))
 
-  const summary = selected.length === 0
-    ? emptyLabel
-    : selected.map(value => options.find(o => o.value === value)?.label ?? value).join(' · ')
-
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span
@@ -83,7 +79,7 @@ export function MultiSelectMenu(props: MultiSelectMenuProps): ReactNode {
               gap: 6,
               width: '100%',
               minHeight: 32,
-              padding: '0 10px',
+              padding: '4px 8px',
               border: '1px solid var(--dsw-alias-border-l2)',
               borderRadius: 8,
               background: 'var(--dsw-alias-bg-layer-1)',
@@ -96,27 +92,21 @@ export function MultiSelectMenu(props: MultiSelectMenuProps): ReactNode {
             <span
               style={{
                 flex: 1,
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: 4,
                 minWidth: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                color: selected.length === 0 ? 'var(--dsw-alias-label-dimmed)' : 'var(--dsw-alias-label-primary)',
               }}
             >
-              {summary}
+              {selected.length === 0
+                ? <span style={{ color: 'var(--dsw-alias-label-dimmed)' }}>{emptyLabel}</span>
+                : selected.map(value => (
+                  <Pill key={value} active>
+                    {options.find(o => o.value === value)?.label ?? value}
+                  </Pill>
+                ))}
             </span>
-            {selected.length > 0 && (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  flex: '0 0 auto',
-                }}
-              >
-                <Pill active>{selected.length}</Pill>
-              </span>
-            )}
             <span
               style={{
                 display: 'inline-flex',
