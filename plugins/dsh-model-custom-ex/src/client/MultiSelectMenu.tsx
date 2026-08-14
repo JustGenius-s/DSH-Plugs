@@ -7,6 +7,9 @@ import type { ReactNode } from 'react'
 import { Menu, Pill, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 
+/** How many selected tags to show before folding the rest into a "+N" chip. */
+const MAX_TAGS = 2
+
 /** One selectable option. */
 export interface MultiSelectOption {
   value: string
@@ -101,11 +104,18 @@ export function MultiSelectMenu(props: MultiSelectMenuProps): ReactNode {
             >
               {selected.length === 0
                 ? <span style={{ color: 'var(--dsw-alias-label-dimmed)' }}>{emptyLabel}</span>
-                : selected.map(value => (
-                  <Pill key={value} active>
-                    {options.find(o => o.value === value)?.label ?? value}
-                  </Pill>
-                ))}
+                : (
+                  <>
+                    {selected.slice(0, MAX_TAGS).map(value => (
+                      <Pill key={value} active>
+                        {options.find(o => o.value === value)?.label ?? value}
+                      </Pill>
+                    ))}
+                    {selected.length > MAX_TAGS && (
+                      <Pill>+{selected.length - MAX_TAGS}</Pill>
+                    )}
+                  </>
+                )}
             </span>
             <span
               style={{
