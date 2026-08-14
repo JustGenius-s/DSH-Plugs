@@ -52,6 +52,7 @@ export interface CatalogPlugin {
   spec: string
   source: string
   added: string
+  installed?: boolean
   profilePatches?: ProfilePatch[]
 }
 
@@ -145,6 +146,7 @@ export function parseCatalog(value: unknown): Catalog {
       spec,
       source: typeof row.source === 'string' ? row.source : AWESOME_SOURCE,
       added: typeof row.added === 'string' ? row.added : '',
+      installed: row.installed === true,
       profilePatches: parsePatches(row.profilePatches),
     })
   }
