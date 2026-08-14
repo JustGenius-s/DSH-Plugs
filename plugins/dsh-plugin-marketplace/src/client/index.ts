@@ -25,7 +25,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const NS = 'settings.pluginMarketplace'
 
-export const inject = ['slots', 'locale', 'remote'] as const
+export const inject = ['slots', 'locale', 'remote', 'remote.pluginInventory'] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-plugin-marketplace: dictionaries')
@@ -55,10 +55,8 @@ export function apply(ctx: ClientContext): void {
   }
 
   const listInstalled = async (): Promise<InventoryEntry[]> => {
-    const inventory = (ctx as { remote?: { pluginInventory?: { list?: () => Promise<{ ok: boolean; value?: { entries?: InventoryEntry[] } }> } } }).remote?.pluginInventory
-    if (inventory?.list === undefined) return []
-    const result = await inventory.list()
-    if (!result.ok || result.value?.entries === undefined) return []
+    const result = await ctx.remote.pluginInventory.list()
+    if (!result.ok) return []
     return result.value.entries.map((entry) => ({
       entryId: String(entry.entryId),
       moduleName: String(entry.moduleName),

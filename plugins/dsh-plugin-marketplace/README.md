@@ -3,8 +3,8 @@
 Adds a **Marketplace** tab to DSH **Settings → Plugins**. It merges two sources:
 this [DSH-Plugs](https://github.com/Rory-X/DSH-Plugs) monorepo, and the curated
 [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) registry. It marks plugins
-already present in the current Loader inventory, and can copy or run the
-catalog install command.
+already present in the web profile (`package.json`) and the live Loader
+inventory, and can copy or run the catalog install command.
 
 The official **Plugin configuration** and **Plugin list** tabs are left in place.
 
@@ -16,7 +16,7 @@ The official **Plugin configuration** and **Plugin list** tabs are left in place
   in front of `https://awesome-dsh-plugin.com/plugins.json`.
 - Client falls back to the same merge if the Host proxy is down.
 - Shows source chips, categories, search, and bilingual descriptions.
-- Compares `packageName` / repo name against `pluginInventory.list()` to tag **Installed**.
+- Tags **Installed** from the web profile (`dependencies` / `dsh.profile.bundles`) and the live Loader inventory (`pluginInventory.list()`). Matches npm name, GitHub spec (`github:owner/repo`), and local `link:` paths.
 - **Copy install command** writes the catalog command to the clipboard.
 - **Install** POSTs `{ spec }` to `/dsh-plugin-marketplace/install`. The Host
   only accepts specs that appear in the merged catalog (`github:owner/repo`,
