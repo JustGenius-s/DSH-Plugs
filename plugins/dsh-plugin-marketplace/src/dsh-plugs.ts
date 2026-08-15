@@ -46,6 +46,15 @@ export const DSH_PLUGS_PLUGINS: readonly DshPlugsPluginDef[] = [
       zh: '设置 → 插件中的市场页。浏览本仓库与 awesome-dsh-plugin 目录。',
     },
   },
+  {
+    folder: 'dsh-wechat-chat',
+    packageName: '@just-genius/dsh-wechat-chat',
+    category: 'ui',
+    description: {
+      en: 'WeChat-style chat skin: sessions become chats, the agent texts short progress bubbles, and you can switch back from Me.',
+      zh: '微信风格聊天皮肤：会话变成聊天，对面像真人一样用短气泡汇报进度，可从「我」切回经典界面。',
+    },
+  },
 ]
 
 export function githubPathSpec(folder: string): string {
