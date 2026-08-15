@@ -26,6 +26,10 @@ A DSH-Desktop update badge next to the sidebar Settings button, driven by `windo
 
 ![Desktop update](public/desktop-update.png)
 
+### [@just-genius/dsh-wechat-chat](plugins/dsh-wechat-chat)
+
+Turns the web surface into a WeChat-style messenger: chat list, green/white bubbles, and an agent that texts short progress updates while it works. Switch back from 我.
+
 ## Repository layout
 
 ```

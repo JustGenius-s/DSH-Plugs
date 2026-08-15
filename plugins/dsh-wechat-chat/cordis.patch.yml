@@ -1,0 +1,8 @@
+# Bundle patch for @just-genius/dsh-wechat-chat.
+#
+# Host half registers a WeChat-style system-prompt section so the agent
+# reports progress like a friend. Browser half paints the WeChat shell.
+
+- insert:
+    - id: dsh-wechat-chat
+      name: '@just-genius/dsh-wechat-chat'
