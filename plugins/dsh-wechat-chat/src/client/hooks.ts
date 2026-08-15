@@ -38,6 +38,35 @@ export function useLiveSnapshot(session: SessionFace | undefined): ConversationS
   return snapshot
 }
 
+export function useRecentSnapshots(
+  ids: readonly string[],
+  resolve: (id: string) => SessionBinding | undefined,
+): Readonly<Record<string, ConversationSnapshot | undefined>> {
+  const key = ids.slice(0, 12).join('\n')
+  const [map, setMap] = useState<Record<string, ConversationSnapshot | undefined>>({})
+  useEffect(() => {
+    const target = key.length === 0 ? [] : key.split('\n')
+    const pull = () => {
+      const next: Record<string, ConversationSnapshot | undefined> = {}
+      for (const id of target) next[id] = resolve(id)?.session.getSnapshot()
+      setMap((prev) => {
+        if (target.length === Object.keys(prev).length && target.every((id) => prev[id] === next[id])) return prev
+        return next
+      })
+    }
+    pull()
+    const unsubs = target
+      .map((id) => resolve(id)?.session.subscribe(pull))
+      .filter((fn): fn is () => void => typeof fn === 'function')
+    const timer = window.setInterval(pull, 800)
+    return () => {
+      for (const fn of unsubs) fn()
+      window.clearInterval(timer)
+    }
+  }, [key, resolve])
+  return map
+}
+
 export function useBinding(
   sessionId: string | undefined,
   resolve: (id: string) => SessionBinding | undefined,

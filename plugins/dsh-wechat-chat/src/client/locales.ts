@@ -30,10 +30,22 @@ export type WeChatKey =
   | 'me.switchHint'
   | 'me.about'
   | 'me.aboutBody'
+  | 'me.model'
+  | 'me.modelHint'
+  | 'me.modelEmpty'
+  | 'me.modelLoading'
+  | 'me.modelNeedChat'
+  | 'me.modelFailed'
   | 'fab'
   | 'contactsHint'
   | 'discoverTitle'
   | 'discoverBody'
+  | 'discover.scan'
+  | 'discover.camera'
+  | 'discover.empty'
+  | 'discover.open'
+  | 'discover.live'
+  | 'discover.coverName'
   | 'pickFolder'
   | 'noWorkspace'
   | 'yesterday'
@@ -71,10 +83,22 @@ export const zh: Record<WeChatKey, string> = {
   'me.switchHint': '随时点右下角绿点回到微信聊天。',
   'me.about': '关于微信风格',
   'me.aboutBody': '这是 DeepSeek Harness 的微信皮肤。左侧是会话，右侧是聊天。对面的人会边干活边用短消息汇报进度。',
+  'me.model': '模型',
+  'me.modelHint': '点一下就换。当前聊天立刻生效，新开的聊天也用这个。',
+  'me.modelEmpty': '这边还没有可用模型。',
+  'me.modelLoading': '正在拉模型列表…',
+  'me.modelNeedChat': '先开一场聊天，才能切模型。',
+  'me.modelFailed': '这次没换成',
   fab: '回到微信',
   contactsHint: '每个工作区是一位联系人。点开就会开一场新聊天。',
   discoverTitle: '朋友圈',
-  discoverBody: '这里暂时没有动态。进度都在聊天里，一条一条发过来。',
+  discoverBody: '各场聊天的进度会发到这里，像朋友圈一样刷。',
+  'discover.scan': '扫一扫',
+  'discover.camera': '发条动态',
+  'discover.empty': '还没有动态。去聊天里丢个需求，做完会出现在这里。',
+  'discover.open': '进入聊天',
+  'discover.live': '正在忙',
+  'discover.coverName': 'DeepSeek',
   pickFolder: '选择文件夹',
   noWorkspace: '先选一个工作区，我们才能开始聊天。',
   yesterday: '昨天',
@@ -113,10 +137,22 @@ export const en: Record<WeChatKey, string> = {
   'me.switchHint': 'The green bubble at the corner brings you back.',
   'me.about': 'About this skin',
   'me.aboutBody': 'A WeChat skin for DeepSeek Harness. Sessions are chats. The other side texts short updates while they work.',
+  'me.model': 'Model',
+  'me.modelHint': 'Tap to switch. Applies to this chat now, and to new chats.',
+  'me.modelEmpty': 'No models available yet.',
+  'me.modelLoading': 'Loading models…',
+  'me.modelNeedChat': 'Start a chat first, then you can switch models.',
+  'me.modelFailed': 'Could not switch',
   fab: 'Open WeChat',
   contactsHint: 'Each workspace is a contact. Tap to start a new chat.',
   discoverTitle: 'Moments',
-  discoverBody: 'No posts here. Progress lands in the chat, one bubble at a time.',
+  discoverBody: 'Work from every chat shows up here, like Moments.',
+  'discover.scan': 'Scan',
+  'discover.camera': 'New moment',
+  'discover.empty': 'No moments yet. Send a request in chat and it will land here.',
+  'discover.open': 'Open chat',
+  'discover.live': 'Working',
+  'discover.coverName': 'DeepSeek',
   pickFolder: 'Choose folder',
   noWorkspace: 'Pick a workspace first, then we can chat.',
   yesterday: 'Yesterday',
