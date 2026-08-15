@@ -144,6 +144,7 @@ function RailImpl({ sessionId, useSession }: any) {
 
   const rail = (
     <div
+      data-dsh-session-nav=""
       style={{
         position: 'fixed',
         top: '50%',

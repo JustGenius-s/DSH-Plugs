@@ -46,6 +46,15 @@ export const DSH_PLUGS_PLUGINS: readonly DshPlugsPluginDef[] = [
       zh: '设置 → 插件中的市场页。浏览本仓库与 awesome-dsh-plugin 目录。',
     },
   },
+  {
+    folder: 'dsh-mobile-web',
+    packageName: '@just-genius/dsh-mobile-web',
+    category: 'ui',
+    description: {
+      en: 'Phone layout for the official Web UI: drawer sidebar, overlay details, hamburger, safe areas, and keyboard avoidance.',
+      zh: '让官方 Web UI 能在手机上用：侧栏改抽屉、详情改全屏层、汉堡按钮、安全区与键盘避让。',
+    },
+  },
 ]
 
 export function githubPathSpec(folder: string): string {

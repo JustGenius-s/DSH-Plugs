@@ -1,0 +1,8 @@
+# Bundle patch for @just-genius/dsh-mobile-web.
+#
+# Pure client-UI plugin: the host body is empty. The browser half injects
+# mobile layout CSS and a hamburger / backdrop into `shell.overlay`.
+
+- insert:
+    - id: dsh-mobile-web
+      name: '@just-genius/dsh-mobile-web'
