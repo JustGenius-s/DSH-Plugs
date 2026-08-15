@@ -26,6 +26,10 @@ A DSH-Desktop update badge next to the sidebar Settings button, driven by `windo
 
 ![Desktop update](public/desktop-update.png)
 
+### [@just-genius/dsh-mobile-web](plugins/dsh-mobile-web)
+
+Adapts the official three-column Web UI for phones: the sidebar becomes a drawer with a hamburger, details open as a full-screen sheet, and the composer respects safe areas plus the on-screen keyboard.
+
 ## Repository layout
 
 ```
