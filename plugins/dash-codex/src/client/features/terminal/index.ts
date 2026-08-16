@@ -12,18 +12,22 @@ const NS = 'settings.codex'
 interface TerminalPanelProps {
   sessionId: string
   cwd?: string
+  instanceKey?: string
   t: (key: string) => string
 }
 
 function createTerminalPanel(scope: SettingsScope<DashCodexConfig>) {
-  return function TerminalPanel({ sessionId, cwd, t }: TerminalPanelProps) {
+  return function TerminalPanel({ sessionId, cwd, instanceKey, t }: TerminalPanelProps) {
     const subscribe = (listener: () => void) => scope.subscribe(listener)
     const getSnapshot = () => scope.getSnapshot()
     const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
     const config = { ...DEFAULT_CONFIG, ...snapshot.value }
+    // Side-panel instances share the conversation session id. Include the
+    // instance key so each terminal tab has an explicit resource identity.
+    const terminalId = instanceKey === undefined ? sessionId : sessionId + ':' + instanceKey
 
     return createElement(WarpTerminalView, {
-      sessionId,
+      sessionId: terminalId,
       cwd,
       terminalShell: config.terminalShell,
       terminalScrollback: config.terminalScrollback,
@@ -42,7 +46,7 @@ export function createTerminalFeature(
     id: 'terminal',
     activate() {
       const TerminalPanel = createTerminalPanel(scope)
-      const disposeDescriptor = ctx.sidePanels.describe('terminal', { icon: 'terminal' })
+      const disposeDescriptor = ctx.sidePanels.describe('terminal', { icon: 'terminal', multi: true })
       const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => {
         let disposeEntry: (() => void) | undefined
 

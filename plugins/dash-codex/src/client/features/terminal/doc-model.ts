@@ -30,7 +30,8 @@ export interface DocBlockRange {
   endRow: number
 }
 
-const HEADER_ROWS = 1
+// One row for the border gap, one row for the status content.
+const HEADER_ROWS = 2
 // Vertical breathing room between a block's status line, its command line and
 // its output rows, like Warp's block padding (padding_top / command_padding /
 // padding_middle).

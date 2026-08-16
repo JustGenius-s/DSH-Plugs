@@ -12,6 +12,12 @@ export interface BlockContext {
   dels?: number
 }
 
+export interface TerminalCompletionCandidate {
+  label: string
+  replacement: string
+  kind: 'command' | 'file' | 'directory'
+}
+
 export type ServerMessage =
   | {
       type: 'ready'
@@ -22,12 +28,21 @@ export type ServerMessage =
     }
   | { type: 'context'; context: BlockContext }
   | { type: 'output'; text: string }
+  | {
+      type: 'completion'
+      requestId: number
+      start: number
+      end: number
+      replacement: string
+      candidates: TerminalCompletionCandidate[]
+    }
   | { type: 'block-end'; exitCode: number }
   | { type: 'exit'; exitCode: number | null; signal: string | null }
   | { type: 'error'; message: string }
 
 export type ClientMessage =
   | { type: 'input'; data: string }
+  | { type: 'complete'; requestId: number; input: string; cursor: number }
   | { type: 'signal'; signal: TerminalSignal }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'kill' }

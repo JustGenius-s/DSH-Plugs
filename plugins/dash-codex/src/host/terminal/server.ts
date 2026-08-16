@@ -25,6 +25,7 @@ import { promisify } from 'node:util'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { DEFAULT_CONFIG, type DashCodexConfig, type TerminalShell } from '../../shared/config'
 import type { BlockContext, ClientMessage, ServerMessage } from '../../shared/terminal-protocol'
+import { completeTerminalInput } from './completion'
 
 export const name = 'dash-codex-terminal'
 
@@ -273,6 +274,32 @@ export async function openSession(
         session.mode = 'output'
         session.pending = ""
         void session.handle.write(message.data).catch(() => {})
+        break
+      }
+      case 'complete': {
+        if (
+          typeof message.requestId !== 'number' ||
+          typeof message.input !== 'string' ||
+          typeof message.cursor !== 'number' ||
+          message.input.length > 32_768
+        ) break
+        const requestId = Math.floor(message.requestId)
+        void completeTerminalInput(message.input, message.cursor, session.cwd)
+          .then((completion) => {
+            if (session.closed) return
+            send(session.ws, { type: 'completion', requestId, ...completion })
+          })
+          .catch(() => {
+            if (session.closed) return
+            send(session.ws, {
+              type: 'completion',
+              requestId,
+              start: Math.max(0, Math.min(message.input.length, Math.floor(message.cursor))),
+              end: Math.max(0, Math.min(message.input.length, Math.floor(message.cursor))),
+              replacement: '',
+              candidates: [],
+            })
+          })
         break
       }
       case 'signal': {
