@@ -10,6 +10,10 @@ A Codex-style message navigator rail: a vertical tick rail on the conversation t
 
 ![Session navigator](public/session-nav.png)
 
+### [@just-genius/dash-codex](plugins/dash-codex)
+
+The consolidated Codex shell: settings, Codex-style navigation, the right-side `side.panel` host, and a Warp-style Terminal panel backed by a real login-shell PTY at `/dash-codex/terminal/ws`.
+
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 
 Replaces the official Models settings page (fork of `ui-settings-models`) to add per-model dropdown multi-selects for **vision** (`input`) and **thinking strength** (`reasoningEfforts`) — the two controls the stock page punts to `settings.yaml`.

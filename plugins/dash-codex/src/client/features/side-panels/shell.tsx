@@ -1,0 +1,384 @@
+/**
+ * The side-panels shell: a fixed right sidebar rendered from the shell.overlay
+ * layer. It reads the `side.panel` slot ledger to build the tab strip and
+ * renders the active panel's body through `renderSlot('side.panel', owner,
+ * { only: activeId })`. The layout squeeze is one CSS variable on #root.
+ *
+ * Visuals and interaction mirror the native DSH sidebar column: surfaces,
+ * inks and borders ride the same `--dsw-*` design tokens, icons and the
+ * tooltip come from `@deepseek-ai/dsh-client-ui-primitives`, and resize
+ * follows AppFrame's drag contract — pointer capture, rAF-throttled deltas
+ * against the drag-start width, and an 8px hit strip with no visible pill.
+ */
+
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { ReactNode } from 'react'
+import {
+  IconCloseFill14, IconCloseOutline16, IconPlusOutline16, Tooltip,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import { resolvePanelIcon } from './icons'
+import type { SidePanelsStore } from './service'
+import { ensureSidePanelStyles } from './styles'
+
+ensureSidePanelStyles()
+
+/** Breathing room between the conversation header's bottom edge and the launcher card. */
+const LAUNCHER_HEADER_GAP = 20
+
+interface SessionRecord { cwd?: string }
+
+/** Reactive read face over the slot ledger for `side.panel`. */
+export interface PanelEntriesApi {
+  list(): readonly PanelTabInfo[]
+  subscribe(listener: () => void): () => void
+  version(): number
+}
+
+export interface PanelTabInfo {
+  id: string
+  label: string
+  order: number
+}
+
+interface ShellProps {
+  renderSlot: (
+    key: 'side.panel',
+    owner: { sessionId: string; cwd?: string; instanceKey?: string },
+    opts?: { only?: string },
+  ) => unknown
+  useSessions: (selector: (state: never) => unknown) => unknown
+  store: SidePanelsStore
+  entries: PanelEntriesApi
+  t: (key: string) => string
+}
+
+export function SidePanelsShell(props: ShellProps) {
+  const { renderSlot, useSessions, store, entries, t } = props
+
+  const sessionId = useSessions((state) => {
+    const s = state as { current?: string } | undefined
+    return s?.current
+  }) as string | undefined
+
+  const sessionsById = useSessions((state) => {
+    const s = state as { byId?: Record<string, SessionRecord> } | undefined
+    return s?.byId
+  }) as Record<string, SessionRecord> | undefined
+  const sessionIds = useSessions((state) => {
+    const s = state as { ids?: readonly string[] } | undefined
+    return s?.ids
+  }) as readonly string[] | undefined
+
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const tabs = useSyncExternalStore(entries.subscribe, entries.list)
+
+  // Switch before paint so the header never renders one session's tabs under
+  // another session's owner. Retained panes keep their original owner props.
+  useLayoutEffect(() => {
+    store.setSession(sessionId)
+  }, [store, sessionId])
+
+  useEffect(() => {
+    if (sessionIds !== undefined) store.pruneSessions(sessionIds)
+  }, [store, sessionIds])
+
+  // Instances whose panel is still registered. A plugin can unload while its
+  // tab is open (or a restored strip can name a panel that never arrived), and
+  // such a tab has nothing to render — drop it from the strip rather than
+  // showing a dead tab. The ledger, not the store, is the authority here.
+  const panelById = new Map(tabs.map(tab => [tab.id, tab]))
+  const currentInstances = snapshot.currentSessionId === sessionId ? snapshot.instances : []
+  const live = currentInstances.filter(instance => panelById.has(instance.panelId))
+
+  // Resolve the active instance: the remembered one when still live, else the first.
+  const activeKey = live.some(i => i.key === snapshot.activeKey)
+    ? snapshot.activeKey
+    : live[0]?.key ?? null
+
+  const open = snapshot.open && live.length > 0
+
+  // Drive the layout squeeze: one CSS variable on <html> plus a body attribute.
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--dsh-side-panels-width', open ? `${snapshot.width}px` : '0px')
+    if (open) {
+      document.body.setAttribute('data-dsh-side-panels-open', '')
+    } else {
+      document.body.removeAttribute('data-dsh-side-panels-open')
+    }
+    return () => {
+      root.style.setProperty('--dsh-side-panels-width', '0px')
+      document.body.removeAttribute('data-dsh-side-panels-open')
+    }
+  }, [open, snapshot.width])
+
+  // The collapsed launcher hangs under the conversation header rather than in
+  // the viewport's corner, where it sat on top of the header's own action
+  // cluster. `[data-conversation-scroll]` is ui-conversation's documented
+  // scrollport hook (README; ChatView resolves its host through it) and its
+  // top edge IS the header's bottom edge — so measuring it tracks the header
+  // through its variable heights (subagent breadcrumb rows) and through the
+  // hero/blank phase that hides the header outright, with no height guess.
+  const [anchorTop, setAnchorTop] = useState<number | null>(null)
+  useEffect(() => {
+    if (!open) {
+      let raf: number | null = null
+      const measure = (): void => {
+        const el = document.querySelector('[data-conversation-scroll]')
+        setAnchorTop(el === null ? null : Math.round(el.getBoundingClientRect().top))
+      }
+      // Observer callbacks can land mid-layout; coalesce to one rAF like the
+      // AppFrame's own viewport tracking does.
+      const schedule = (): void => {
+        raf ??= requestAnimationFrame(() => { raf = null; measure() })
+      }
+      measure()
+      const observer = new ResizeObserver(schedule)
+      const scroll = document.querySelector('[data-conversation-scroll]')
+      if (scroll !== null) observer.observe(scroll)
+      // The header is what moves the scrollport, and a column/viewport reflow
+      // can move it without resizing the scrollport's own box.
+      observer.observe(document.documentElement)
+      window.addEventListener('resize', schedule)
+      return () => {
+        observer.disconnect()
+        window.removeEventListener('resize', schedule)
+        if (raf !== null) cancelAnimationFrame(raf)
+      }
+    }
+    return undefined
+  }, [open])
+
+  // Resize mirrors AppFrame's DragHandle: pointer capture keeps the gesture on
+  // the strip (no window listeners), deltas are rAF-throttled, and the base is
+  // the width captured at drag start so a clamped panel never jumps. The
+  // body attribute pauses the #root transition and shows the col-resize cursor.
+  // New-instance menu open state; closes on any outside pointer press so it
+  // behaves like the DSH menus it visually copies.
+  const [adding, setAdding] = useState(false)
+  useEffect(() => {
+    if (!adding) return
+    const onDown = (event: PointerEvent): void => {
+      const el = event.target
+      if (el instanceof Element && el.closest('.dsh-side-panels-add') !== null) return
+      setAdding(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => { document.removeEventListener('pointerdown', onDown) }
+  }, [adding])
+
+  const [dragging, setDragging] = useState(false)
+  const origin = useRef(0)
+  const latest = useRef(0)
+  const base = useRef(0)
+  const frame = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (dragging) document.body.setAttribute('data-dsh-side-panels-dragging', '')
+    else document.body.removeAttribute('data-dsh-side-panels-dragging')
+    return () => { document.body.removeAttribute('data-dsh-side-panels-dragging') }
+  }, [dragging])
+
+  const onDragStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    origin.current = event.clientX
+    latest.current = event.clientX
+    base.current = snapshot.width
+    setDragging(true)
+  }, [snapshot.width])
+
+  const onDragMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+    latest.current = event.clientX
+    frame.current ??= requestAnimationFrame(() => {
+      frame.current = null
+      store.setWidth(base.current + (origin.current - latest.current))
+    })
+  }, [store])
+
+  const onDragEnd = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null }
+    store.setWidth(base.current + (origin.current - latest.current))
+    setDragging(false)
+  }, [store])
+
+  const retainedPanes = snapshot.retainedSessions.flatMap((session) =>
+    session.instances
+      .filter((instance) => panelById.has(instance.panelId))
+      .map((instance) => ({ session, instance })),
+  )
+  // Keep this body as one stable React parent across session/sidebar changes.
+  // Moving panes between an open body and a hidden keepalive container would
+  // still unmount every terminal even when the child keys are unchanged.
+  const renderPanes = (): ReactNode => (
+    <div className="dsh-side-panels-body">
+      {retainedPanes.map(({ session, instance }) => {
+        const visible = open && session.sessionId === sessionId && instance.key === activeKey
+        return (
+          <div
+            key={session.sessionId + ':' + instance.key}
+            className="dsh-side-panels-pane"
+            hidden={!visible}
+          >
+            {renderSlot(
+              'side.panel',
+              {
+                sessionId: session.sessionId,
+                cwd: sessionsById?.[session.sessionId]?.cwd,
+                instanceKey: instance.key,
+              },
+              { only: instance.panelId },
+            ) as ReactNode}
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  const launcher = !open && tabs.length > 0 ? (
+    <div
+      className="dsh-side-panels-launcher"
+      style={anchorTop === null ? undefined : { top: anchorTop + LAUNCHER_HEADER_GAP }}
+      role="group"
+      aria-label={t('aria.open')}
+    >
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          className="dsh-side-panels-launcher-item"
+          onClick={() => store.open(tab.id)}
+        >
+          <span className="dsh-side-panels-launcher-icon" aria-hidden>
+            {resolvePanelIcon(store.descriptor(tab.id)?.icon)}
+          </span>
+          <span className="dsh-side-panels-launcher-label">{tab.label}</span>
+        </button>
+      ))}
+    </div>
+  ) : null
+
+  return (
+    <>
+      {launcher}
+      <div
+        className="dsh-side-panels"
+        style={{ width: snapshot.width, display: open ? 'flex' : 'none' }}
+        aria-hidden={!open || undefined}
+        role="complementary"
+        aria-label={t('aria.sidebar')}
+      >
+      <div
+        className="dsh-side-panels-resize"
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t('aria.resize')}
+      />
+      <div className="dsh-side-panels-header">
+        <div className="dsh-side-panels-tabs" role="tablist">
+          {live.map((instance) => {
+            const info = panelById.get(instance.panelId)
+            const isActive = instance.key === activeKey
+            // Number only what is actually duplicated: a lone terminal reads
+            // "终端", not "终端 1".
+            const siblings = live.filter(i => i.panelId === instance.panelId)
+            const ordinal = siblings.length > 1 ? siblings.indexOf(instance) + 1 : 0
+            return (
+              <div
+                key={instance.key}
+                className={[
+                  'dsh-side-panels-tab',
+                  isActive ? 'dsh-side-panels-tab-active' : '',
+                ].filter(Boolean).join(' ')}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  className="dsh-side-panels-tab-button"
+                  onClick={() => store.activateInstance(instance.key)}
+                >
+                  <span className="dsh-side-panels-tab-icon" aria-hidden>
+                    {resolvePanelIcon(store.descriptor(instance.panelId)?.icon)}
+                  </span>
+                  <span className="dsh-side-panels-tab-label">
+                    {info?.label ?? instance.panelId}
+                    {ordinal > 0 && ' ' + String(ordinal)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="dsh-side-panels-tab-close"
+                  aria-label={t('aria.closeTab')}
+                  title={t('aria.closeTab')}
+                  onClick={() => store.closeInstance(instance.key)}
+                >
+                  <IconCloseFill14 size={14} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+        {/* New-instance menu: lists every registered panel. A single-instance
+            panel that is already open just re-activates its tab (store.open
+            decides), so the menu never needs to hide or disable rows. */}
+        <div className="dsh-side-panels-add">
+          <Tooltip label={t('aria.newPanel')} delayMs={500} side="bottom">
+            <button
+              type="button"
+              className="dsh-side-panels-icon-button"
+              aria-label={t('aria.newPanel')}
+              aria-expanded={adding}
+              onClick={() => { setAdding(v => !v) }}
+            >
+              <IconPlusOutline16 size={16} />
+            </button>
+          </Tooltip>
+          {adding && (
+            <div className="dsh-side-panels-add-menu" role="menu">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="menuitem"
+                  className="dsh-side-panels-add-item"
+                  onClick={() => {
+                    setAdding(false)
+                    store.open(tab.id)
+                  }}
+                >
+                  <span className="dsh-side-panels-add-icon" aria-hidden>
+                    {resolvePanelIcon(store.descriptor(tab.id)?.icon)}
+                  </span>
+                  <span className="dsh-side-panels-add-label">{tab.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <Tooltip label={t('aria.close')} delayMs={500} side="bottom">
+          <button
+            type="button"
+            className="dsh-side-panels-icon-button"
+            aria-label={t('aria.close')}
+            onClick={() => store.close()}
+          >
+            <IconCloseOutline16 size={16} />
+          </button>
+        </Tooltip>
+      </div>
+      {/* Session and tab switches only hide panes. The compound key keeps
+          identical panel instance keys from different sessions independent. */}
+        {renderPanes()}
+      </div>
+    </>
+  )
+}

@@ -1,6 +1,5 @@
 import { defineConfig } from 'tsdown'
 
-// Node half: a plain ESM library bundle of src/index.ts.
 export default defineConfig({
   entry: ['src/index.ts'],
   format: 'esm',
