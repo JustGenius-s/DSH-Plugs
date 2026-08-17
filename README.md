@@ -10,9 +10,9 @@ A Codex-style message navigator rail: a vertical tick rail on the conversation t
 
 ![Session navigator](public/session-nav.png)
 
-### [@just-genius/dash-codex](plugins/dash-codex)
+### [@just-genius/dsh-codex](plugins/dsh-codex)
 
-The consolidated Codex shell: settings, Codex-style navigation, the right-side `side.panel` host, and a Warp-style Terminal panel backed by a real login-shell PTY at `/dash-codex/terminal/ws`.
+The consolidated Codex shell: settings, Codex-style navigation, the right-side `side.panel` host, and a Warp-style Terminal panel backed by a real login-shell PTY at `/dsh-codex/terminal/ws`.
 
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 

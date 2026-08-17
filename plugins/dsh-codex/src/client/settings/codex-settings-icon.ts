@@ -1,5 +1,5 @@
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg'
-const ICON_MARKER = 'data-dash-codex-chatgpt-icon'
+const ICON_MARKER = 'data-dsh-codex-chatgpt-icon'
 
 /**
  * The rc.6 settings shell chooses section icons from a private id switch and

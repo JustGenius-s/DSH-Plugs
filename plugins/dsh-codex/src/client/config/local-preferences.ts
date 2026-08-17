@@ -1,9 +1,9 @@
-import type { DashCodexConfig } from '../../shared/config'
+import type { DshCodexConfig } from '../../shared/config'
 
-type Field = keyof DashCodexConfig
-type Overrides = Partial<DashCodexConfig>
+type Field = keyof DshCodexConfig
+type Overrides = Partial<DshCodexConfig>
 
-const STORAGE_KEY = 'dash-codex:settings-overrides'
+const STORAGE_KEY = 'dsh-codex:settings-overrides'
 const listeners = new Set<() => void>()
 let overrides: Overrides = readOverrides()
 
@@ -16,7 +16,7 @@ export function subscribeLocalOverrides(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
-export function setLocalOverride<K extends Field>(field: K, value: DashCodexConfig[K]): void {
+export function setLocalOverride<K extends Field>(field: K, value: DshCodexConfig[K]): void {
   overrides = { ...overrides, [field]: value }
   persist()
   emit()
@@ -50,7 +50,7 @@ function readOverrides(): Overrides {
     if (raw === null) return {}
     const value: unknown = JSON.parse(raw)
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
-    const candidate = value as Partial<DashCodexConfig>
+    const candidate = value as Partial<DshCodexConfig>
     const next: Overrides = {}
     if (typeof candidate.navigatorEnabled === 'boolean') next.navigatorEnabled = candidate.navigatorEnabled
     if (typeof candidate.terminalEnabled === 'boolean') next.terminalEnabled = candidate.terminalEnabled

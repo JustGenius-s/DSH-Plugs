@@ -19,6 +19,15 @@ export interface DshPlugsPluginDef {
 
 export const DSH_PLUGS_PLUGINS: readonly DshPlugsPluginDef[] = [
   {
+    folder: 'dsh-codex',
+    packageName: '@just-genius/dsh-codex',
+    category: 'ui',
+    description: {
+      en: 'Codex-style navigation, side-panel host, and Warp-style terminal in one plugin.',
+      zh: 'Codex 风格导航、侧边栏宿主与 Warp 风格终端的整合插件。',
+    },
+  },
+  {
     folder: 'session-navigator',
     packageName: '@just-genius/dsh-session-navigator',
     category: 'session',

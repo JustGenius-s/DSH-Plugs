@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import { SETTINGS_NAMESPACE, type DashCodexConfig } from '../shared/config'
+import { SETTINGS_NAMESPACE, type DshCodexConfig } from '../shared/config'
 import { createCodexFeatureManager } from './core/feature-manager'
 import { createNavigatorFeature } from './features/navigator'
 import { createSidePanelsFeature } from './features/side-panels'
@@ -25,10 +25,10 @@ const NS = 'settings.codex'
 export const inject = ['slots', 'locale', 'settingsScope', 'connection', 'remote', 'sessions'] as const
 
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dash-codex: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-codex: dictionaries')
 
   const binder = ctx.get('settingsScope') as SettingsScopeBinder
-  const scope = binder.bind<DashCodexConfig>({
+  const scope = binder.bind<DshCodexConfig>({
     namespace: SETTINGS_NAMESPACE,
     decode: decodeConfig,
   })
@@ -41,7 +41,7 @@ export function apply(ctx: ClientContext): void {
     label: () => t('nav'),
     inject: () => ({ scope, t }),
   }, CodexSettingsSection))
-  ctx.effect(() => installCodexSettingsIcon(() => t('nav')), 'dash-codex: settings icon')
+  ctx.effect(() => installCodexSettingsIcon(() => t('nav')), 'dsh-codex: settings icon')
 
   const features = createCodexFeatureManager([
     createNavigatorFeature(ctx, scope),
@@ -51,12 +51,12 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     features.activate()
     return () => features.dispose()
-  }, 'dash-codex: feature manager')
+  }, 'dsh-codex: feature manager')
 }
 
-function decodeConfig(value: unknown): DashCodexConfig | undefined {
+function decodeConfig(value: unknown): DshCodexConfig | undefined {
   if (typeof value !== 'object' || value === null) return undefined
-  const candidate = value as Partial<DashCodexConfig>
+  const candidate = value as Partial<DshCodexConfig>
   if (typeof candidate.navigatorEnabled !== 'boolean') return undefined
   if (typeof candidate.terminalEnabled !== 'boolean') return undefined
   if (candidate.terminalShell !== 'auto' && candidate.terminalShell !== 'bash' && candidate.terminalShell !== 'zsh') return undefined

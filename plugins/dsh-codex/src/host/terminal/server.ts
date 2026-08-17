@@ -1,6 +1,6 @@
-// Host half of the dash-codex terminal feature.
+// Host half of the dsh-codex terminal feature.
 //
-// Owns a WebSocket endpoint (`/dash-codex/terminal/ws`) backed by the DSH
+// Owns a WebSocket endpoint (`/dsh-codex/terminal/ws`) backed by the DSH
 // subprocess seam's `spawnTerminal` primitive. One browser connection is one
 // interactive login shell on a real PTY.
 //
@@ -23,11 +23,11 @@ import type { Duplex } from 'node:stream'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { DEFAULT_CONFIG, type DashCodexConfig, type TerminalShell } from '../../shared/config'
+import { DEFAULT_CONFIG, type DshCodexConfig, type TerminalShell } from '../../shared/config'
 import type { BlockContext, ClientMessage, ServerMessage } from '../../shared/terminal-protocol'
 import { completeTerminalInput } from './completion'
 
-export const name = 'dash-codex-terminal'
+export const name = 'dsh-codex-terminal'
 
 /** Host services this plugin requires before `apply` runs. */
 export const inject = ['subprocess', 'webServer'] as const
@@ -37,7 +37,7 @@ const execFileAsync = promisify(execFile)
 const BLOCK_END_PREFIX = '\x1b]777;warp-block-end;'
 const NODE_VERSION_PREFIX = '\x1b]777;warp-node-version;'
 const BEL = '\x07'
-const WS_PATH = '/dash-codex/terminal/ws'
+const WS_PATH = '/dsh-codex/terminal/ws'
 const MARKER_PREFIXES = [BLOCK_END_PREFIX, NODE_VERSION_PREFIX] as const
 const CONTEXT_TIMEOUT_MS = 2500
 
@@ -58,27 +58,27 @@ export interface TerminalSession {
 }
 
 /** Handle the main thread can dispose to tear the whole server down. */
-export interface DashCodexTerminalServer {
+export interface DshCodexTerminalServer {
   dispose(): void
 }
 
 export function apply(ctx: Context) {
   ctx.effect(() => {
-    const server = createDashCodexTerminalServer(ctx, () => DEFAULT_CONFIG)
+    const server = createDshCodexTerminalServer(ctx, () => DEFAULT_CONFIG)
     return () => server.dispose()
-  }, 'dash-codex: terminal websocket route')
+  }, 'dsh-codex: terminal websocket route')
 }
 
 /**
  * Create the terminal WebSocket server against an injected Cordis context.
- * Exported so the dash-codex host entry (src/index.ts) can wire it explicitly
+ * Exported so the dsh-codex host entry (src/index.ts) can wire it explicitly
  * once the 'subprocess' and 'webServer' services are available, instead of
  * relying on this module being loaded as its own plugin.
  */
-export function createDashCodexTerminalServer(
+export function createDshCodexTerminalServer(
   ctx: Context,
-  getConfig: () => DashCodexConfig = () => DEFAULT_CONFIG,
-): DashCodexTerminalServer {
+  getConfig: () => DshCodexConfig = () => DEFAULT_CONFIG,
+): DshCodexTerminalServer {
   const wss = new WebSocketServer({ noServer: true })
   const sessions = new Set<TerminalSession>()
 
@@ -121,7 +121,7 @@ export async function openSession(
   ctx: Context,
   ws: WebSocket,
   req: IncomingMessage,
-  getConfig: () => DashCodexConfig = () => DEFAULT_CONFIG,
+  getConfig: () => DshCodexConfig = () => DEFAULT_CONFIG,
 ): Promise<TerminalSession | undefined> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const cwd = url.searchParams.get('cwd')?.trim() || process.cwd()

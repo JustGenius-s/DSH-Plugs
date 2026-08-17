@@ -1,8 +1,8 @@
-export const SETTINGS_NAMESPACE = 'dash-codex' as const
+export const SETTINGS_NAMESPACE = 'dsh-codex' as const
 
 export type TerminalShell = 'auto' | 'bash' | 'zsh'
 
-export interface DashCodexConfig {
+export interface DshCodexConfig {
   navigatorEnabled: boolean
   terminalEnabled: boolean
   terminalShell: TerminalShell
@@ -12,7 +12,7 @@ export interface DashCodexConfig {
   panelRememberTabs: boolean
 }
 
-export const DEFAULT_CONFIG: DashCodexConfig = {
+export const DEFAULT_CONFIG: DshCodexConfig = {
   navigatorEnabled: true,
   terminalEnabled: true,
   terminalShell: 'auto',

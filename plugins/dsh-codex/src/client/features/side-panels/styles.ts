@@ -1,4 +1,4 @@
-// Styles for the dash-codex side-panels feature.
+// Styles for the dsh-codex side-panels feature.
 //
 // The shell injects one <style data-plugin-css> tag (idempotent). The layout
 // squeeze is a single CSS variable consumed by #root; the sidebar itself is a
@@ -139,10 +139,10 @@ body[data-dsh-side-panels-dragging]{cursor:col-resize;user-select:none}
 /** Inject the shell stylesheet once per page load. */
 export function ensureSidePanelStyles(): void {
   if (typeof document === 'undefined') return
-  const tagId = 'dash-codex/side-panels.css'
+  const tagId = 'dsh-codex/side-panels.css'
   if (document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']') !== null) return
   const tag = document.createElement('style')
-  tag.dataset.plugin = 'dash-codex'
+  tag.dataset.plugin = 'dsh-codex'
   tag.dataset.pluginCss = tagId
   tag.textContent = CSS
   document.head.appendChild(tag)

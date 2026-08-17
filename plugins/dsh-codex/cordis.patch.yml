@@ -1,8 +1,8 @@
-# Bundle patch for @just-genius/dash-codex.
+# Bundle patch for @just-genius/dsh-codex.
 # Remove the three legacy loader rows before enabling this replacement owner.
 - insert:
-    - id: dash-codex
-      name: '@just-genius/dash-codex'
+    - id: dsh-codex
+      name: '@just-genius/dsh-codex'
       config:
         navigatorEnabled: true
         terminalEnabled: true

@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import type { DashCodexConfig } from '../../../shared/config'
+import type { DshCodexConfig } from '../../../shared/config'
 import { getLocalOverrides, subscribeLocalOverrides } from '../../config/local-preferences'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/client'
 import type { IApiClient, SubagentAddress } from '@deepseek-ai/dsh-client-connection/client'
@@ -113,7 +113,7 @@ function animateScroll(sp: HTMLElement, target: number) {
 
 export function NavigatorRail(props: any) {
   const { sessionId, useSession, api, loadOlder } = props
-  const scope = props.scope as SettingsScope<DashCodexConfig> | undefined
+  const scope = props.scope as SettingsScope<DshCodexConfig> | undefined
   const scopeSnapshot = useSyncExternalStore(
     scope === undefined ? () => () => {} : listener => scope.subscribe(listener),
     scope === undefined ? () => undefined : () => scope.getSnapshot(),

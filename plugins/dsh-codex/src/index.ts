@@ -1,10 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { installSettingsSection } from '@deepseek-ai/dsh-settings'
-import { DEFAULT_CONFIG, SETTINGS_NAMESPACE, type DashCodexConfig } from './shared/config'
-import { createDashCodexTerminalServer } from './host/terminal/server'
+import { DEFAULT_CONFIG, SETTINGS_NAMESPACE, type DshCodexConfig } from './shared/config'
+import { createDshCodexTerminalServer } from './host/terminal/server'
 
-export const name = 'dash-codex'
+export const name = 'dsh-codex'
 export const inject = ['subprocess', 'webServer'] as const
 
 /** Host-side schema for the one durable Codex configuration namespace. */
@@ -22,9 +22,9 @@ export const ConfigSchema = Schema.object({
   panelRememberTabs: Schema.boolean().default(DEFAULT_CONFIG.panelRememberTabs),
 })
 
-export function apply(ctx: Context, config?: Partial<DashCodexConfig>): void {
+export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
   const entry = { ...DEFAULT_CONFIG, ...config }
-  let source = (): DashCodexConfig => entry
+  let source = (): DshCodexConfig => entry
   let currentConfig = entry
 
   installSettingsSection(ctx, SETTINGS_NAMESPACE as never, ConfigSchema, entry, {
@@ -33,7 +33,7 @@ export function apply(ctx: Context, config?: Partial<DashCodexConfig>): void {
   })
 
   ctx.effect(() => {
-    const server = createDashCodexTerminalServer(ctx, () => currentConfig)
+    const server = createDshCodexTerminalServer(ctx, () => currentConfig)
     return () => server.dispose()
-  }, 'dash-codex: terminal websocket route')
+  }, 'dsh-codex: terminal websocket route')
 }

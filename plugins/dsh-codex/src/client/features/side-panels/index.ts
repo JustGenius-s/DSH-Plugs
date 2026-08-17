@@ -2,7 +2,7 @@ import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runti
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import { DEFAULT_CONFIG, type DashCodexConfig } from '../../../shared/config'
+import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import './contract'
@@ -15,7 +15,7 @@ const NS = 'settings.codex'
 
 export function createSidePanelsFeature(
   ctx: ClientContext,
-  scope: SettingsScope<DashCodexConfig>,
+  scope: SettingsScope<DshCodexConfig>,
   t: (key: CodexKey) => string,
 ): CodexFeature {
   return {

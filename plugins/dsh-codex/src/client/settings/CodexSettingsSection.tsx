@@ -2,17 +2,17 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react
 import { Button, IconChevronDownOutline14, Input, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuItem } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import { DEFAULT_CONFIG, type DashCodexConfig, type TerminalShell } from '../../shared/config'
+import { DEFAULT_CONFIG, type DshCodexConfig, type TerminalShell } from '../../shared/config'
 import type { CodexKey } from '../locales'
 import { clearLocalOverride, getLocalOverrides, setLocalOverride, subscribeLocalOverrides } from '../config/local-preferences'
 
 export interface CodexSettingsInjected {
-  scope: SettingsScope<DashCodexConfig>
+  scope: SettingsScope<DshCodexConfig>
   t: (key: CodexKey) => string
 }
 
 export type CodexSettingsSectionProps = Partial<CodexSettingsInjected>
-type Field = keyof DashCodexConfig
+type Field = keyof DshCodexConfig
 
 const CONFIG_FIELDS: readonly Field[] = [
   'navigatorEnabled',
@@ -161,7 +161,7 @@ function SettingsBody(props: CodexSettingsInjected) {
     }
   }, [localOverrides, snapshot.value])
 
-  const set = <K extends Field>(field: K, next: DashCodexConfig[K]): void => {
+  const set = <K extends Field>(field: K, next: DshCodexConfig[K]): void => {
     setLocalOverride(field, next)
     void scope.set(field, next)
   }

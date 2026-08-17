@@ -77,7 +77,7 @@ function buildWsUrl(cwd: string | undefined, shell: TerminalShell): string {
   if (shell !== 'auto') query.set('shell', shell)
   query.set('rows', '30')
   query.set('cols', '100')
-  return proto + '//' + window.location.host + '/dash-codex/terminal/ws?' + query.toString()
+  return proto + '//' + window.location.host + '/dsh-codex/terminal/ws?' + query.toString()
 }
 
 function displayPath(cwd: string): string {

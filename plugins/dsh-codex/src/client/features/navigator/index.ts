@@ -1,11 +1,11 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { DashCodexConfig } from '../../../shared/config'
+import type { DshCodexConfig } from '../../../shared/config'
 import type { CodexFeature } from '../../core/feature-manager'
 import { NavigatorRail } from './navigator-rail'
 
-export function createNavigatorFeature(ctx: ClientContext, scope: SettingsScope<DashCodexConfig>): CodexFeature {
+export function createNavigatorFeature(ctx: ClientContext, scope: SettingsScope<DshCodexConfig>): CodexFeature {
   return {
     id: 'navigator',
     activate() {

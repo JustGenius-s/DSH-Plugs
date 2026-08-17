@@ -1,4 +1,4 @@
-// Styles for the dash-codex Terminal panel.
+// Styles for the dsh-codex Terminal panel.
 //
 // The plugin injects one <style data-plugin-css> tag (idempotent, HMR-friendly
 // under the same contract DSH's own client bundles use) that contains both the
@@ -55,10 +55,10 @@ const BLOCK_CSS = `
 /** Inject the plugin + xterm styles once per page load. */
 export function ensureWarpTerminalStyles(): void {
   if (typeof document === 'undefined') return
-  const tagId = '@just-genius/dash-codex/terminal/styles.css'
+  const tagId = '@just-genius/dsh-codex/terminal/styles.css'
   if (document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']') !== null) return
   const tag = document.createElement('style')
-  tag.dataset.plugin = '@just-genius/dash-codex'
+  tag.dataset.plugin = '@just-genius/dsh-codex'
   tag.dataset.pluginCss = tagId
   tag.textContent = XTERM_CSS + '\n' + BLOCK_CSS
   document.head.appendChild(tag)

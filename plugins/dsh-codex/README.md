@@ -1,4 +1,4 @@
-# @just-genius/dash-codex
+# @just-genius/dsh-codex
 
 The consolidated Codex shell for Codex-style navigation, side panels, and a Warp-style terminal.
 

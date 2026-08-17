@@ -1,5 +1,5 @@
 {
-  "name": "@just-genius/dash-codex",
+  "name": "@just-genius/dsh-codex",
   "description": "Codex-style navigation, side panels, and terminal integration shell for DeepSeek Harness",
   "version": "0.1.0",
   "publishConfig": { "access": "public" },
