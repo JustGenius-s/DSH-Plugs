@@ -12,7 +12,7 @@ A Codex-style message navigator rail: a vertical tick rail on the conversation t
 
 ### [@just-genius/dsh-codex](plugins/dsh-codex)
 
-The consolidated Codex shell: settings, Codex-style navigation, the right-side `side.panel` host, a Warp-style Terminal panel backed by a real login-shell PTY at `/dsh-codex/terminal/ws`, and a read-only commit-graph panel that walks `git log` at `/dsh-codex/git-graph`.
+The consolidated Codex shell: settings, Codex-style navigation, Cursor-style per-turn **Worked for** collapsing, the right-side `side.panel` host, a Warp-style Terminal panel backed by a real login-shell PTY at `/dsh-codex/terminal/ws`, and a read-only commit-graph panel that walks `git log` at `/dsh-codex/git-graph`.
 
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 

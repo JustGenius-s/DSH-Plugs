@@ -1,12 +1,12 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { SettingsScopeBinder } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import { DEFAULT_CONFIG, SETTINGS_NAMESPACE, type DshCodexConfig } from '../shared/config'
 import { createCodexFeatureManager } from './core/feature-manager'
+import { createCodexSettingsStore } from './config/codex-settings-store'
+import { createConversationCollapseFeature } from './features/conversation-collapse'
 import { createGitGraphFeature } from './features/git-graph'
 import { createNavigatorFeature } from './features/navigator'
 import { createSidePanelsFeature } from './features/side-panels'
@@ -23,16 +23,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const NS = 'settings.codex'
 
-export const inject = ['slots', 'locale', 'settingsScope', 'connection', 'remote', 'sessions'] as const
+export const inject = ['slots', 'locale', 'connection', 'remote', 'sessions', 'conversationEvents'] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-codex: dictionaries')
 
-  const binder = ctx.get('settingsScope') as SettingsScopeBinder
-  const scope = binder.bind<DshCodexConfig>({
-    namespace: SETTINGS_NAMESPACE,
-    decode: decodeConfig,
-  })
+  const scope = createCodexSettingsStore()
   const t = ctx.locale.bind(NS) as (key: CodexKey) => string
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -45,6 +41,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => installCodexSettingsIcon(() => t('nav')), 'dsh-codex: settings icon')
 
   const features = createCodexFeatureManager([
+    createConversationCollapseFeature(ctx, scope, t),
     createNavigatorFeature(ctx, scope),
     createSidePanelsFeature(ctx, scope, t),
     createTerminalFeature(ctx, scope, t),
@@ -54,30 +51,4 @@ export function apply(ctx: ClientContext): void {
     features.activate()
     return () => features.dispose()
   }, 'dsh-codex: feature manager')
-}
-
-function decodeConfig(value: unknown): DshCodexConfig | undefined {
-  if (typeof value !== 'object' || value === null) return undefined
-  const candidate = value as Partial<DshCodexConfig>
-  if (typeof candidate.navigatorEnabled !== 'boolean') return undefined
-  if (typeof candidate.terminalEnabled !== 'boolean') return undefined
-  if (candidate.terminalShell !== 'auto' && candidate.terminalShell !== 'bash' && candidate.terminalShell !== 'zsh') return undefined
-  if (typeof candidate.terminalScrollback !== 'number' || !Number.isFinite(candidate.terminalScrollback)) return undefined
-  if (typeof candidate.terminalFontSize !== 'number' || !Number.isFinite(candidate.terminalFontSize)) return undefined
-  if (typeof candidate.panelDefaultWidth !== 'number' || !Number.isFinite(candidate.panelDefaultWidth)) return undefined
-  if (typeof candidate.panelMaxWidth !== 'number' || !Number.isFinite(candidate.panelMaxWidth)) return undefined
-  if (typeof candidate.panelRememberTabs !== 'boolean') return undefined
-  return {
-    navigatorEnabled: candidate.navigatorEnabled,
-    terminalEnabled: candidate.terminalEnabled,
-    gitGraphEnabled: typeof candidate.gitGraphEnabled === 'boolean'
-      ? candidate.gitGraphEnabled
-      : DEFAULT_CONFIG.gitGraphEnabled,
-    terminalShell: candidate.terminalShell,
-    terminalScrollback: candidate.terminalScrollback,
-    terminalFontSize: candidate.terminalFontSize,
-    panelDefaultWidth: candidate.panelDefaultWidth,
-    panelMaxWidth: candidate.panelMaxWidth,
-    panelRememberTabs: candidate.panelRememberTabs,
-  }
 }

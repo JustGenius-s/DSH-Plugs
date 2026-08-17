@@ -1,16 +1,24 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { installSettingsSection } from '@deepseek-ai/dsh-settings'
-import { DEFAULT_CONFIG, SETTINGS_NAMESPACE, type DshCodexConfig } from './shared/config'
+import {
+  DEFAULT_CONFIG,
+  PANEL_LAUNCHER_WIDTH_MAX,
+  PANEL_LAUNCHER_WIDTH_MIN,
+  SETTINGS_NAMESPACE,
+  type DshCodexConfig,
+} from './shared/config'
 import { createDshCodexGitGraphServer } from './host/git-graph/server'
+import { createDshCodexSettingsServer } from './host/settings/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
-export const inject = ['subprocess', 'webServer'] as const
+export const inject = ['subprocess', 'webServer', 'settings'] as const
 
 /** Host-side schema for the one durable Codex configuration namespace. */
 export const ConfigSchema = Schema.object({
   navigatorEnabled: Schema.boolean().default(DEFAULT_CONFIG.navigatorEnabled),
+  conversationCollapseEnabled: Schema.boolean().default(DEFAULT_CONFIG.conversationCollapseEnabled),
   terminalEnabled: Schema.boolean().default(DEFAULT_CONFIG.terminalEnabled),
   gitGraphEnabled: Schema.boolean().default(DEFAULT_CONFIG.gitGraphEnabled),
   terminalShell: Schema.union([
@@ -22,6 +30,7 @@ export const ConfigSchema = Schema.object({
   terminalFontSize: Schema.number().min(10).max(24).default(DEFAULT_CONFIG.terminalFontSize),
   panelDefaultWidth: Schema.number().min(300).max(720).default(DEFAULT_CONFIG.panelDefaultWidth),
   panelMaxWidth: Schema.number().min(300).max(720).default(DEFAULT_CONFIG.panelMaxWidth),
+  panelLauncherWidth: Schema.number().min(PANEL_LAUNCHER_WIDTH_MIN).max(PANEL_LAUNCHER_WIDTH_MAX).default(DEFAULT_CONFIG.panelLauncherWidth),
   panelRememberTabs: Schema.boolean().default(DEFAULT_CONFIG.panelRememberTabs),
 })
 
@@ -34,6 +43,22 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
     setSource: (nextSource) => { source = nextSource },
     onChange: () => { currentConfig = source() },
   })
+
+  const applyPatch = async (patch: Partial<DshCodexConfig>): Promise<DshCodexConfig> => {
+    const settings = ctx.get('settings')
+    if (settings === undefined) {
+      throw new Error('settings service is unavailable')
+    }
+    const next = { ...currentConfig, ...patch }
+    await settings.update(SETTINGS_NAMESPACE as never, patch)
+    currentConfig = next
+    return next
+  }
+
+  ctx.effect(() => {
+    const server = createDshCodexSettingsServer(ctx, () => currentConfig, applyPatch)
+    return () => server.dispose()
+  }, 'dsh-codex: settings route')
 
   ctx.effect(() => {
     const server = createDshCodexTerminalServer(ctx, () => currentConfig)

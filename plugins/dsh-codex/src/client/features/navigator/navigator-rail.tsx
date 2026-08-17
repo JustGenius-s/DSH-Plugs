@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { DshCodexConfig } from '../../../shared/config'
-import { getLocalOverrides, subscribeLocalOverrides } from '../../config/local-preferences'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/client'
 import type { IApiClient, SubagentAddress } from '@deepseek-ai/dsh-client-connection/client'
 
@@ -119,14 +118,7 @@ export function NavigatorRail(props: any) {
     scope === undefined ? () => undefined : () => scope.getSnapshot(),
     scope === undefined ? () => undefined : () => scope.getSnapshot(),
   )
-  const localOverrides = useSyncExternalStore(
-    subscribeLocalOverrides,
-    getLocalOverrides,
-    getLocalOverrides,
-  )
-  const navigatorEnabled = localOverrides.navigatorEnabled
-    ?? scopeSnapshot?.value?.navigatorEnabled
-    ?? true
+  const navigatorEnabled = scopeSnapshot?.value?.navigatorEnabled ?? true
   const [claimed] = useState(() => {
     if (claimedSessions.has(sessionId)) return false
     claimedSessions.add(sessionId)

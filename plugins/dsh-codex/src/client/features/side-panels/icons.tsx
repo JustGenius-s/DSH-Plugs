@@ -6,10 +6,10 @@
  * 1. REUSE a native `ic_ds_*` glyph from `@deepseek-ai/dsh-client-ui-primitives`
  *    whenever one carries the right meaning. Reuse is free consistency — the
  *    glyph is byte-identical to what DSH draws elsewhere, and it tracks any
- *    upstream redraw. Five of the seven names below are pure reuse.
+ *    upstream redraw. Four of the seven names below are pure reuse.
  * 2. HAND-DRAW to DSH's spec only where that sheet has no equivalent
- *    (terminal, and the generic panel mark). Spec reverse-engineered from
- *    the same sheet:
+ *    (terminal, git-graph, and the generic panel mark). Spec reverse-engineered
+ *    from the same sheet:
  *      - 16x16 grid, `viewBox="0 0 16 16"`, `fill="none"` on the <svg>
  *      - every path `fill="currentColor"` — fill-type outlines, NOT stroked
  *        paths (that sheet is 130 fills vs 2 strokes), so a glyph never
@@ -25,7 +25,7 @@
  * something outside this set overrides with its own thunk (SidePanelDescriptor).
  */
 import {
-  IconBranchOutline16, IconChecklistOutline14, IconFolderOpenOutline16,
+  IconChecklistOutline14, IconFolderOpenOutline16,
   IconGlobeOutline14, IconNewChatOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ReactNode } from 'react'
@@ -101,19 +101,61 @@ export function PanelIconDefault(props: PanelIconProps) {
 }
 
 /**
+ * Git graph: two stacked commits on the left, a full-height spine, and a
+ * right-hand commit joining via a curved connector. Lucide's git-graph
+ * composition, redrawn as DSH fill-type outlines so it sits with the rest
+ * of the launcher column. Node rings copy `ic_ds_branch_outline_16`
+ * (outer r 1.83, inner r 0.53, 1.30 stroke); the native sheet has no graph
+ * glyph — branch reads as "a branch", not "the graph".
+ */
+export function PanelIconGit(props: PanelIconProps) {
+  return (
+    <Glyph {...props}>
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M1.27 3.25a1.83 1.83 0 1 1 3.66 0a1.83 1.83 0 1 1-3.66 0M2.57 3.25a.53.53 0 1 0 1.06 0a.53.53 0 1 0-1.06 0"
+        fill="currentColor"
+      />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M1.27 12.75a1.83 1.83 0 1 1 3.66 0a1.83 1.83 0 1 1-3.66 0M2.57 12.75a.53.53 0 1 0 1.06 0a.53.53 0 1 0-1.06 0"
+        fill="currentColor"
+      />
+      {/* Stem overlaps each ring's stroke and stops at the hole. */}
+      <path d="M2.45 3.78h1.3v8.44H2.45V3.78Z" fill="currentColor" />
+      <path d="M7.35 1.42h1.3v13.16H7.35V1.42Z" fill="currentColor" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M11.07 3.25a1.83 1.83 0 1 1 3.66 0a1.83 1.83 0 1 1-3.66 0M12.37 3.25a.53.53 0 1 0 1.06 0a.53.53 0 1 0-1.06 0"
+        fill="currentColor"
+      />
+      <path
+        d="M8 11.57A5.63 5.63 0 0 0 13.54 4.97L12.26 5.19A4.33 4.33 0 0 1 8 10.27Z"
+        fill="currentColor"
+      />
+    </Glyph>
+  )
+}
+
+/**
  * The named glyphs a panel can request by string. Panels report a name
  * (`icon: 'terminal'`) so the host owns the drawing and every panel row stays
  * on one visual language; a panel needing something else passes a thunk.
  *
- * `git`, `files`, `browser`, `chat` and `command` are native `ic_ds_*` glyphs
- * verbatim — the branch, open-folder, meridian-globe, new-chat and checklist
- * marks DSH already uses for these meanings (checklist reads as a command
- * list, which is what a command panel shows). Globe and checklist are 14-grid
- * glyphs upstream; the size prop below still renders them at the row's 16px box.
+ * `files`, `browser`, `chat` and `command` are native `ic_ds_*` glyphs
+ * verbatim — the open-folder, meridian-globe, new-chat and checklist marks
+ * DSH already uses for these meanings (checklist reads as a command list,
+ * which is what a command panel shows). Globe and checklist are 14-grid
+ * glyphs upstream; the size prop below still renders them at the row's 16px
+ * box. `git` is the hand-drawn graph above — native branch is the wrong
+ * metaphor for this panel.
  */
 export const PANEL_ICONS = {
   terminal: PanelIconTerminal,
-  git: IconBranchOutline16,
+  git: PanelIconGit,
   files: IconFolderOpenOutline16,
   browser: IconGlobeOutline14,
   chat: IconNewChatOutline16,

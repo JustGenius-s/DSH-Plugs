@@ -19,9 +19,18 @@ const CSS = `
 #root{margin-right:var(--dsh-side-panels-width);transition:margin-right var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
 body[data-dsh-side-panels-dragging] #root{transition:none}
 
-.dsh-side-panels{position:fixed;top:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-left:1px solid var(--dsw-alias-border-l2);pointer-events:auto;font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary)}
+/* Width (not display:none) is the collapse, matching AppFrame's
+   grid-template-columns track: same slow duration and --ds-ease-in-out
+   curve. The column stays mounted at width 0 so the squeeze and the
+   panel slide as one piece. Overflow stays visible here so the 8px
+   resize strip can hang 4px past the left border; the inner clip
+   wrapper is what hides content as the track shrinks. */
+.dsh-side-panels{position:fixed;top:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;background:var(--dsw-alias-bg-base);border-left:1px solid var(--dsw-alias-border-l2);pointer-events:auto;font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary);transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out),border-left-color var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
+.dsh-side-panels[data-collapsed]{border-left-color:transparent;pointer-events:none}
+.dsh-side-panels-inner{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;height:100%;overflow:hidden}
 .dsh-side-panels-resize{position:absolute;left:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:2;touch-action:none}
 body[data-dsh-side-panels-dragging]{cursor:col-resize;user-select:none}
+body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 /* Header height matches the CONVERSATION header (76px), not DetailsPanel (55px).
    Both are defensible in isolation, but this panel sits directly beside the
    conversation column, and their hairlines are one continuous horizontal line
@@ -111,7 +120,8 @@ body[data-dsh-side-panels-dragging]{cursor:col-resize;user-select:none}
 .dsh-side-panels-pane>*{flex:1;min-height:0}
 .dsh-side-panels-pane[hidden]{display:none}
 /* Collapsed launcher: a titleless floating card in the top-right corner, one
-   row per registered panel.
+   row per registered panel. A panel that already has open instances grows a
+   chevron; the nested list is existing tabs, not a second copy of the catalog.
    Surface is the SIDEBAR fill, not the menu fill: this card stands in for the
    panel column itself while it is collapsed, so it belongs to the sidebar
    family rather than the transient-overlay family. It also keeps the card in
@@ -125,22 +135,52 @@ body[data-dsh-side-panels-dragging]{cursor:col-resize;user-select:none}
    sheet: the card insets 12px (menu uses 4) and rows inset 4px vertical /
    8px horizontal (menu cells use 8/10). Rows keep min-h 40 and the 14/22 primary ink, so the row box is
    unchanged — the 4px only pulls its hover fill in tighter. */
-.dsh-side-panels-launcher{position:fixed;top:68px;right:28px;z-index:41;box-sizing:border-box;display:flex;flex-direction:column;gap:0;min-width:164px;max-width:280px;padding:12px;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-sidebar-fill);box-shadow:var(--dsw-shadow-lv3);font-family:var(--dsw-font-family);pointer-events:auto;-webkit-app-region:no-drag}
-.dsh-side-panels-launcher-item{-webkit-app-region:no-drag;display:flex;align-items:center;gap:8px;width:100%;min-height:40px;padding:4px 8px;border:none;border-radius:10px;background:transparent;cursor:pointer;font-family:inherit;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);text-align:left}
-.dsh-side-panels-launcher-item:hover{background:var(--dsw-alias-interactive-bg-hover)}
+/* Under the panel (z 40) so closing the column reveals the card the
+   way AppFrame's collapsed rail is the same track, just narrower. */
+.dsh-side-panels-launcher{position:fixed;top:68px;right:28px;z-index:39;box-sizing:border-box;display:flex;flex-direction:column;gap:0;width:220px;padding:12px;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-sidebar-fill);box-shadow:var(--dsw-shadow-lv3);font-family:var(--dsw-font-family);pointer-events:auto;-webkit-app-region:no-drag}
+.dsh-side-panels-launcher[data-hidden]{pointer-events:none}
+.dsh-side-panels-launcher-group{display:flex;flex-direction:column;min-width:0}
+/* One catalog row: label + optional chevron share a single flex line.
+   Hover fill lives on the row so the chevron is not a second plate.
+   appearance:none kills the UA button chrome if a class ever misses. */
+.dsh-side-panels-launcher-row{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;min-width:0;min-height:40px;padding:4px 8px;border-radius:10px}
+.dsh-side-panels-launcher-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-side-panels-launcher-item{-webkit-app-region:no-drag;display:flex;align-items:center;gap:8px;flex:1 1 0;min-width:0;padding:0;border:none;border-radius:0;background:transparent;appearance:none;-webkit-appearance:none;cursor:pointer;font-family:inherit;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);text-align:left}
 .dsh-side-panels-launcher-icon{display:inline-flex;flex:none;width:16px;height:16px;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary)}
 .dsh-side-panels-launcher-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-side-panels-launcher-expand{-webkit-app-region:no-drag;display:inline-flex;flex:none;align-items:center;justify-content:center;width:16px;height:16px;margin-left:4px;padding:0;border:none;border-radius:0;background:transparent;appearance:none;-webkit-appearance:none;color:var(--dsw-alias-label-tertiary);cursor:pointer}
+.dsh-side-panels-launcher-expand:hover{background:transparent;color:var(--dsw-alias-label-primary)}
+/* Native dropdown chevron: one glyph, 0.12s rotate, not an icon swap. */
+.dsh-side-panels-launcher-expand svg{transition:transform .12s}
+.dsh-side-panels-launcher-expand[aria-expanded=true] svg{transform:rotate(90deg)}
+/* Accordion body uses the same track interpolation as AppFrame columns
+   (0fr ↔ 1fr, slow + --ds-ease-in-out) so the nested tabs do not pop. */
+.dsh-side-panels-launcher-tabs{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
+.dsh-side-panels-launcher-tabs[data-expanded]{grid-template-rows:1fr}
+.dsh-side-panels-launcher-tabs-inner{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:0 0 4px 24px}
+.dsh-side-panels-launcher-tab{-webkit-app-region:no-drag;display:flex;align-items:center;width:100%;min-height:32px;padding:2px 8px;border:none;border-radius:8px;background:transparent;cursor:pointer;font-family:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-side-panels-launcher-tab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 
 @media (prefers-reduced-motion: reduce) {
   #root{transition:none}
+  .dsh-side-panels{transition:none}
+  .dsh-side-panels-launcher-expand svg{transition:none}
+  .dsh-side-panels-launcher-tabs{transition:none}
 }
 `
 
-/** Inject the shell stylesheet once per page load. */
+/** Inject or refresh the shell stylesheet. Replacing textContent keeps HMR
+ *  from leaving a stale tag that still matches the idempotent selector. */
 export function ensureSidePanelStyles(): void {
   if (typeof document === 'undefined') return
   const tagId = 'dsh-codex/side-panels.css'
-  if (document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']') !== null) return
+  const existing = document.querySelector(
+    'style[data-plugin-css=' + JSON.stringify(tagId) + ']',
+  )
+  if (existing instanceof HTMLStyleElement) {
+    existing.textContent = CSS
+    return
+  }
   const tag = document.createElement('style')
   tag.dataset.plugin = 'dsh-codex'
   tag.dataset.pluginCss = tagId

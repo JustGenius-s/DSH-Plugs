@@ -1,10 +1,9 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Button, IconChevronDownOutline14, Input, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuItem } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import { DEFAULT_CONFIG, type DshCodexConfig, type TerminalShell } from '../../shared/config'
+import { clampPanelLauncherWidth, DEFAULT_CONFIG, PANEL_LAUNCHER_WIDTH_MAX, PANEL_LAUNCHER_WIDTH_MIN, type DshCodexConfig, type TerminalShell } from '../../shared/config'
 import type { CodexKey } from '../locales'
-import { clearLocalOverride, getLocalOverrides, setLocalOverride, subscribeLocalOverrides } from '../config/local-preferences'
 
 export interface CodexSettingsInjected {
   scope: SettingsScope<DshCodexConfig>
@@ -13,18 +12,6 @@ export interface CodexSettingsInjected {
 
 export type CodexSettingsSectionProps = Partial<CodexSettingsInjected>
 type Field = keyof DshCodexConfig
-
-const CONFIG_FIELDS: readonly Field[] = [
-  'navigatorEnabled',
-  'terminalEnabled',
-  'gitGraphEnabled',
-  'terminalShell',
-  'terminalScrollback',
-  'terminalFontSize',
-  'panelDefaultWidth',
-  'panelMaxWidth',
-  'panelRememberTabs',
-]
 
 function FieldRow(props: { label: string; children: ReactNode }) {
   return (
@@ -147,24 +134,9 @@ function SettingsBody(props: CodexSettingsInjected) {
     () => scope.getSnapshot(),
     () => scope.getSnapshot(),
   )
-  const localOverrides = useSyncExternalStore(
-    subscribeLocalOverrides,
-    getLocalOverrides,
-    getLocalOverrides,
-  )
-  const value = { ...DEFAULT_CONFIG, ...snapshot.value, ...localOverrides }
-
-  useEffect(() => {
-    if (snapshot.value === undefined) return
-    for (const field of CONFIG_FIELDS) {
-      if (localOverrides[field] !== undefined && Object.is(localOverrides[field], snapshot.value[field])) {
-        clearLocalOverride(field)
-      }
-    }
-  }, [localOverrides, snapshot.value])
+  const value = { ...DEFAULT_CONFIG, ...snapshot.value }
 
   const set = <K extends Field>(field: K, next: DshCodexConfig[K]): void => {
-    setLocalOverride(field, next)
     void scope.set(field, next)
   }
 
@@ -179,9 +151,15 @@ function SettingsBody(props: CodexSettingsInjected) {
         <FieldRow label={t('navigatorEnabled')}>
           <SettingToggle label={t('navigatorEnabled')} checked={value.navigatorEnabled} onChange={next => set('navigatorEnabled', next)} />
         </FieldRow>
+        <FieldRow label={t('conversationCollapseEnabled')}>
+          <SettingToggle label={t('conversationCollapseEnabled')} checked={value.conversationCollapseEnabled} onChange={next => set('conversationCollapseEnabled', next)} />
+        </FieldRow>
       </Group>
 
       <Group title={t('groupPanel')}>
+        <FieldRow label={t('panelLauncherWidth')}>
+          <NumberField label={t('panelLauncherWidth')} min={PANEL_LAUNCHER_WIDTH_MIN} max={PANEL_LAUNCHER_WIDTH_MAX} step={10} value={value.panelLauncherWidth} onChange={next => set('panelLauncherWidth', clampPanelLauncherWidth(next))} />
+        </FieldRow>
         <FieldRow label={t('panelDefaultWidth')}>
           <NumberField label={t('panelDefaultWidth')} min={300} max={720} step={10} value={value.panelDefaultWidth} onChange={next => set('panelDefaultWidth', next)} />
         </FieldRow>

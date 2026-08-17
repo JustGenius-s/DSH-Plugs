@@ -13,17 +13,38 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import {
+  IconChevronRightOutline14,
   IconCloseFill14, IconCloseOutline16, IconPlusOutline16, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  clampPanelLauncherWidth,
+  DEFAULT_CONFIG,
+  type DshCodexConfig,
+} from '../../../shared/config'
 import { resolvePanelIcon } from './icons'
-import type { SidePanelsStore } from './service'
+import type { SidePanelInstance, SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
 
 ensureSidePanelStyles()
 
 /** Breathing room between the conversation header's bottom edge and the launcher card. */
 const LAUNCHER_HEADER_GAP = 20
+
+/**
+ * Tab caption: a lone instance keeps the panel label ("终端"); duplicates
+ * pick up a 1-based ordinal so two terminals read "终端 1" / "终端 2".
+ */
+function instanceCaption(
+  instance: SidePanelInstance,
+  siblings: readonly SidePanelInstance[],
+  label: string,
+): string {
+  if (siblings.length < 2) return label
+  const ordinal = siblings.findIndex(item => item.key === instance.key) + 1
+  return ordinal > 0 ? label + ' ' + String(ordinal) : label
+}
 
 interface SessionRecord { cwd?: string }
 
@@ -49,11 +70,12 @@ interface ShellProps {
   useSessions: (selector: (state: never) => unknown) => unknown
   store: SidePanelsStore
   entries: PanelEntriesApi
+  scope?: SettingsScope<DshCodexConfig>
   t: (key: string) => string
 }
 
 export function SidePanelsShell(props: ShellProps) {
-  const { renderSlot, useSessions, store, entries, t } = props
+  const { renderSlot, useSessions, store, entries, scope, t } = props
 
   const sessionId = useSessions((state) => {
     const s = state as { current?: string } | undefined
@@ -71,6 +93,15 @@ export function SidePanelsShell(props: ShellProps) {
 
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const tabs = useSyncExternalStore(entries.subscribe, entries.list)
+  const scopeSnapshot = useSyncExternalStore(
+    scope === undefined ? () => () => {} : listener => scope.subscribe(listener),
+    scope === undefined ? () => undefined : () => scope.getSnapshot(),
+    scope === undefined ? () => undefined : () => scope.getSnapshot(),
+  )
+  const launcherWidth = clampPanelLauncherWidth(
+    scopeSnapshot?.value?.panelLauncherWidth
+      ?? DEFAULT_CONFIG.panelLauncherWidth,
+  )
 
   // Switch before paint so the header never renders one session's tabs under
   // another session's owner. Retained panes keep their original owner props.
@@ -153,6 +184,11 @@ export function SidePanelsShell(props: ShellProps) {
   // the strip (no window listeners), deltas are rAF-throttled, and the base is
   // the width captured at drag start so a clamped panel never jumps. The
   // body attribute pauses the #root transition and shows the col-resize cursor.
+
+  // Which collapsed-launcher row is showing its existing tabs. Accordion:
+  // expanding one panel collapses the other so the floating card stays short.
+  const [expandedLauncherId, setExpandedLauncherId] = useState<string | null>(null)
+
   // New-instance menu open state; closes on any outside pointer press so it
   // behaves like the DSH menus it visually copies.
   const [adding, setAdding] = useState(false)
@@ -239,26 +275,81 @@ export function SidePanelsShell(props: ShellProps) {
     </div>
   )
 
-  const launcher = !open && tabs.length > 0 ? (
+  const launcher = tabs.length > 0 ? (
     <div
       className="dsh-side-panels-launcher"
-      style={anchorTop === null ? undefined : { top: anchorTop + LAUNCHER_HEADER_GAP }}
+      style={{
+        width: launcherWidth,
+        ...(anchorTop === null ? undefined : { top: anchorTop + LAUNCHER_HEADER_GAP }),
+      }}
       role="group"
       aria-label={t('aria.open')}
+      aria-hidden={open || undefined}
+      data-hidden={open || undefined}
     >
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          className="dsh-side-panels-launcher-item"
-          onClick={() => store.open(tab.id)}
-        >
-          <span className="dsh-side-panels-launcher-icon" aria-hidden>
-            {resolvePanelIcon(store.descriptor(tab.id)?.icon)}
-          </span>
-          <span className="dsh-side-panels-launcher-label">{tab.label}</span>
-        </button>
-      ))}
+      {tabs.map((tab) => {
+        const existing = live.filter(instance => instance.panelId === tab.id)
+        const expanded = expandedLauncherId === tab.id && existing.length > 0
+        return (
+          <div key={tab.id} className="dsh-side-panels-launcher-group">
+            <div className="dsh-side-panels-launcher-row">
+              <button
+                type="button"
+                className="dsh-side-panels-launcher-item"
+                onClick={() => {
+                  if (existing.length === 0) {
+                    store.open(tab.id)
+                    return
+                  }
+                  const preferred = existing.find(instance => instance.key === snapshot.activeKey)
+                    ?? existing[existing.length - 1]
+                  if (preferred !== undefined) store.activateInstance(preferred.key)
+                }}
+              >
+                <span className="dsh-side-panels-launcher-icon" aria-hidden>
+                  {resolvePanelIcon(store.descriptor(tab.id)?.icon)}
+                </span>
+                <span className="dsh-side-panels-launcher-label">{tab.label}</span>
+              </button>
+              {existing.length > 0 && (
+                <button
+                  type="button"
+                  className="dsh-side-panels-launcher-expand"
+                  aria-expanded={expanded}
+                  aria-label={expanded ? t('aria.collapseTabs') : t('aria.expandTabs')}
+                  onClick={() => {
+                    setExpandedLauncherId(current => current === tab.id ? null : tab.id)
+                  }}
+                >
+                  <IconChevronRightOutline14 size={14} />
+                </button>
+              )}
+            </div>
+            {existing.length > 0 && (
+              <div
+                className="dsh-side-panels-launcher-tabs"
+                data-expanded={expanded || undefined}
+                role="list"
+              >
+                <div className="dsh-side-panels-launcher-tabs-inner">
+                  {existing.map((instance) => (
+                    <button
+                      key={instance.key}
+                      type="button"
+                      role="listitem"
+                      className="dsh-side-panels-launcher-tab"
+                      tabIndex={expanded ? 0 : -1}
+                      onClick={() => store.activateInstance(instance.key)}
+                    >
+                      {instanceCaption(instance, existing, tab.label)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   ) : null
 
@@ -267,7 +358,8 @@ export function SidePanelsShell(props: ShellProps) {
       {launcher}
       <div
         className="dsh-side-panels"
-        style={{ width: snapshot.width, display: open ? 'flex' : 'none' }}
+        style={{ width: open ? snapshot.width : 0 }}
+        data-collapsed={!open || undefined}
         aria-hidden={!open || undefined}
         role="complementary"
         aria-label={t('aria.sidebar')}
@@ -282,15 +374,13 @@ export function SidePanelsShell(props: ShellProps) {
         aria-orientation="vertical"
         aria-label={t('aria.resize')}
       />
+      <div className="dsh-side-panels-inner">
       <div className="dsh-side-panels-header">
         <div className="dsh-side-panels-tabs" role="tablist">
           {live.map((instance) => {
             const info = panelById.get(instance.panelId)
             const isActive = instance.key === activeKey
-            // Number only what is actually duplicated: a lone terminal reads
-            // "终端", not "终端 1".
             const siblings = live.filter(i => i.panelId === instance.panelId)
-            const ordinal = siblings.length > 1 ? siblings.indexOf(instance) + 1 : 0
             return (
               <div
                 key={instance.key}
@@ -310,8 +400,7 @@ export function SidePanelsShell(props: ShellProps) {
                     {resolvePanelIcon(store.descriptor(instance.panelId)?.icon)}
                   </span>
                   <span className="dsh-side-panels-tab-label">
-                    {info?.label ?? instance.panelId}
-                    {ordinal > 0 && ' ' + String(ordinal)}
+                    {instanceCaption(instance, siblings, info?.label ?? instance.panelId)}
                   </span>
                 </button>
                 <button
@@ -378,6 +467,7 @@ export function SidePanelsShell(props: ShellProps) {
       {/* Session and tab switches only hide panes. The compound key keeps
           identical panel instance keys from different sessions independent. */}
         {renderPanes()}
+      </div>
       </div>
     </>
   )
