@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-desktop-update",
-  "description": "Desktop update badge for DSH-Desktop: renders an update icon next to the sidebar Settings button, driven by window.dshDesktop (Electron preload bridge)",
+  "description": "Desktop update plugin for DSH-Desktop: sidebar badge plus native applicationMenu/tray contributions via window.dshDesktop.seats",
   "version": "0.1.1",
   "publishConfig": {
     "access": "public"

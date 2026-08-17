@@ -54,10 +54,12 @@ function readOverrides(): Overrides {
     const next: Overrides = {}
     if (typeof candidate.navigatorEnabled === 'boolean') next.navigatorEnabled = candidate.navigatorEnabled
     if (typeof candidate.terminalEnabled === 'boolean') next.terminalEnabled = candidate.terminalEnabled
+    if (typeof candidate.gitGraphEnabled === 'boolean') next.gitGraphEnabled = candidate.gitGraphEnabled
     if (candidate.terminalShell === 'auto' || candidate.terminalShell === 'bash' || candidate.terminalShell === 'zsh') next.terminalShell = candidate.terminalShell
     if (typeof candidate.terminalScrollback === 'number' && Number.isFinite(candidate.terminalScrollback)) next.terminalScrollback = candidate.terminalScrollback
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) next.terminalFontSize = candidate.terminalFontSize
     if (typeof candidate.panelDefaultWidth === 'number' && Number.isFinite(candidate.panelDefaultWidth)) next.panelDefaultWidth = candidate.panelDefaultWidth
+    if (typeof candidate.panelMaxWidth === 'number' && Number.isFinite(candidate.panelMaxWidth)) next.panelMaxWidth = candidate.panelMaxWidth
     if (typeof candidate.panelRememberTabs === 'boolean') next.panelRememberTabs = candidate.panelRememberTabs
     return next
   } catch {

@@ -17,10 +17,12 @@ type Field = keyof DshCodexConfig
 const CONFIG_FIELDS: readonly Field[] = [
   'navigatorEnabled',
   'terminalEnabled',
+  'gitGraphEnabled',
   'terminalShell',
   'terminalScrollback',
   'terminalFontSize',
   'panelDefaultWidth',
+  'panelMaxWidth',
   'panelRememberTabs',
 ]
 
@@ -181,10 +183,19 @@ function SettingsBody(props: CodexSettingsInjected) {
 
       <Group title={t('groupPanel')}>
         <FieldRow label={t('panelDefaultWidth')}>
-          <NumberField label={t('panelDefaultWidth')} min={300} max={520} step={10} value={value.panelDefaultWidth} onChange={next => set('panelDefaultWidth', next)} />
+          <NumberField label={t('panelDefaultWidth')} min={300} max={720} step={10} value={value.panelDefaultWidth} onChange={next => set('panelDefaultWidth', next)} />
+        </FieldRow>
+        <FieldRow label={t('panelMaxWidth')}>
+          <NumberField label={t('panelMaxWidth')} min={300} max={720} step={10} value={value.panelMaxWidth} onChange={next => set('panelMaxWidth', next)} />
         </FieldRow>
         <FieldRow label={t('panelRememberTabs')}>
           <SettingToggle label={t('panelRememberTabs')} checked={value.panelRememberTabs} onChange={next => set('panelRememberTabs', next)} />
+        </FieldRow>
+      </Group>
+
+      <Group title={t('groupGitGraph')}>
+        <FieldRow label={t('gitGraphEnabled')}>
+          <SettingToggle label={t('gitGraphEnabled')} checked={value.gitGraphEnabled} onChange={next => set('gitGraphEnabled', next)} />
         </FieldRow>
       </Group>
 

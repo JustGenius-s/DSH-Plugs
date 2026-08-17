@@ -6,6 +6,7 @@
       config:
         navigatorEnabled: true
         terminalEnabled: true
+        gitGraphEnabled: true
         terminalShell: auto
         terminalScrollback: 5000
         terminalFontSize: 12

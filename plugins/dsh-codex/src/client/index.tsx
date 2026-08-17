@@ -5,8 +5,9 @@ import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import { SETTINGS_NAMESPACE, type DshCodexConfig } from '../shared/config'
+import { DEFAULT_CONFIG, SETTINGS_NAMESPACE, type DshCodexConfig } from '../shared/config'
 import { createCodexFeatureManager } from './core/feature-manager'
+import { createGitGraphFeature } from './features/git-graph'
 import { createNavigatorFeature } from './features/navigator'
 import { createSidePanelsFeature } from './features/side-panels'
 import { createTerminalFeature } from './features/terminal'
@@ -47,6 +48,7 @@ export function apply(ctx: ClientContext): void {
     createNavigatorFeature(ctx, scope),
     createSidePanelsFeature(ctx, scope, t),
     createTerminalFeature(ctx, scope, t),
+    createGitGraphFeature(ctx, scope, t),
   ])
   ctx.effect(() => {
     features.activate()
@@ -63,14 +65,19 @@ function decodeConfig(value: unknown): DshCodexConfig | undefined {
   if (typeof candidate.terminalScrollback !== 'number' || !Number.isFinite(candidate.terminalScrollback)) return undefined
   if (typeof candidate.terminalFontSize !== 'number' || !Number.isFinite(candidate.terminalFontSize)) return undefined
   if (typeof candidate.panelDefaultWidth !== 'number' || !Number.isFinite(candidate.panelDefaultWidth)) return undefined
+  if (typeof candidate.panelMaxWidth !== 'number' || !Number.isFinite(candidate.panelMaxWidth)) return undefined
   if (typeof candidate.panelRememberTabs !== 'boolean') return undefined
   return {
     navigatorEnabled: candidate.navigatorEnabled,
     terminalEnabled: candidate.terminalEnabled,
+    gitGraphEnabled: typeof candidate.gitGraphEnabled === 'boolean'
+      ? candidate.gitGraphEnabled
+      : DEFAULT_CONFIG.gitGraphEnabled,
     terminalShell: candidate.terminalShell,
     terminalScrollback: candidate.terminalScrollback,
     terminalFontSize: candidate.terminalFontSize,
     panelDefaultWidth: candidate.panelDefaultWidth,
+    panelMaxWidth: candidate.panelMaxWidth,
     panelRememberTabs: candidate.panelRememberTabs,
   }
 }

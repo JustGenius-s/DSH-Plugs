@@ -7,40 +7,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { bridge, type DesktopUpdateState } from './bridge'
 import { ensureBadgeStyles } from './styles'
 
 // Inject the badge stylesheet once at module materialization (the same
 // <style data-plugin> contract DSH's own client bundles use).
 ensureBadgeStyles()
-
-interface DesktopUpdateInfo {
-  current: string
-  latest: string
-  url?: string
-}
-
-interface DesktopUpdateState {
-  app: DesktopUpdateInfo | null
-  dsh: DesktopUpdateInfo | null
-  checking: boolean
-  config: { checkApp: boolean; checkDsh: boolean }
-  versions: { app: string; dsh: string | null }
-}
-
-interface DshDesktopBridge {
-  getUpdateState(): Promise<DesktopUpdateState>
-  onUpdateState(listener: (state: DesktopUpdateState) => void): () => void
-  downloadAppUpdate(): Promise<void>
-  updateDsh(): Promise<void>
-  checkNow(): Promise<DesktopUpdateState>
-  skipVersion(kind: 'app' | 'dsh'): Promise<void>
-  setGate(kind: 'app' | 'dsh', enabled: boolean): Promise<DesktopUpdateState>
-  relaunch(): void
-}
-
-function bridge(): DshDesktopBridge | undefined {
-  return (window as unknown as { dshDesktop?: DshDesktopBridge }).dshDesktop
-}
 
 type Phase = 'idle' | 'updating' | 'done' | 'failed'
 

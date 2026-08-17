@@ -24,6 +24,7 @@ export function createSidePanelsFeature(
       const config = { ...DEFAULT_CONFIG, ...scope.getSnapshot().value }
       const store = createSidePanelsStore({
         defaultWidth: config.panelDefaultWidth,
+        maxWidth: config.panelMaxWidth,
         rememberTabs: config.panelRememberTabs,
       })
       ctx.provide('sidePanels', store)
@@ -56,6 +57,7 @@ export function createSidePanelsFeature(
         const next = { ...DEFAULT_CONFIG, ...scope.getSnapshot().value }
         store.setPreferences({
           defaultWidth: next.panelDefaultWidth,
+          maxWidth: next.panelMaxWidth,
           rememberTabs: next.panelRememberTabs,
         })
       })

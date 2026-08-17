@@ -1,12 +1,10 @@
 // Browser half of @just-genius/dsh-desktop-update.
 //
-// Renders up to two update badges into the sidebar's `sidebar.footer.action`
-// list slot (beside the Settings seat): a deep-blue circle for App updates, a
-// blue-violet circle for DSH runtime updates. All state comes from
-// `window.dshDesktop` — the contextBridge surface exposed by DSH-Desktop's
-// preload (check results, settings gates, skip-version actions all live in the
-// main process, which reads/writes <DSH_HOME>/settings.yaml itself). In a
-// plain browser the bridge is absent and nothing renders.
+// Renders the sidebar update badge (`sidebar.footer.action`) and, when the
+// desktop shell is present, contributes Check for Updates / Download /
+// Update DSH / Restart into the native `applicationMenu` and `tray` seats
+// via `window.dshDesktop.seats`. All state still comes from the preload
+// bridge; a plain browser has no `dshDesktop` and this half stays inert.
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-runtime/client'
@@ -15,6 +13,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 
 import { UpdateBadge } from './badge'
+import { installDesktopSeats } from './seats'
 
 /** Client services this plugin requires before `apply` runs. */
 export const inject = ['slots', 'locale'] as const
@@ -61,6 +60,7 @@ export function apply(ctx: Context) {
   // the built-in LocaleNamespaceMap.
   ctx.effect(() => ctx.locale.register(NS, 'zh', zh), 'desktop-update: zh dictionary')
   ctx.effect(() => ctx.locale.register(NS, 'en', en), 'desktop-update: en dictionary')
+  ctx.effect(() => installDesktopSeats(), 'desktop-update: native seats')
   ctx.slots.inject('sidebar.footer.action', () =>
     ctx.slots.register(
       {

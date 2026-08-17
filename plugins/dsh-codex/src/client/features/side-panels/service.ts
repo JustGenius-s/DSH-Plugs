@@ -130,10 +130,12 @@ const TABS_KEY_PREFIX = 'dsh-side-panels:tabs:'
 const LEGACY_ACTIVE_KEY_PREFIX = 'dsh-side-panels:active:'
 // Panel is a right-docked column, so its clamp mirrors AppFrame's details
 // column (DETAILS_MIN / DETAILS_MAX / DETAILS_DEFAULT in ui-layout columns.ts)
-// rather than a free-form width.
+// rather than a free-form width. The ceiling is config-driven
+// (`panelMaxWidth`); DEFAULT_MAX_WIDTH only seeds a store that never received
+// a preference.
 const DEFAULT_WIDTH = 360
 const MIN_WIDTH = 300
-const MAX_WIDTH = 520
+const DEFAULT_MAX_WIDTH = 720
 const MAX_RETAINED_SESSIONS = 8
 
 function readBool(key: string, fallback: boolean): boolean {
@@ -184,10 +186,6 @@ export interface SidePanelsStore extends SidePanelsService {
   setPreferences(preferences: SidePanelsStoreOptions): void
 }
 
-function clampWidth(width: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width))
-}
-
 /** Persisted per-session tab state. */
 interface StoredTabs {
   instances: SidePanelInstance[]
@@ -235,12 +233,16 @@ function readTabs(id: string | undefined, rememberTabs: boolean): StoredTabs {
 /** Create the store + service pair for one client activation. */
 export interface SidePanelsStoreOptions {
   defaultWidth?: number
+  maxWidth?: number
   rememberTabs?: boolean
 }
 
 export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): SidePanelsStore {
   let sessionId: string | undefined
   let rememberTabs = options.rememberTabs ?? true
+  let maxWidth = options.maxWidth ?? DEFAULT_MAX_WIDTH
+  const clampWidth = (width: number): number =>
+    Math.min(maxWidth, Math.max(MIN_WIDTH, width))
   // Panel-reported presentation facts, keyed by panel id. Held outside the
   // snapshot: descriptors are not user state and never persist.
   const descriptors = new Map<string, SidePanelDescriptor>()
@@ -426,6 +428,17 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     },
     setPreferences(preferences) {
       if (preferences.rememberTabs !== undefined) rememberTabs = preferences.rememberTabs
+      const nextMax = preferences.maxWidth ?? maxWidth
+      if (nextMax !== maxWidth) {
+        maxWidth = nextMax
+        // A lowered ceiling re-clamps the remembered width so the panel never
+        // renders wider than the new limit; a raised one leaves it alone.
+        const width = clampWidth(snapshot.width)
+        if (width !== snapshot.width) {
+          setSnapshot({ width })
+          writeStorage(WIDTH_KEY, String(width))
+        }
+      }
       if (preferences.defaultWidth === undefined || readStorage(WIDTH_KEY) !== null) return
       const width = clampWidth(preferences.defaultWidth)
       if (width !== snapshot.width) setSnapshot({ width })
