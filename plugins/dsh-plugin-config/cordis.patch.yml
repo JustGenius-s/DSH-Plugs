@@ -1,0 +1,11 @@
+# Bundle patch for @just-genius/dsh-plugin-config.
+#
+# Replaces the official read-only Plugin list tab. The host half exposes
+# inventory / disable / uninstall routes; the browser half owns `all`.
+
+- insert:
+    - id: dsh-plugin-config
+      name: '@just-genius/dsh-plugin-config'
+
+- id: ui-settings-plugin-inventory
+  disabled: true
