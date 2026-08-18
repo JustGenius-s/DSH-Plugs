@@ -24,6 +24,7 @@ import {
   type DshCodexConfig,
 } from '../../../shared/config'
 import { resolvePanelIcon } from './icons'
+import { launcherVisible, type LauncherStore } from './launcher-store'
 import type { SidePanelInstance, SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
 
@@ -79,13 +80,14 @@ interface ShellProps {
   ) => unknown
   useSessions: (selector: (state: never) => unknown) => unknown
   store: SidePanelsStore
+  launcher: LauncherStore
   entries: PanelEntriesApi
   scope?: SettingsScope<DshCodexConfig>
   t: (key: string) => string
 }
 
 export function SidePanelsShell(props: ShellProps) {
-  const { renderSlot, useSessions, store, entries, scope, t } = props
+  const { renderSlot, useSessions, store, launcher, entries, scope, t } = props
 
   const sessionId = useSessions((state) => {
     const s = state as { current?: string } | undefined
@@ -112,6 +114,8 @@ export function SidePanelsShell(props: ShellProps) {
     scopeSnapshot?.value?.panelLauncherWidth
       ?? DEFAULT_CONFIG.panelLauncherWidth,
   )
+  const launcherSnapshot = useSyncExternalStore(launcher.subscribe, launcher.getSnapshot)
+  const launcherShown = launcherVisible(launcherSnapshot)
 
   // Switch before paint so the header never renders one session's tabs under
   // another session's owner. Retained panes keep their original owner props.
@@ -189,6 +193,67 @@ export function SidePanelsShell(props: ShellProps) {
     }
     return undefined
   }, [open])
+
+  // Occlusion auto-hide: the card hangs over the conversation's top-right
+  // corner, which is empty chrome on wide windows but covers message rows
+  // once the centered chat column reaches under it. When any visible chat
+  // row intersects the card, the card conceals itself and the session header
+  // grows a toggle (LauncherToggle) to bring it back. The card hides with
+  // `visibility`, not `display`, so its rect stays measurable and scrolling
+  // the conversation out from under it auto-shows it again.
+  const launcherRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (open || tabs.length === 0) {
+      launcher.setOccluded(false)
+      return undefined
+    }
+    let raf: number | null = null
+    const measure = (): void => {
+      const card = launcherRef.current
+      const sp = document.querySelector('[data-conversation-scroll]')
+      if (card === null || sp === null) {
+        launcher.setOccluded(false)
+        return
+      }
+      const cardRect = card.getBoundingClientRect()
+      const spRect = sp.getBoundingClientRect()
+      const overScrollport = cardRect.left < spRect.right && cardRect.right > spRect.left
+        && cardRect.top < spRect.bottom && cardRect.bottom > spRect.top
+      let hit = false
+      if (overScrollport) {
+        for (const row of sp.querySelectorAll('[data-chat-anchor-key]')) {
+          const r = row.getBoundingClientRect()
+          if (r.bottom < spRect.top || r.top > spRect.bottom) continue
+          if (cardRect.left < r.right && cardRect.right > r.left
+            && cardRect.top < r.bottom && cardRect.bottom > r.top) {
+            hit = true
+            break
+          }
+        }
+      }
+      launcher.setOccluded(hit)
+    }
+    const schedule = (): void => {
+      raf ??= requestAnimationFrame(() => { raf = null; measure() })
+    }
+    measure()
+    // Capture-phase document scroll listener: scroll does not bubble, and the
+    // scrollport element is replaced on session switch, so a listener bound
+    // to the element found at mount would silently go stale.
+    document.addEventListener('scroll', schedule, { capture: true, passive: true })
+    window.addEventListener('resize', schedule)
+    const ro = new ResizeObserver(schedule)
+    ro.observe(document.documentElement)
+    const mo = new MutationObserver(schedule)
+    mo.observe(document.body, { childList: true, subtree: true })
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf)
+      document.removeEventListener('scroll', schedule, { capture: true })
+      window.removeEventListener('resize', schedule)
+      ro.disconnect()
+      mo.disconnect()
+    }
+  }, [open, tabs.length, launcher])
 
   // Resize mirrors AppFrame's DragHandle: pointer capture keeps the gesture on
   // the strip (no window listeners), deltas are rAF-throttled, and the base is
@@ -285,8 +350,9 @@ export function SidePanelsShell(props: ShellProps) {
     </div>
   )
 
-  const launcher = tabs.length > 0 ? (
+  const launcherCard = tabs.length > 0 ? (
     <div
+      ref={launcherRef}
       className="dsh-side-panels-launcher"
       style={{
         width: launcherWidth,
@@ -294,9 +360,14 @@ export function SidePanelsShell(props: ShellProps) {
       }}
       role="group"
       aria-label={t('aria.open')}
-      aria-hidden={open || undefined}
+      aria-hidden={open || !launcherShown || undefined}
       data-hidden={open || undefined}
+      data-concealed={(!open && !launcherShown) || undefined}
     >
+      {/* The visual card is an inner wrapper: the show/hide transform animates
+          here, so the OUTER box — the one the occlusion watch measures — never
+          moves, and auto-hide cannot oscillate off its own animation. */}
+      <div className="dsh-side-panels-launcher-card">
       {tabs.map((tab) => {
         const existing = live.filter(instance => instance.panelId === tab.id)
         const expanded = expandedLauncherId === tab.id && existing.length > 0
@@ -360,12 +431,13 @@ export function SidePanelsShell(props: ShellProps) {
           </div>
         )
       })}
+      </div>
     </div>
   ) : null
 
   return (
     <>
-      {launcher}
+      {launcherCard}
       <div
         className="dsh-side-panels"
         style={{ width: open ? snapshot.width : 0 }}

@@ -1,78 +1,95 @@
 // Browser half of @just-genius/dsh-desktop-update.
 //
-// Renders the sidebar update badge (`sidebar.footer.action`) and, when the
-// desktop shell is present, uses the three-family `window.dshDesktop` API:
-// `updates` for check/download/upgrade/relaunch, `seats` for applicationMenu
-// + tray, `notify` for system notifications. A plain browser has no
-// `dshDesktop` and this half stays inert.
+// Registers the `desktop-update` settings card into the Plugins section's
+// configurable tab (rc.7+ keyed `settings.plugin.item`; on older hosts the
+// card simply never dispatches) and, when the desktop shell is present, uses
+// the three-family `window.dshDesktop` API: `seats` for applicationMenu +
+// tray, `notify` for system notifications. A plain browser has no
+// `dshDesktop` and the native half stays inert.
 
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Declares the sidebar slot names (sidebar.footer.action among them).
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+// Type-only: the ctx.settingsScope Context merge (the implementation lives
+// in the Settings surface; binding happens on this plugin's fiber).
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: the keyed `settings.plugin.item` slot declaration (rc.7+).
+import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 
-import { UpdateBadge } from './badge'
+import { UpdateCard, type DesktopUpdateConfig } from './card'
 import { installDesktopSeats } from './seats'
 
 /** Client services this plugin requires before `apply` runs. */
-export const inject = ['slots', 'locale'] as const
+export const inject = ['slots', 'locale', 'connection', 'remote', 'settingsScope'] as const
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'desktop-update'
 
+/** Settings namespace this card edits (mirrors SETTINGS_NS in src/index.ts). */
+const SETTINGS_NS = 'desktop-update'
+
 const zh = {
-  'badge.title': '有可用更新',
-  'badge.label': '更新',
-  'badge.quiet.title': '版本与更新设置',
-  'panel.title': '软件更新',
-  'panel.app': 'DSH-Desktop',
-  'panel.dsh': 'DSH 运行时',
-  'action.update.to': '更新到',
-  'action.updating': '正在更新…',
-  'action.restart': '重启生效',
-  'action.skip': '跳过',
+  'card.title': '软件更新',
+  'card.description': 'DSH-Desktop 与 DSH 运行时的版本与自动检查。',
+  'card.expand': '展开',
+  'card.collapse': '折叠',
+  'card.unsaved': '未保存',
+  'card.readOnly': '当前设置文档为只读，无法保存修改。',
+  'card.save': '保存',
+  'card.saving': '保存中…',
+  'card.discard': '放弃',
+  'card.saveFailed': '保存失败，请重试。',
   'gate.app': '自动检查桌面更新',
+  'gate.appHint': '定期检查 DSH-Desktop 新版本（GitHub Releases）。',
   'gate.dsh': '自动检查 DSH 更新',
-  'state.failed': '更新失败，请稍后重试',
-  'state.done': '更新完成，重启应用后生效',
+  'gate.dshHint': '定期检查 DSH 运行时新版本（npm registry）。',
+  'version.app': 'DSH-Desktop',
+  'version.dsh': 'DSH 运行时',
+  'action.check': '检查更新',
+  'action.checking': '检查中…',
 }
 
 const en: Record<keyof typeof zh, string> = {
-  'badge.title': 'Update available',
-  'badge.label': 'Update',
-  'badge.quiet.title': 'Versions & update settings',
-  'panel.title': 'Software updates',
-  'panel.app': 'DSH-Desktop',
-  'panel.dsh': 'DSH runtime',
-  'action.update.to': 'Update to',
-  'action.updating': 'Updating…',
-  'action.restart': 'Restart to apply',
-  'action.skip': 'Skip',
+  'card.title': 'Software updates',
+  'card.description': 'Versions and automatic checks for DSH-Desktop and the DSH runtime.',
+  'card.expand': 'Expand',
+  'card.collapse': 'Collapse',
+  'card.unsaved': 'Unsaved',
+  'card.readOnly': 'The settings document is read-only; changes cannot be saved.',
+  'card.save': 'Save',
+  'card.saving': 'Saving…',
+  'card.discard': 'Discard',
+  'card.saveFailed': 'Save failed, please retry.',
   'gate.app': 'Check for app updates',
+  'gate.appHint': 'Periodically check GitHub Releases for a newer DSH-Desktop.',
   'gate.dsh': 'Check for DSH updates',
-  'state.failed': 'Update failed, please retry later',
-  'state.done': 'Update installed — restart the app to apply',
+  'gate.dshHint': 'Periodically check the npm registry for a newer DSH runtime.',
+  'version.app': 'DSH-Desktop',
+  'version.dsh': 'DSH runtime',
+  'action.check': 'Check now',
+  'action.checking': 'Checking…',
 }
 
-export function apply(ctx: Context) {
+export function apply(ctx: ClientContext): void {
   // Free-form overload: our dictionary namespace is plugin-owned, not part of
   // the built-in LocaleNamespaceMap.
   ctx.effect(() => ctx.locale.register(NS, 'zh', zh), 'desktop-update: zh dictionary')
   ctx.effect(() => ctx.locale.register(NS, 'en', en), 'desktop-update: en dictionary')
   ctx.effect(() => installDesktopSeats(), 'desktop-update: native seats')
-  ctx.slots.inject('sidebar.footer.action', () =>
+
+  // Bound on this fiber: disposal, invalidation subscriptions, and the
+  // initial Host read are owned by the binder's ctx.effect.
+  const scope = ctx.settingsScope.bind<DesktopUpdateConfig>({ namespace: SETTINGS_NS })
+  ctx.slots.inject('settings.plugin.item', () =>
     ctx.slots.register(
       {
-        name: 'sidebar.footer.action',
-        id: 'desktop-update',
-        order: 0,
-        // Plugin-owned dictionary namespace; the upstream locale union only
-        // lists built-in namespaces, so widen here (same escape hatch the
-        // locale service's free-form register overload documents).
+        name: 'settings.plugin.item',
+        key: SETTINGS_NS,
+        // Plugin-owned dictionary namespace; widen as with the free-form
+        // locale register overload above.
         locale: NS as never,
+        inject: () => ({ scope }),
       },
-      UpdateBadge as never,
+      UpdateCard as never,
     ),
   )
 }

@@ -31,42 +31,39 @@ function Group(props: { title: string; children: ReactNode }) {
   )
 }
 
+// 与官方 fields 开关（及 dsh-desktop-update 卡片里的复刻）逐 token 对齐，
+// 保证所有插件设置页的 Switch 尺寸、配色、动效完全一致。
+const SWITCH_STYLES = `
+.dsh-codex-switch{appearance:none;margin:0;flex:none;width:32px;height:18px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);position:relative;cursor:pointer;transition:background .16s,border-color .16s}
+.dsh-codex-switch::after{content:'';position:absolute;top:1px;left:1px;width:14px;height:14px;border-radius:50%;background:var(--dsw-alias-label-tertiary);transition:transform .16s,background .16s}
+.dsh-codex-switch:checked{background:var(--dsw-alias-brand-primary);border-color:var(--dsw-alias-brand-primary)}
+.dsh-codex-switch:checked::after{transform:translateX(14px);background:var(--dsw-alias-bg-layer-3,#fff)}
+.dsh-codex-switch:hover:not(:disabled):not(:checked){border-color:var(--dsw-alias-label-dimmed)}
+.dsh-codex-switch:disabled{opacity:.4;cursor:default}
+.dsh-codex-switch:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
+`
+
+function ensureSwitchStyles() {
+  if (typeof document === 'undefined') return
+  if (document.head.querySelector('style[data-dsh-codex-switch]')) return
+  const el = document.createElement('style')
+  el.setAttribute('data-dsh-codex-switch', '')
+  el.textContent = SWITCH_STYLES
+  document.head.appendChild(el)
+}
+
 function SettingToggle(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   const { label, checked, onChange } = props
+  ensureSwitchStyles()
   return (
-    <button
-      type="button"
+    <input
+      type="checkbox"
       role="switch"
       aria-label={label}
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: checked ? 'flex-end' : 'flex-start',
-        flex: '0 0 auto',
-        width: 36,
-        height: 20,
-        padding: 2,
-        border: 'none',
-        borderRadius: 999,
-        background: checked ? 'var(--dsw-alias-state-business-primary)' : 'var(--dsw-alias-bg-layer-3)',
-        cursor: 'pointer',
-        transition: 'background 120ms ease',
-      }}
-    >
-      <span
-        aria-hidden="true"
-        style={{
-          display: 'block',
-          width: 16,
-          height: 16,
-          borderRadius: 999,
-          background: 'var(--dsw-alias-bg-base, #ffffff)',
-          boxShadow: '0 1px 2px rgba(0, 0, 0, .18)',
-        }}
-      />
-    </button>
+      className="dsh-codex-switch"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+    />
   )
 }
 

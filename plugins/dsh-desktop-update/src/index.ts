@@ -2,15 +2,15 @@
 //
 // Owns the `desktop-update` settings namespace: two booleans gating the
 // desktop bridge's background checks (App 本体 / DSH 运行时). Registration
-// puts the values under standard schema validation in <DSH_HOME>/settings.yaml
-// — DSH-Desktop's main process reads/writes that same section directly (the
-// apiproxy settings.* whitelist is a hardcoded upstream constant, so this
-// namespace never rides the generic settings RPC; the badge toggles go
-// through the preload bridge instead).
+// puts the values under standard schema validation in <DSH_HOME>/settings.yaml.
+// Since DSH rc.7 the api-proxy serves every registered namespace, so the
+// settings card edits these gates through the generic settings RPC;
+// DSH-Desktop's main process watches the same settings.yaml section, and
+// both write paths converge on the one document.
 //
-// Update detection itself also lives in the main process (it already has the
-// fetchers and, crucially, knows the App's own version); this half carries no
-// checker. The badge subscribes to state over the preload bridge.
+// Update detection itself lives in the main process (it already has the
+// fetchers and, crucially, knows the App's own version); this half carries
+// no checker. The card reads version state over the preload bridge.
 
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'

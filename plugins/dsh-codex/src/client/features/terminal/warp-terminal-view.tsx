@@ -10,7 +10,7 @@
 // active, matching Warp's AltScreen.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
+import type { ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import type {
   BlockContext,
@@ -109,6 +109,14 @@ function formatDuration(ms: number): string {
   const seconds = ms / 1000
   const rounded = seconds < 1 ? Math.round(seconds * 1000) / 1000 : Math.round(seconds * 100) / 100
   return '(' + rounded + 's)'
+}
+
+const ANSI_SEQUENCE = /\x1b\[[0-9;:?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-2]|\x1b[=>#][0-9]?|\x1b[@-_]/g
+const CONTROL_CHARS = /[\x00-\x1f\x7f]/g
+
+/** Whether a PTY chunk carries printable text once escape sequences and control characters are ignored. */
+function hasVisibleContent(text: string): boolean {
+  return text.replace(ANSI_SEQUENCE, '').replace(CONTROL_CHARS, '').length > 0
 }
 
 function HeaderSegments({ block }: { block: Block }) {
@@ -238,6 +246,24 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const readySeenRef = useRef(false)
   const retryCountRef = useRef(0)
   const retryTimerRef = useRef(0)
+  const eraseScrollbackBufRef = useRef('')
+  // Clearing commands (`clear`, or ED 3 in the output stream) wipe blocks
+  // whose block-end is still in flight. Count them so back-to-back clears
+  // each swallow exactly one block-end instead of one boolean being consumed
+  // by the first marker while the second clear's marker is still coming.
+  const pendingClearsRef = useRef(0)
+  // Until a clearing command's block-end arrives, its output is only echo and
+  // erase sequences: drop everything for an exact `clear`, or only chunks
+  // without visible text after a stream ED 3 (so `clear; ls` keeps ls output).
+  const clearDropModeRef = useRef<'all' | 'blank' | null>(null)
+  const editorBlockRef = useRef<HTMLDivElement | null>(null)
+  const [editorHeight, setEditorHeight] = useState(0)
+  // While a real command block is in flight the editor hides (Warp shows the
+  // next input only once the command finishes). Anonymous output blocks —
+  // e.g. background-job output with no command of their own — keep it visible.
+  const runningBlock = runningId === null ? undefined : blocks.find((block) => block.id === runningId)
+  const editorHidden = altActive || (runningBlock !== undefined && runningBlock.command !== '')
+  const editorWasHiddenRef = useRef(false)
 
   blocksRef.current = blocks
   draftRef.current = draft
@@ -465,6 +491,38 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       }
     }
   }
+  // `clear` must wipe the whole transcript, not just the running block's
+  // grid: in the block model the "scrollback" IS the earlier blocks. Two
+  // entry points share this reset — the runDraft command check (covers
+  // terminfo entries whose clear is only H+ED2) and the ED 3 interception
+  // below (covers tput/printf and modern ncurses clear, which appends 3J).
+  const clearTranscript = useCallback(() => {
+    const running = runningIdRef.current
+    // A command block is in flight when its command text is set; a prompt
+    // block (anonymous, command '') has no block-end coming.
+    const inFlight = running !== null
+      && (blocksRef.current.find((block) => block.id === running)?.command ?? '') !== ''
+    for (const grid of gridsRef.current.values()) disposeGrid(grid)
+    gridsRef.current.clear()
+    startedAtRef.current.clear()
+    blocksRef.current = []
+    setBlocks([])
+    selectionRef.current = null
+    runningIdRef.current = null
+    setRunningId(null)
+    // The in-flight command's block no longer exists: swallow its block-end,
+    // and drop its remaining output (echo, erase sequences) instead of
+    // collecting it into a leftover anonymous block with a header.
+    if (inFlight) {
+      pendingClearsRef.current += 1
+      if (clearDropModeRef.current !== 'all') clearDropModeRef.current = 'blank'
+    }
+    eraseScrollbackBufRef.current = ''
+    stickToBottomRef.current = true
+    rebuildDoc()
+    schedulePaint()
+  }, [rebuildDoc, schedulePaint])
+
   const appendOutput = useCallback((text: string) => {
     answerTermcapQueries(text)
     answerOscQueries(text)
@@ -481,6 +539,33 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       })
       return
     }
+
+    // An exact `clear` command's whole output burst is echo + erase sequences.
+    if (clearDropModeRef.current === 'all') return
+    let pending = eraseScrollbackBufRef.current + text
+    eraseScrollbackBufRef.current = ''
+    const eraseIndex = pending.lastIndexOf('\x1b[3J')
+    if (eraseIndex !== -1) {
+      // ED 3 erases the scrollback — which in the block model IS the earlier
+      // blocks. Bytes before it belonged to blocks that no longer exist; only
+      // the tail can be new content (e.g. ls output in `clear; ls`). ED 2 is
+      // deliberately left through: full-screen redrawers like watch rely on
+      // it for in-place repaints.
+      clearTranscript()
+      pending = pending.slice(eraseIndex + '\x1b[3J'.length)
+    }
+    // A trailing partial prefix is held for the next chunk, since PTY writes
+    // can split the sequence anywhere.
+    for (const prefix of ['\x1b[3', '\x1b[', '\x1b']) {
+      if (pending.endsWith(prefix)) {
+        eraseScrollbackBufRef.current = prefix
+        pending = pending.slice(0, -prefix.length)
+        break
+      }
+    }
+    if (pending.length === 0) return
+    if (clearDropModeRef.current === 'blank' && !hasVisibleContent(pending)) return
+    const output = pending
 
     let targetId = runningIdRef.current
     if (targetId === null) {
@@ -505,7 +590,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     }
     // write() is async — detect the alt screen only after it completes,
     // otherwise the buffer type is still 'normal' and vim/less never register.
-    writeToGrid(grid, text, storeOpts(), () => {
+    writeToGrid(grid, output, storeOpts(), () => {
       const bufType = grid.term.buffer.active.type
       if (bufType === 'alternate' && !altActiveRef.current) {
         altTermRef.current = grid.term
@@ -523,7 +608,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       rebuildDoc()
       schedulePaint()
     })
-  }, [rebuildDoc, schedulePaint])
+  }, [rebuildDoc, schedulePaint, clearTranscript])
 
   const setDraftWithCaret = useCallback((value: string, caret: number, focus = false) => {
     draftRef.current = value
@@ -641,6 +726,15 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   }, [setDraftWithCaret])
 
   const completeRunning = useCallback((exitCode: number) => {
+    if (pendingClearsRef.current > 0) {
+      pendingClearsRef.current -= 1
+      if (pendingClearsRef.current === 0) clearDropModeRef.current = null
+      eraseScrollbackBufRef.current = ''
+      // A pure clear leaves no block to complete. A `clear; ls` style command
+      // may have accumulated post-clear output in a fresh block, which then
+      // inherits the cleared command's block-end.
+      if (runningIdRef.current === null) return
+    }
     const targetId = runningIdRef.current
     if (targetId === null) return
     const startedAt = startedAtRef.current.get(targetId)
@@ -792,6 +886,9 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     setRunningId(null)
     runningIdRef.current = null
     startedAtRef.current.clear()
+    eraseScrollbackBufRef.current = ''
+    pendingClearsRef.current = 0
+    clearDropModeRef.current = null
     window.clearTimeout(retryTimerRef.current)
     const sessionKey = sessionId
     if (lastSessionKeyRef.current !== sessionKey) {
@@ -867,28 +964,42 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     setCompletionMenu(null)
     setGhost('')
     completionRequestRef.current = null
-    const id = newBlockId()
-    startedAtRef.current.set(id, Date.now())
-    const block: Block = {
-      id,
-      command,
-      context: currentContextRef.current,
-      startedAt: Date.now(),
-      durationMs: null,
-      status: 'running',
-      exitCode: null,
+    // `clear` leaves no block of its own: the transcript resets, and the
+    // command's whole output burst (echo + erase sequences) plus the
+    // block-end it still produces are swallowed. Covers terminfo entries
+    // whose clear is only H+ED2 (no ED 3 for the stream interception).
+    if (command.trim() === 'clear') {
+      clearTranscript()
+      pendingClearsRef.current += 1
+      clearDropModeRef.current = 'all'
+    } else {
+      // A stale pending clear (a lost block-end) must not eat this command's
+      // output or its block-end.
+      pendingClearsRef.current = 0
+      clearDropModeRef.current = null
+      const id = newBlockId()
+      startedAtRef.current.set(id, Date.now())
+      const block: Block = {
+        id,
+        command,
+        context: currentContextRef.current,
+        startedAt: Date.now(),
+        durationMs: null,
+        status: 'running',
+        exitCode: null,
+      }
+      setBlocks((prev) => [...prev, block])
+      gridsRef.current.set(id, newGrid(id))
+      runningIdRef.current = id
+      setRunningId(id)
     }
-    setBlocks((prev) => [...prev, block])
-    gridsRef.current.set(id, newGrid(id))
-    runningIdRef.current = id
-    setRunningId(id)
     draftRef.current = ''
     setDraft('')
     const message: ClientMessage = { type: 'input', data: command + '\n' }
     ws.send(JSON.stringify(message))
     rebuildDoc()
     schedulePaint()
-  }, [draft, rebuildDoc, schedulePaint])
+  }, [draft, rebuildDoc, schedulePaint, clearTranscript])
 
   const killRunning = useCallback(() => {
     const ws = wsRef.current
@@ -921,6 +1032,42 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [altActive])
+
+  // While the editor is hidden (command running), keystrokes land on the
+  // focused scroll surface and go straight to the PTY, like a normal
+  // terminal — so interactive commands (read, sudo, ssh) still get stdin.
+  // Cmd/Ctrl+C with an active selection stays "copy", not SIGINT.
+  const onScrollKeyDown = useCallback((event: ReactKeyboardEvent) => {
+    if (altActiveRef.current || runningIdRef.current === null) return
+    const key = event.key.toLowerCase()
+    if ((event.metaKey || event.ctrlKey) && key === 'c' && selectionRef.current !== null) return
+    const ws = wsRef.current
+    if (ws === null || ws.readyState !== WebSocket.OPEN) return
+    const data = keyToBytes(event.nativeEvent)
+    if (data === null) return
+    event.preventDefault()
+    const message: ClientMessage = { type: 'input', data }
+    ws.send(JSON.stringify(message))
+  }, [])
+
+  // Paste with the editor hidden targets the scroll surface (never an
+  // editable element), so forward the clipboard text as stdin here.
+  useEffect(() => {
+    const onPaste = (event: ClipboardEvent) => {
+      if (runningIdRef.current === null || altActiveRef.current) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      const text = event.clipboardData?.getData('text') ?? ''
+      if (text.length === 0) return
+      const ws = wsRef.current
+      if (ws === null || ws.readyState !== WebSocket.OPEN) return
+      event.preventDefault()
+      const message: ClientMessage = { type: 'input', data: text }
+      ws.send(JSON.stringify(message))
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [])
 
   const pointToCell = useCallback((clientX: number, clientY: number): { row: number; col: number } => {
     const canvas = canvasRef.current
@@ -1001,11 +1148,42 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     schedulePaint()
   }, [schedulePaint])
 
+  // The editor rides the document as its last block, so its height is part of
+  // the scrollable extent. Measured (not computed from draftRows) because the
+  // chips row wraps and the textarea caps at 8 rows. Hidden while a command
+  // runs — then it contributes nothing.
+  useEffect(() => {
+    const el = editorBlockRef.current
+    if (el === null) {
+      setEditorHeight(0)
+      return
+    }
+    const update = () => setEditorHeight(el.getBoundingClientRect().height)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [editorHidden])
+
+  // Focus follows the editor: while it is hidden the scroll surface receives
+  // keystrokes (forwarded to the PTY); when the command finishes and the
+  // editor returns, focus moves back so typing resumes immediately.
+  useEffect(() => {
+    if (editorHidden) {
+      editorWasHiddenRef.current = true
+      scrollRef.current?.focus()
+      return
+    }
+    if (!editorWasHiddenRef.current) return
+    editorWasHiddenRef.current = false
+    textareaRef.current?.focus()
+  }, [editorHidden])
+
   useEffect(() => {
     const el = scrollRef.current
     if (el === null) return
     if (stickToBottomRef.current) el.scrollTop = el.scrollHeight
-  }, [doc, blocks.length])
+  }, [doc, blocks.length, editorHeight])
 
   const draftRows = Math.min(8, Math.max(1, draft.split('\n').length))
   const chips = contextChips(currentContext)
@@ -1014,6 +1192,17 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const rangeById = new Map((doc?.ranges ?? []).map((r) => [r.id, r]))
   const viewportTop = scrollTop
   const viewportBottom = scrollTop + viewHeight
+  // The editor's on-screen position decides the completion menu's direction:
+  // downward while the editor sits high, upward once it nears the bottom edge.
+  // Computed at render (not in an effect) so the menu never flashes open in
+  // the wrong direction for a frame.
+  const menuUp = (() => {
+    if (completionMenu === null) return false
+    const block = editorBlockRef.current
+    const scroll = scrollRef.current
+    if (block === null || scroll === null) return false
+    return block.getBoundingClientRect().bottom + 200 > scroll.getBoundingClientRect().bottom
+  })()
   return (
     <div className="dsh-warp-terminal">
       {connState === 'disconnected' && (
@@ -1025,7 +1214,62 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         </div>
       )}
 
-      <div className="dsh-warp-terminal-block dsh-warp-terminal-block-editing">
+      <div className="dsh-warp-terminal-scroll" ref={scrollRef} onScroll={onScroll} tabIndex={-1} onKeyDown={onScrollKeyDown}>
+        <div className="dsh-warp-terminal-doc" style={{ height: totalHeight + editorHeight }}>
+          <div className="dsh-warp-terminal-viewport" style={{ height: viewHeight }}>
+            <canvas
+              ref={canvasRef}
+              className="dsh-warp-canvas"
+              onMouseDown={onMouseDown}
+            />
+
+            <div className="dsh-warp-overlay-layer" ref={overlayLayerRef}>
+            {!altActive && blocks.map((block) => {
+              const range = rangeById.get(block.id)
+              if (range === undefined) return null
+              // Overlays use document coordinates; the layer itself is shifted
+              // by -scrollTop (transform) in the same frame as the canvas.
+              const top = range.headerRow * metrics.cellHeight
+              const height = Math.max(metrics.cellHeight, (range.endRow - range.headerRow) * metrics.cellHeight)
+              if (top + height < scrollTop - 200 || top > scrollTop + viewHeight + 200) return null
+              const isRunning = block.status === 'running'
+              const hasHeader = block.context !== null || block.durationMs !== null
+              return (
+                <div
+                  key={block.id}
+                  className={[
+                    'dsh-warp-block-overlay',
+                    isRunning ? 'dsh-warp-block-running' : '',
+                    block.status === 'failed' ? 'dsh-warp-block-failed' : '',
+                  ].filter(Boolean).join(' ')}
+                  style={{ top, height }}
+                >
+                <div className="dsh-warp-block-chrome">
+                  {hasHeader && (
+                    <div className="dsh-warp-terminal-prompt-line">
+                      <HeaderSegments block={block} />
+                    </div>
+                  )}
+                  <div className="dsh-warp-terminal-block-actions">
+                    <button type="button" className="dsh-warp-terminal-iconbtn" title={t('block.copy')} aria-label={t('block.copy')} onClick={() => void copyCommand(block.command)}>⧉</button>
+                    <button type="button" className="dsh-warp-terminal-iconbtn" title={t('block.rerun')} aria-label={t('block.rerun')} onClick={() => rerun(block.command)}>↻</button>
+                    {isRunning && (
+                      <button type="button" className="dsh-warp-terminal-iconbtn dsh-warp-terminal-iconbtn-kill" title={t('editor.kill')} aria-label={t('editor.kill')} onClick={killRunning}>■</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+            </div>
+          </div>
+
+      {!editorHidden && (
+      <div
+        ref={editorBlockRef}
+        className="dsh-warp-terminal-block dsh-warp-terminal-block-editing"
+        style={{ top: totalHeight }}
+      >
         {chips.length > 0 && (
           <div className="dsh-warp-terminal-chips">
             {chips.map((chip) => (<span key={chip.key} className="dsh-warp-terminal-chip">{chip.node}</span>))}
@@ -1229,7 +1473,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
             }}
           />
           {completionMenu !== null && (
-            <div className="dsh-warp-terminal-completion-menu" role="listbox">
+            <div className={'dsh-warp-terminal-completion-menu' + (menuUp ? ' dsh-warp-terminal-completion-menu-up' : '')} role="listbox">
               {visibleCompletionRows(completionMenu).map((row) => (
                 <button
                   key={row.candidate.label + ':' + row.candidate.kind + ':' + String(row.index)}
@@ -1258,56 +1502,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
           )}
         </div>
       </div>
-
-      <div className="dsh-warp-terminal-scroll" ref={scrollRef} onScroll={onScroll}>
-        <div className="dsh-warp-terminal-doc" style={{ height: totalHeight }}>
-          <div className="dsh-warp-terminal-viewport" style={{ height: viewHeight }}>
-            <canvas
-              ref={canvasRef}
-              className="dsh-warp-canvas"
-              onMouseDown={onMouseDown}
-            />
-
-            <div className="dsh-warp-overlay-layer" ref={overlayLayerRef}>
-            {!altActive && blocks.map((block) => {
-              const range = rangeById.get(block.id)
-              if (range === undefined) return null
-              // Overlays use document coordinates; the layer itself is shifted
-              // by -scrollTop (transform) in the same frame as the canvas.
-              const top = range.headerRow * metrics.cellHeight
-              const height = Math.max(metrics.cellHeight, (range.endRow - range.headerRow) * metrics.cellHeight)
-              if (top + height < scrollTop - 200 || top > scrollTop + viewHeight + 200) return null
-              const isRunning = block.status === 'running'
-              const hasHeader = block.context !== null || block.durationMs !== null
-              return (
-                <div
-                  key={block.id}
-                  className={[
-                    'dsh-warp-block-overlay',
-                    isRunning ? 'dsh-warp-block-running' : '',
-                    block.status === 'failed' ? 'dsh-warp-block-failed' : '',
-                  ].filter(Boolean).join(' ')}
-                  style={{ top, height }}
-                >
-                <div className="dsh-warp-block-chrome">
-                  {hasHeader && (
-                    <div className="dsh-warp-terminal-prompt-line">
-                      <HeaderSegments block={block} />
-                    </div>
-                  )}
-                  <div className="dsh-warp-terminal-block-actions">
-                    <button type="button" className="dsh-warp-terminal-iconbtn" title={t('block.copy')} aria-label={t('block.copy')} onClick={() => void copyCommand(block.command)}>⧉</button>
-                    <button type="button" className="dsh-warp-terminal-iconbtn" title={t('block.rerun')} aria-label={t('block.rerun')} onClick={() => rerun(block.command)}>↻</button>
-                    {isRunning && (
-                      <button type="button" className="dsh-warp-terminal-iconbtn dsh-warp-terminal-iconbtn-kill" title={t('editor.kill')} aria-label={t('editor.kill')} onClick={killRunning}>■</button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-            </div>
-          </div>
+      )}
         </div>
       </div>
     </div>

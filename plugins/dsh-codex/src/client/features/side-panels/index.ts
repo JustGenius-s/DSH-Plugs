@@ -6,6 +6,8 @@ import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import './contract'
+import { createLauncherStore } from './launcher-store'
+import { LauncherToggle } from './launcher-toggle'
 import { createSidePanelsStore } from './service'
 import { SidePanelsShell } from './shell'
 import type { PanelEntriesApi, PanelTabInfo } from './shell'
@@ -28,6 +30,7 @@ export function createSidePanelsFeature(
         rememberTabs: config.panelRememberTabs,
       })
       ctx.provide('sidePanels', store)
+      const launcher = createLauncherStore()
 
       let cachedVersion = -1
       let cachedList: PanelTabInfo[] = []
@@ -74,15 +77,31 @@ export function createSidePanelsFeature(
                 owner: {},
               },
             } as never,
-            inject: () => ({ store, entries, scope, t }),
+            inject: () => ({ store, launcher, entries, scope, t }),
           },
           SidePanelsShell as never,
+        ),
+      )
+
+      // The header toggle for the occlusion auto-hide: one button in the
+      // session header's action row, visible only while the card is hidden
+      // or a manual override is in effect.
+      const disposeLauncherToggle = ctx.slots.inject('conversation.session.header.actions', () =>
+        ctx.slots.register(
+          {
+            name: 'conversation.session.header.actions',
+            id: 'codex-launcher-toggle',
+            order: 100,
+            inject: () => ({ launcher, t }),
+          },
+          LauncherToggle as never,
         ),
       )
 
       return () => {
         unsubscribeSettings()
         disposeShell()
+        disposeLauncherToggle()
       }
     },
   }

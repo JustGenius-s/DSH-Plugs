@@ -105,6 +105,10 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
    from ui-conversation's DetailsPanel .close. */
 .dsh-side-panels-icon-button{display:grid;flex:none;place-items:center;width:28px;height:28px;border:none;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
 .dsh-side-panels-icon-button:hover{background:var(--dsw-alias-interactive-bg-hover)}
+/* Pressed (the header toggle while the launcher card is shown): the native
+   toggle recipe from ui-trajectory's TrajectoryToolbar — primary ink over the
+   hover fill, so the on-state reads as held, not just hovered. */
+.dsh-side-panels-icon-button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 
 /* New-instance menu: the DSH menu dropdown surface (Menu.module.css). */
 .dsh-side-panels-add{position:relative;flex:none;display:flex}
@@ -122,23 +126,34 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 /* Collapsed launcher: a titleless floating card in the top-right corner, one
    row per registered panel. A panel that already has open instances grows a
    chevron; the nested list is existing tabs, not a second copy of the catalog.
-   Surface is the SIDEBAR fill, not the menu fill: this card stands in for the
-   panel column itself while it is collapsed, so it belongs to the sidebar
-   family rather than the transient-overlay family. It also keeps the card in
-   the same tonal register as the rest of the chrome — sidebar-fill is one step
-   off the base (dark 900 = rgb(27,27,28) over base 950 = rgb(21,21,23), i.e.
-   correctly lighter as it rises), whereas the menu fill (layer-3 = rgb(53,54,56))
-   is tuned for a short-lived dropdown and reads as a grey slab when parked
-   persistently over the conversation.
-   Geometry follows the menu dropdown (Menu.module.css) for the inverted
-   hairline, r12 and shadow-lv3, but the two paddings are deliberately OFF that
-   sheet: the card insets 12px (menu uses 4) and rows inset 4px vertical /
-   8px horizontal (menu cells use 8/10). Rows keep min-h 40 and the 14/22 primary ink, so the row box is
+   Surface copies the composer input card (InputBar.module.css, figma Input
+   75:8208): --dsw-specific-input-major fill over a
+   --dsw-alias-border-l2-darkmode-thin hairline. The card floats over the same
+   conversation the composer docks into, so matching the composer's surface
+   keeps the two in one tonal register — neither the too-quiet sidebar-fill
+   nor the louder button-elevated-fill.
+   Geometry keeps the menu dropdown's r12 and shadow-lv3, but the two
+   paddings are deliberately OFF that sheet: the card insets 12px (menu
+   uses 4) and rows inset 4px vertical / 8px horizontal (menu cells use
+   8/10). Rows keep min-h 40 and the 14/22 primary ink, so the row box is
    unchanged — the 4px only pulls its hover fill in tighter. */
 /* Under the panel (z 40) so closing the column reveals the card the
    way AppFrame's collapsed rail is the same track, just narrower. */
-.dsh-side-panels-launcher{position:fixed;top:68px;right:28px;z-index:39;box-sizing:border-box;display:flex;flex-direction:column;gap:0;width:220px;padding:12px;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-sidebar-fill);box-shadow:var(--dsw-shadow-lv3);font-family:var(--dsw-font-family);pointer-events:auto;-webkit-app-region:no-drag}
-.dsh-side-panels-launcher[data-hidden]{pointer-events:none}
+/* Outer box is positioning + measurement only. The visual card is the inner
+   wrapper: the show/hide transform animates there, so this box's rect — the
+   one the occlusion watch measures — never moves, and auto-hide cannot
+   oscillate off its own exit animation. */
+.dsh-side-panels-launcher{position:fixed;top:68px;right:28px;z-index:39;box-sizing:border-box;width:220px;font-family:var(--dsw-font-family);pointer-events:auto;-webkit-app-region:no-drag}
+.dsh-side-panels-launcher[data-hidden],
+.dsh-side-panels-launcher[data-concealed]{pointer-events:none}
+.dsh-side-panels-launcher-card{display:flex;flex-direction:column;gap:0;padding:12px;border:1px solid var(--dsw-alias-border-l2-darkmode-thin);border-radius:12px;background:var(--dsw-specific-input-major);box-shadow:var(--dsw-shadow-lv3);transform-origin:top right;transition:opacity .18s var(--ds-ease-in-out),transform .18s var(--ds-ease-in-out),visibility .18s}
+/* Hidden (panel open) or concealed (occlusion auto-hide / header toggle):
+   shrink toward the top-right corner while sliding out, the way Codex's
+   floating card exits. The card stays mounted and the outer box measurable,
+   so the occlusion watch keeps running and scrolling the conversation out
+   from under it (or a manual toggle) brings it back without a remount. */
+.dsh-side-panels-launcher[data-hidden]>.dsh-side-panels-launcher-card,
+.dsh-side-panels-launcher[data-concealed]>.dsh-side-panels-launcher-card{opacity:0;visibility:hidden;transform:translate(12px,-6px) scale(.92)}
 .dsh-side-panels-launcher-group{display:flex;flex-direction:column;min-width:0}
 /* One catalog row: label + optional chevron share a single flex line.
    Hover fill lives on the row so the chevron is not a second plate.
@@ -164,6 +179,7 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 @media (prefers-reduced-motion: reduce) {
   #root{transition:none}
   .dsh-side-panels{transition:none}
+  .dsh-side-panels-launcher-card{transition:none}
   .dsh-side-panels-launcher-expand svg{transition:none}
   .dsh-side-panels-launcher-tabs{transition:none}
 }
