@@ -8,6 +8,7 @@ export interface DshCodexConfig {
   conversationCollapseEnabled: boolean
   terminalEnabled: boolean
   gitGraphEnabled: boolean
+  filesEnabled: boolean
   terminalShell: TerminalShell
   terminalScrollback: number
   terminalFontSize: number
@@ -28,6 +29,7 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   conversationCollapseEnabled: true,
   terminalEnabled: true,
   gitGraphEnabled: true,
+  filesEnabled: true,
   terminalShell: 'auto',
   terminalScrollback: 5000,
   terminalFontSize: 12,
@@ -42,6 +44,7 @@ export const CODEX_CONFIG_FIELDS: readonly CodexConfigField[] = [
   'conversationCollapseEnabled',
   'terminalEnabled',
   'gitGraphEnabled',
+  'filesEnabled',
   'terminalShell',
   'terminalScrollback',
   'terminalFontSize',
@@ -97,6 +100,9 @@ export function parseCodexConfig(value: unknown): DshCodexConfig | undefined {
     gitGraphEnabled: typeof candidate.gitGraphEnabled === 'boolean'
       ? candidate.gitGraphEnabled
       : DEFAULT_CONFIG.gitGraphEnabled,
+    filesEnabled: typeof candidate.filesEnabled === 'boolean'
+      ? candidate.filesEnabled
+      : DEFAULT_CONFIG.filesEnabled,
     terminalShell: candidate.terminalShell,
     terminalScrollback: clampInt(
       candidate.terminalScrollback,

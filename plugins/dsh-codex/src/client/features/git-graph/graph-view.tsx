@@ -7,9 +7,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   DEFAULT_GRAPH_LIMIT,
-  GIT_GRAPH_COMMIT_PATH,
   GIT_GRAPH_PATH,
-  type GitGraphCommitResponse,
   type GitGraphRef,
   type GitGraphResponse,
   type GitGraphRow,
@@ -21,6 +19,7 @@ import {
   toggleScope,
 } from './branch-filter'
 import { CommitContextMenu, openCommitMenu, type CommitMenuState } from './commit-menu'
+import { GitGraphDetail } from './detail-files'
 import { layoutGraph, type GraphEdge, type LaidOutNode } from './layout'
 import { ensureGitGraphStyles } from './styles'
 
@@ -40,6 +39,8 @@ const LANE_COLORS = [
 export interface GitGraphViewProps {
   cwd?: string
   t: (key: string) => string
+  /** Open the `files` panel on a file; sha undefined = working tree. */
+  onOpenFile?: (file: string, sha?: string) => void
 }
 
 interface GraphState {
@@ -63,10 +64,10 @@ const EMPTY: GraphState = {
 }
 
 export function GitGraphView(props: GitGraphViewProps) {
-  const { cwd, t } = props
+  const { cwd, t, onOpenFile } = props
   const [state, setState] = useState<GraphState>(EMPTY)
   const [selected, setSelected] = useState<string | undefined>()
-  const [detail, setDetail] = useState<string | undefined>()
+  const [detail, setDetail] = useState<{ sha?: string; title: string } | undefined>()
   const [menu, setMenu] = useState<CommitMenuState | null>(null)
   const [toast, setToast] = useState<{ seq: number; text: string; kind: 'ok' | 'error' } | null>(null)
   const toastSeq = useRef(0)
@@ -99,8 +100,7 @@ export function GitGraphView(props: GitGraphViewProps) {
       setState((current) => ({ ...current, status: 'loading' }))
       setSelected(undefined)
       setDetail(undefined)
-    }
-    const response = await fetchGraph(cwd, skip, refs ?? undefined)
+    }    const response = await fetchGraph(cwd, skip, refs ?? undefined)
     if (!response.ok) {
       setState({
         status: 'error',
@@ -136,17 +136,16 @@ export function GitGraphView(props: GitGraphViewProps) {
       return
     }
     const row = state.rows.find((item) => item.sha === selected)
-    if (row?.kind === 'workdir') {
-      setDetail(row.detail ?? '')
+    if (row === undefined) {
+      setDetail(undefined)
       return
     }
-    if (cwd === undefined || row === undefined) return
-    let cancelled = false
-    void fetchCommit(cwd, row.sha).then((body) => {
-      if (!cancelled) setDetail(body)
-    })
-    return () => { cancelled = true }
-  }, [cwd, selected, state.rows])
+    if (row.kind === 'workdir') {
+      setDetail({ title: t('gitGraph.workdir') })
+      return
+    }
+    setDetail({ sha: row.sha, title: row.subject })
+  }, [selected, state.rows, t])
 
   const layout = useMemo(() => layoutGraph(state.rows), [state.rows])
   const needed = LANE_PAD * 2
@@ -193,8 +192,14 @@ export function GitGraphView(props: GitGraphViewProps) {
         edges={layout.edges}
         onScroll={onScroll}
       />
-      {detail !== undefined && selected !== undefined ? (
-        <pre className="dsh-git-graph-detail">{detail}</pre>
+      {detail !== undefined && selected !== undefined && cwd !== undefined ? (
+        <GitGraphDetail
+          cwd={cwd}
+          sha={detail.sha}
+          title={detail.title}
+          t={t}
+          onOpenFile={(file, sha) => onOpenFile?.(file, sha)}
+        />
       ) : null}
       {toast !== null ? (
         <Toast
@@ -420,20 +425,5 @@ async function fetchGraph(
       code: 'git',
       message: error instanceof Error ? error.message : String(error),
     }
-  }
-}
-
-async function fetchCommit(cwd: string, sha: string): Promise<string> {
-  const params = new URLSearchParams({ cwd, sha })
-  try {
-    const response = await fetch(`${GIT_GRAPH_COMMIT_PATH}?${params.toString()}`, {
-      cache: 'no-store',
-      headers: { accept: 'application/json' },
-    })
-    const value = await response.json() as GitGraphCommitResponse
-    if (!value.ok) return value.message
-    return value.body
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error)
   }
 }

@@ -13,17 +13,98 @@ const SHA_RE = /^[0-9a-f]{7,40}$/i
 const BRANCH_RE = /^(?!\/)[A-Za-z0-9._][A-Za-z0-9._/-]*$/
 
 export async function runGraphAction(request: GitGraphActionRequest): Promise<string> {
-  const sha = request.sha.trim()
-  if (!SHA_RE.test(sha)) {
-    throw badRequest('invalid commit')
-  }
   await assertGitRepo(request.cwd)
-  const args = buildArgs(request.action, sha, request.branch, request.mode)
-  return gitText(request.cwd, args)
+  if (isCommitAction(request.action)) {
+    const sha = (request.sha ?? '').trim()
+    if (!SHA_RE.test(sha)) {
+      throw badRequest('invalid commit')
+    }
+    const args = buildArgs(request.action, sha, request.branch, request.mode)
+    return gitText(request.cwd, args)
+  }
+  return runWorkdirAction(request)
+}
+
+type CommitAction = Extract<
+  GitGraphActionName,
+  'checkout' | 'create-branch' | 'cherry-pick' | 'revert' | 'reset'
+>
+
+function isCommitAction(action: GitGraphActionName): action is CommitAction {
+  switch (action) {
+    case 'checkout':
+    case 'create-branch':
+    case 'cherry-pick':
+    case 'revert':
+    case 'reset':
+      return true
+    default:
+      return false
+  }
+}
+
+/**
+ * Working-tree actions from the Git changes panel. `commit` stages nothing
+ * itself: with staged changes it commits the index, otherwise it falls back
+ * to `commit -a` (all tracked changes, mirroring VSCode's smart commit —
+ * untracked files are never swept in implicitly).
+ */
+async function runWorkdirAction(request: GitGraphActionRequest): Promise<string> {
+  const cwd = request.cwd
+  switch (request.action) {
+    case 'commit':
+    case 'commit-push': {
+      const message = (request.message ?? '').trim()
+      if (message.length === 0) throw badRequest('empty commit message')
+      const staged = await hasStagedChanges(cwd)
+      const out = await gitText(
+        cwd,
+        staged ? ['commit', '-m', message] : ['commit', '-am', message],
+      )
+      if (request.action === 'commit') return out
+      const push = await gitText(cwd, ['push'])
+      return [out, push].filter((part) => part.length > 0).join('\n')
+    }
+    case 'stage-all':
+      return gitText(cwd, ['add', '-A'])
+    case 'discard-all': {
+      const reset = await gitText(cwd, ['reset', '--hard', 'HEAD'])
+      const clean = await gitText(cwd, ['clean', '-fd'])
+      return [reset, clean].filter((part) => part.length > 0).join('\n')
+    }
+    case 'pull':
+      return gitText(cwd, ['pull', '--ff-only'])
+    case 'push':
+      return gitText(cwd, ['push'])
+    case 'fetch':
+      return gitText(cwd, ['fetch', '--all', '--prune'])
+    case 'stash':
+      return gitText(cwd, ['stash', 'push', '-u'])
+    case 'stash-pop':
+      return gitText(cwd, ['stash', 'pop'])
+    default:
+      throw badRequest('invalid action')
+  }
+}
+
+/** True when the index differs from HEAD (`git diff --cached --quiet`). */
+async function hasStagedChanges(cwd: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['diff', '--cached', '--quiet', '--'], {
+      cwd,
+      timeout: ACTION_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+    })
+    return false
+  } catch (error) {
+    const code = (error as { code?: unknown }).code
+    if (code === 1) return true
+    throw new Error(gitErrorMessage(error))
+  }
 }
 
 function buildArgs(
-  action: GitGraphActionName,
+  action: CommitAction,
   sha: string,
   branch: string | undefined,
   mode: GitResetMode | undefined,

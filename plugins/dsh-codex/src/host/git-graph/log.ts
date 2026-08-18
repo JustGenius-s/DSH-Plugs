@@ -15,7 +15,6 @@ const GIT_TIMEOUT_MS = 8_000
 const SHOW_TIMEOUT_MS = 5_000
 const MAX_BUFFER = 8 * 1024 * 1024
 const FIELD = '\x1f'
-const WORKDIR_SHA = 'WORKDIR'
 const TYPE_ORDER: Record<GitGraphScopeRef['type'], number> = {
   head: 0,
   branch: 1,
@@ -55,10 +54,6 @@ export async function loadGraphLog(
   const rows = await readLog(cwd, skip, limit + 1, scope)
   const hasMore = rows.length > limit
   if (hasMore) rows.pop()
-  if (skip === 0 && scopeIncludesWorkdir(scope, refs)) {
-    const wip = await readWorkdirRow(cwd, head)
-    if (wip !== undefined) rows.unshift(wip)
-  }
   return {
     head: head === '' ? undefined : head,
     branch: branch === '' ? undefined : branch,
@@ -170,18 +165,6 @@ export function resolveScope(
   return { all: false, gitArgs: picked, selected: picked }
 }
 
-function scopeIncludesWorkdir(
-  scope: GraphScope,
-  refs: readonly GitGraphScopeRef[],
-): boolean {
-  if (scope.all) return true
-  const current = refs.find((ref) => ref.current === true)
-  if (current !== undefined && scope.selected.includes(current.fullName)) {
-    return true
-  }
-  return scope.selected.includes('HEAD')
-}
-
 function compareScopeRefs(a: GitGraphScopeRef, b: GitGraphScopeRef): number {
   if (a.current === true && b.current !== true) return -1
   if (b.current === true && a.current !== true) return 1
@@ -224,30 +207,6 @@ async function readLog(
     if (row !== undefined) rows.push(row)
   }
   return rows
-}
-
-async function readWorkdirRow(
-  cwd: string,
-  head: string,
-): Promise<GitGraphRow | undefined> {
-  const porcelain = await gitText(
-    cwd,
-    ['status', '--porcelain'],
-    GIT_TIMEOUT_MS,
-  ).catch(() => '')
-  if (porcelain.length === 0) return undefined
-  const parents = head === '' ? [] : [head]
-  return {
-    sha: WORKDIR_SHA,
-    shortSha: 'wip',
-    parents,
-    author: '',
-    timestamp: Math.floor(Date.now() / 1000),
-    subject: 'Uncommitted changes',
-    refs: [],
-    kind: 'workdir',
-    detail: porcelain,
-  }
 }
 
 function parseLogLine(line: string): GitGraphRow | undefined {

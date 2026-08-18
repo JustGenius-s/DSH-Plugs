@@ -6,16 +6,25 @@ import {
   DEFAULT_GRAPH_LIMIT,
   GIT_GRAPH_ACTION_PATH,
   GIT_GRAPH_COMMIT_PATH,
+  GIT_GRAPH_DIFF_PATH,
+  GIT_GRAPH_FILE_PATH,
+  GIT_GRAPH_FILES_PATH,
   GIT_GRAPH_PATH,
+  GIT_GRAPH_TREE_PATH,
   type GitGraphActionName,
   type GitGraphActionRequest,
   type GitGraphActionResponse,
   type GitGraphCommitResponse,
+  type GitGraphDiffResponse,
   type GitGraphErr,
+  type GitGraphFileResponse,
+  type GitGraphFilesResponse,
   type GitGraphResponse,
+  type GitGraphTreeResponse,
   type GitResetMode,
 } from '../../shared/git-graph'
 import { runGraphAction } from './actions'
+import { loadChangeFiles, loadFile, loadFileDiff, loadTree } from './browse'
 import { clampLimit, clampSkip, loadCommitBody, loadGraphLog } from './log'
 
 export interface DshCodexGitGraphServer {
@@ -38,11 +47,35 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
     path: GIT_GRAPH_ACTION_PATH,
     handler: handleAction,
   })
+  const disposeFiles = ctx.webServer.register({
+    kind: 'exact',
+    path: GIT_GRAPH_FILES_PATH,
+    handler: handleFiles,
+  })
+  const disposeTree = ctx.webServer.register({
+    kind: 'exact',
+    path: GIT_GRAPH_TREE_PATH,
+    handler: handleTree,
+  })
+  const disposeFile = ctx.webServer.register({
+    kind: 'exact',
+    path: GIT_GRAPH_FILE_PATH,
+    handler: handleFile,
+  })
+  const disposeDiff = ctx.webServer.register({
+    kind: 'exact',
+    path: GIT_GRAPH_DIFF_PATH,
+    handler: handleDiff,
+  })
   return {
     dispose() {
       disposeGraph()
       disposeCommit()
       disposeAction()
+      disposeFiles()
+      disposeTree()
+      disposeFile()
+      disposeDiff()
     },
   }
 }
@@ -125,8 +158,120 @@ async function handleAction(req: IncomingMessage, res: ServerResponse) {
     const value: GitGraphActionResponse = {
       ok: true,
       action: request.action,
-      sha: request.sha,
       message: message.length === 0 ? undefined : message,
+    }
+    if (request.sha !== undefined) value.sha = request.sha
+    json(res, 200, value)
+  } catch (error) {
+    writeGitError(res, error)
+  }
+}
+
+async function handleFiles(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    json(res, 405, fail('bad-request', 'method not allowed'))
+    return
+  }
+  const url = readUrl(req)
+  const cwd = readCwd(url.searchParams.get('cwd'))
+  if (cwd === undefined) {
+    json(res, 400, fail('no-cwd', 'workspace directory is missing'))
+    return
+  }
+  const sha = url.searchParams.get('sha') ?? ''
+  if (sha !== '' && !/^[0-9a-f]{7,40}$/i.test(sha)) {
+    json(res, 400, fail('bad-request', 'invalid commit'))
+    return
+  }
+  try {
+    const files = await loadChangeFiles(cwd, sha === '' ? undefined : sha)
+    const value: GitGraphFilesResponse = { ok: true, cwd, files }
+    json(res, 200, value)
+  } catch (error) {
+    writeGitError(res, error)
+  }
+}
+
+async function handleTree(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    json(res, 405, fail('bad-request', 'method not allowed'))
+    return
+  }
+  const url = readUrl(req)
+  const cwd = readCwd(url.searchParams.get('cwd'))
+  if (cwd === undefined) {
+    json(res, 400, fail('no-cwd', 'workspace directory is missing'))
+    return
+  }
+  const path = url.searchParams.get('path') ?? ''
+  try {
+    const entries = await loadTree(cwd, path)
+    const value: GitGraphTreeResponse = { ok: true, cwd, path, entries }
+    json(res, 200, value)
+  } catch (error) {
+    writeGitError(res, error)
+  }
+}
+
+async function handleFile(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    json(res, 405, fail('bad-request', 'method not allowed'))
+    return
+  }
+  const url = readUrl(req)
+  const cwd = readCwd(url.searchParams.get('cwd'))
+  if (cwd === undefined) {
+    json(res, 400, fail('no-cwd', 'workspace directory is missing'))
+    return
+  }
+  const path = url.searchParams.get('path') ?? ''
+  const sha = url.searchParams.get('sha') ?? ''
+  if (path.length === 0) {
+    json(res, 400, fail('bad-request', 'invalid file path'))
+    return
+  }
+  if (sha !== '' && !/^[0-9a-f]{7,40}$/i.test(sha)) {
+    json(res, 400, fail('bad-request', 'invalid commit'))
+    return
+  }
+  try {
+    const loaded = await loadFile(cwd, path, sha === '' ? undefined : sha)
+    const value: GitGraphFileResponse = { ok: true, cwd, path, ...loaded }
+    json(res, 200, value)
+  } catch (error) {
+    writeGitError(res, error)
+  }
+}
+
+async function handleDiff(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    json(res, 405, fail('bad-request', 'method not allowed'))
+    return
+  }
+  const url = readUrl(req)
+  const cwd = readCwd(url.searchParams.get('cwd'))
+  if (cwd === undefined) {
+    json(res, 400, fail('no-cwd', 'workspace directory is missing'))
+    return
+  }
+  const path = url.searchParams.get('path') ?? ''
+  const sha = url.searchParams.get('sha') ?? ''
+  if (path.length === 0) {
+    json(res, 400, fail('bad-request', 'invalid file path'))
+    return
+  }
+  if (sha !== '' && !/^[0-9a-f]{7,40}$/i.test(sha)) {
+    json(res, 400, fail('bad-request', 'invalid commit'))
+    return
+  }
+  try {
+    const diff = await loadFileDiff(cwd, path, sha === '' ? undefined : sha)
+    const value: GitGraphDiffResponse = {
+      ok: true,
+      cwd,
+      path,
+      sha: sha === '' ? undefined : sha,
+      diff,
     }
     json(res, 200, value)
   } catch (error) {
@@ -138,11 +283,12 @@ function parseAction(value: unknown): GitGraphActionRequest | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const candidate = value as Partial<GitGraphActionRequest>
   const cwd = readCwd(typeof candidate.cwd === 'string' ? candidate.cwd : null)
-  const sha = typeof candidate.sha === 'string' ? candidate.sha : ''
   const action = parseActionName(candidate.action)
   if (cwd === undefined || action === undefined) return undefined
-  const request: GitGraphActionRequest = { cwd, sha, action }
+  const request: GitGraphActionRequest = { cwd, action }
+  if (typeof candidate.sha === 'string') request.sha = candidate.sha
   if (typeof candidate.branch === 'string') request.branch = candidate.branch
+  if (typeof candidate.message === 'string') request.message = candidate.message
   if (candidate.mode === 'soft' || candidate.mode === 'mixed' || candidate.mode === 'hard') {
     request.mode = candidate.mode as GitResetMode
   }
@@ -150,10 +296,25 @@ function parseAction(value: unknown): GitGraphActionRequest | undefined {
 }
 
 function parseActionName(value: unknown): GitGraphActionName | undefined {
-  if (value === 'checkout' || value === 'create-branch' || value === 'cherry-pick' || value === 'revert' || value === 'reset') {
-    return value
+  switch (value) {
+    case 'checkout':
+    case 'create-branch':
+    case 'cherry-pick':
+    case 'revert':
+    case 'reset':
+    case 'commit':
+    case 'commit-push':
+    case 'stage-all':
+    case 'discard-all':
+    case 'pull':
+    case 'push':
+    case 'fetch':
+    case 'stash':
+    case 'stash-pop':
+      return value
+    default:
+      return undefined
   }
-  return undefined
 }
 
 function writeGitError(res: ServerResponse, error: unknown): void {

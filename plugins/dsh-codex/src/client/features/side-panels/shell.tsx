@@ -41,6 +41,16 @@ function instanceCaption(
   siblings: readonly SidePanelInstance[],
   label: string,
 ): string {
+  // An explicit caption override wins — the git graph tab reads "Graph".
+  const title = instance.state?.title
+  if (title !== undefined && title.length > 0) return title
+  // A `files` instance focused on a file reads as the file's name —
+  // "index.ts" distinguishes two file tabs far better than "文件 1".
+  const file = instance.state?.file
+  if (instance.panelId === 'files' && file !== undefined && file.length > 0) {
+    const slash = file.lastIndexOf('/')
+    return slash === -1 ? file : file.slice(slash + 1)
+  }
   if (siblings.length < 2) return label
   const ordinal = siblings.findIndex(item => item.key === instance.key) + 1
   return ordinal > 0 ? label + ' ' + String(ordinal) : label

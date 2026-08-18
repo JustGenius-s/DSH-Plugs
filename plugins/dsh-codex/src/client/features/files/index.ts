@@ -5,45 +5,27 @@ import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
-import { GitChangesView } from './changes-view'
-import { GitGraphView } from './graph-view'
+import { FilesPanel, type FilesPanelProps } from './files-panel'
 
 const PANEL_SLOT = 'side.panel'
-const PANEL_ID = 'git-graph'
 const NS = 'settings.codex'
 
-export function createGitGraphFeature(
+export function createFilesFeature(
   ctx: ClientContext,
   scope: SettingsScope<DshCodexConfig>,
   t: (key: CodexKey) => string,
 ): CodexFeature {
   return {
-    id: 'git-graph',
+    id: 'files',
     activate() {
       const store = ctx.sidePanels as SidePanelsStore
 
-      // One panel, two views (like `files` tree vs preview): the default
-      // instance shows the working-tree changes; the Graph button opens a
-      // second instance of the SAME panel rendering the commit graph.
-      const disposeDescriptor = ctx.sidePanels.describe(PANEL_ID, {
-        icon: 'git',
-        multi: true,
-      })
-      const openFile = (file: string, sha?: string): void => {
-        ctx.sidePanels.open('files', { mode: 'diff', file, sha })
-      }
-      const openGraph = (): void => {
-        const existing = store.getSnapshot().instances.find(
-          (item) => item.panelId === PANEL_ID && item.state?.view === 'graph',
-        )
-        if (existing !== undefined) {
-          store.activateInstance(existing.key)
-          return
-        }
-        ctx.sidePanels.open(PANEL_ID, {
-          view: 'graph',
-          title: t('view.gitGraphGraph'),
-        })
+      // `multi`: every open is a NEW instance (tab). One form per instance —
+      // switching form or opening a file opens another `files` tab.
+      const disposeDescriptor = ctx.sidePanels.describe('files', { icon: 'files', multi: true })
+
+      const open = (state: import('../side-panels/service').PanelNavState): void => {
+        ctx.sidePanels.open('files', state)
       }
 
       const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => {
@@ -52,17 +34,18 @@ export function createGitGraphFeature(
         const syncRegistration = (): void => {
           disposeEntry?.()
           disposeEntry = undefined
-          if (!(scope.getSnapshot().value ?? DEFAULT_CONFIG).gitGraphEnabled) return
+          if (!(scope.getSnapshot().value ?? DEFAULT_CONFIG).filesEnabled) return
 
           disposeEntry = ctx.slots.register(
             {
               name: PANEL_SLOT,
-              id: PANEL_ID,
-              order: 30,
+              id: 'files',
+              order: 35,
               locale: NS as never,
-              label: () => t('view.gitGraph'),
+              label: () => t('view.files'),
             },
-            function GitPanelSlot(props: {
+            function FilesPanelSlot(props: {
+              sessionId: string
               cwd?: string
               instanceKey?: string
               t: (key: string) => string
@@ -75,21 +58,18 @@ export function createGitGraphFeature(
                 store.getSnapshot,
               )
               const instance = snapshot.instances.find(
-                (item) => item.panelId === PANEL_ID && item.key === props.instanceKey,
+                (item) => item.panelId === 'files' && item.key === props.instanceKey,
               )
-              if (instance?.state?.view === 'graph') {
-                return createElement(GitGraphView, {
-                  cwd: props.cwd,
-                  t: props.t,
-                  onOpenFile: openFile,
-                })
-              }
-              return createElement(GitChangesView, {
+              const navState = instance?.state
+              const panelProps: FilesPanelProps = {
+                sessionId: props.sessionId,
                 cwd: props.cwd,
+                instanceKey: props.instanceKey,
                 t: props.t,
-                onOpenFile: openFile,
-                onOpenGraph: openGraph,
-              })
+                navState,
+                onOpen: open,
+              }
+              return createElement(FilesPanel, panelProps)
             } as never,
           )
         }
@@ -111,4 +91,4 @@ export function createGitGraphFeature(
   }
 }
 
-export { GitChangesView, GitGraphView }
+export { FilesPanel }

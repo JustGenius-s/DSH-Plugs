@@ -5,7 +5,7 @@ export default defineConfig({
   format: 'esm',
   dts: true,
   outDir: 'lib',
-  clean: true,
+  clean: false,
   platform: 'neutral',
   deps: { neverBundle: true },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),

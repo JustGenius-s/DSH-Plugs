@@ -12,7 +12,7 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
-  deps: { alwaysBundle: [/^@xterm\//] },
+  deps: { alwaysBundle: [/^@xterm\//, 'shiki', /^shiki\//, /^@shikijs\//] },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: 'window.__ModuleLoader__.load({ id: ' + JSON.stringify(id) + ', factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;',

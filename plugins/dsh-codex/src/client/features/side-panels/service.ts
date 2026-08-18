@@ -27,6 +27,29 @@ export interface SidePanelInstance {
   key: string
   /** The registered `side.panel` entry this instance renders. */
   panelId: string
+  /**
+   * Optional navigation payload for this instance, carried so an opening call
+   * can locate a panel (e.g. which file a `files` instance is showing). Stored
+   * on the instance so it survives tab restore and sibling switches.
+   */
+  state?: PanelNavState
+}
+
+/**
+ * Where a panel instance should navigate when it mounts. `files` uses
+ * `mode`/`file`/`sha`; the git panel uses `view`/`title`. Other panels may
+ * add their own shapes over time.
+ */
+export interface PanelNavState {
+  mode?: 'tree' | 'preview' | 'diff'
+  /** Absolute or relative file path the instance focuses on. */
+  file?: string
+  /** A commit the file is shown against (diff mode); absent = working tree. */
+  sha?: string
+  /** Git panel: which view the instance shows (default = changes). */
+  view?: 'changes' | 'graph'
+  /** Tab caption override (the git graph tab reads "Graph", not "Git 2"). */
+  title?: string
 }
 
 export interface SidePanelSessionSnapshot {
@@ -99,9 +122,10 @@ export interface SidePanelsService {
   /**
    * Open the sidebar. With `id`, ensure that panel has an instance and
    * activate it: a `multi` panel gets a NEW instance every call, a
-   * single-instance panel reuses its existing one.
+   * single-instance panel reuses its existing one. When `state` is given, a
+   * reused single instance updates its navigation state in place.
    */
-  open(id?: string): void
+  open(id?: string, state?: PanelNavState): void
   /** Close the sidebar (instances stay open, so reopening restores the tabs). */
   close(): void
   /** Toggle the sidebar; `id` also opens/activates that panel. */
@@ -328,7 +352,7 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     descriptor(id) {
       return descriptors.get(id)
     },
-    open(id) {
+    open(id, state) {
       if (id === undefined) {
         setSnapshot({ open: true })
         writeStorage(OPEN_KEY, '1')
@@ -339,9 +363,16 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
         ? undefined
         : snapshot.instances.find(i => i.panelId === id)
       if (existing !== undefined) {
-        setSnapshot({ open: true, activeKey: existing.key })
+        const instance = state === undefined
+          ? existing
+          : { ...existing, state }
+        const instances = instance === existing
+          ? snapshot.instances
+          : snapshot.instances.map(i => i.key === existing.key ? instance : i)
+        setSnapshot({ open: true, activeKey: existing.key, instances })
       } else {
         const instance: SidePanelInstance = { key: nextKey(id), panelId: id }
+        if (state !== undefined) instance.state = state
         setSnapshot({
           open: true,
           instances: [...snapshot.instances, instance],

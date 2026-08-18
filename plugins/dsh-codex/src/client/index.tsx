@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createCodexFeatureManager } from './core/feature-manager'
 import { createCodexSettingsStore } from './config/codex-settings-store'
 import { createConversationCollapseFeature } from './features/conversation-collapse'
+import { createFilesFeature } from './features/files'
 import { createGitGraphFeature } from './features/git-graph'
 import { createNavigatorFeature } from './features/navigator'
 import { createSidePanelsFeature } from './features/side-panels'
@@ -46,6 +47,7 @@ export function apply(ctx: ClientContext): void {
     createSidePanelsFeature(ctx, scope, t),
     createTerminalFeature(ctx, scope, t),
     createGitGraphFeature(ctx, scope, t),
+    createFilesFeature(ctx, scope, t),
   ])
   ctx.effect(() => {
     features.activate()

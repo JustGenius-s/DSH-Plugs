@@ -21,6 +21,7 @@ export const ConfigSchema = Schema.object({
   conversationCollapseEnabled: Schema.boolean().default(DEFAULT_CONFIG.conversationCollapseEnabled),
   terminalEnabled: Schema.boolean().default(DEFAULT_CONFIG.terminalEnabled),
   gitGraphEnabled: Schema.boolean().default(DEFAULT_CONFIG.gitGraphEnabled),
+  filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),
   terminalShell: Schema.union([
     Schema.const('auto'),
     Schema.const('bash'),
