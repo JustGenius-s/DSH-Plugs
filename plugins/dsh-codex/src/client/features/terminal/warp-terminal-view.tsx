@@ -58,11 +58,26 @@ interface CompletionMenu {
   selectedIndex: number
 }
 
+type CompletionIntent = 'suggest' | 'tab'
+
 interface CompletionRequest {
   requestId: number
   input: string
   cursor: number
+  intent: CompletionIntent
 }
+
+const KIND_LABEL: Record<TerminalCompletionCandidate['kind'], 'completion.command' | 'completion.file' | 'completion.directory' | 'completion.flag' | 'completion.subcommand' | 'completion.variable' | 'completion.history'> = {
+  command: 'completion.command',
+  file: 'completion.file',
+  directory: 'completion.directory',
+  flag: 'completion.flag',
+  subcommand: 'completion.subcommand',
+  variable: 'completion.variable',
+  history: 'completion.history',
+}
+
+const MAX_HISTORY_ENTRIES = 2000
 
 let blockCounter = 0
 function newBlockId(): string {
@@ -170,6 +185,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const [blocks, setBlocks] = useState<Block[]>([])
   const [draft, setDraft] = useState('')
   const [completionMenu, setCompletionMenu] = useState<CompletionMenu | null>(null)
+  const [ghost, setGhost] = useState('')
   const [currentContext, setCurrentContext] = useState<BlockContext | null>(null)
   const [connState, setConnState] = useState<'connecting' | 'ready' | 'disconnected'>('connecting')
   const [error, setError] = useState<string | null>(null)
@@ -194,6 +210,8 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const historyScratchRef = useRef('')
   const completionRequestIdRef = useRef(0)
   const completionRequestRef = useRef<CompletionRequest | null>(null)
+  const completionMenuRef = useRef<CompletionMenu | null>(null)
+  const ghostRef = useRef('')
   const gridsRef = useRef<Map<string, BlockGrid>>(new Map())
   const altTermRef = useRef<Terminal | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -223,6 +241,8 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
 
   blocksRef.current = blocks
   draftRef.current = draft
+  ghostRef.current = ghost
+  completionMenuRef.current = completionMenu
   docRef.current = doc
   metricsRef.current = metrics
   altActiveRef.current = altActive
@@ -516,16 +536,47 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     })
   }, [])
 
-  const requestCompletion = useCallback((cursor: number) => {
+  const refreshHistoryGhost = useCallback((input: string) => {
+    const hint = historyGhost(historyRef.current, input)
+    setGhost(hint ?? '')
+  }, [])
+
+  const requestCompletion = useCallback((cursor: number, intent: CompletionIntent) => {
     const ws = wsRef.current
     if (ws === null || ws.readyState !== WebSocket.OPEN) return
+    if (runningIdRef.current !== null || altActiveRef.current) return
     const input = draftRef.current
+    if (intent === 'suggest') {
+      refreshHistoryGhost(input)
+      return
+    }
     const requestId = completionRequestIdRef.current + 1
     completionRequestIdRef.current = requestId
-    completionRequestRef.current = { requestId, input, cursor }
+    completionRequestRef.current = { requestId, input, cursor, intent }
     const message: ClientMessage = { type: 'complete', requestId, input, cursor }
     ws.send(JSON.stringify(message))
-  }, [])
+  }, [refreshHistoryGhost])
+
+  const acceptGhost = useCallback(() => {
+    const hint = ghostRef.current
+    if (hint.length === 0) return false
+    const next = draftRef.current + hint
+    setDraftWithCaret(next, next.length, true)
+    setGhost('')
+    setCompletionMenu(null)
+    completionRequestRef.current = null
+    return true
+  }, [setDraftWithCaret])
+
+  const acceptGhostWord = useCallback(() => {
+    const hint = ghostRef.current
+    if (hint.length === 0) return false
+    const chunk = hint.match(/^\s*\S+/)?.[0] ?? hint
+    const next = draftRef.current + chunk
+    setDraftWithCaret(next, next.length, true)
+    setGhost(hint.slice(chunk.length))
+    return true
+  }, [setDraftWithCaret])
 
   const applyCompletionCandidate = useCallback((index: number) => {
     const menu = completionMenu
@@ -537,7 +588,26 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     setDraftWithCaret(next, menu.start + candidate.replacement.length, true)
     completionRequestRef.current = null
     setCompletionMenu(null)
-  }, [completionMenu, setDraftWithCaret])
+    refreshHistoryGhost(next)
+  }, [completionMenu, refreshHistoryGhost, setDraftWithCaret])
+
+  const openHistoryMenu = useCallback((input: string) => {
+    const matches = historyPrefixMatches(historyRef.current, input)
+    if (matches.length === 0) return false
+    setCompletionMenu({
+      start: 0,
+      end: input.length,
+      selectedIndex: 0,
+      candidates: matches.map((command) => ({
+        label: command,
+        replacement: command,
+        kind: 'history',
+      })),
+    })
+    const firstLonger = matches.find((command) => command.length > input.length)
+    setGhost(firstLonger === undefined ? '' : firstLonger.slice(input.length))
+    return true
+  }, [])
 
   const navigateHistory = useCallback((direction: -1 | 1) => {
     const history = historyRef.current
@@ -555,6 +625,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       if (index >= history.length - 1) {
         historyIndexRef.current = null
         setCompletionMenu(null)
+        setGhost('')
         completionRequestRef.current = null
         setDraftWithCaret(historyScratchRef.current, historyScratchRef.current.length)
         return
@@ -564,6 +635,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     historyIndexRef.current = index
     const value = history[index]
     setCompletionMenu(null)
+    setGhost('')
     completionRequestRef.current = null
     setDraftWithCaret(value, value.length)
   }, [setDraftWithCaret])
@@ -594,24 +666,46 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         currentContextRef.current = message.context
         setCurrentContext(message.context)
         break
+      case 'history': {
+        historyRef.current = mergeHistory(message.commands, historyRef.current)
+        refreshHistoryGhost(draftRef.current)
+        break
+      }
       case 'completion': {
         const request = completionRequestRef.current
         if (request === null || request.requestId !== message.requestId || draftRef.current !== request.input) break
         completionRequestRef.current = null
         const start = Math.max(0, Math.min(draftRef.current.length, message.start))
         const end = Math.max(start, Math.min(draftRef.current.length, message.end))
+        if (request.intent === 'suggest') {
+          refreshHistoryGhost(draftRef.current)
+          break
+        }
+        if (message.candidates.length === 0) {
+          setCompletionMenu(null)
+          refreshHistoryGhost(draftRef.current)
+          break
+        }
+        const currentToken = draftRef.current.slice(start, end)
         const next = draftRef.current.slice(0, start) + message.replacement + draftRef.current.slice(end)
-        setDraftWithCaret(next, start + message.replacement.length)
-        if (message.candidates.length > 1) {
+        if (message.candidates.length === 1) {
+          setDraftWithCaret(next, start + message.replacement.length)
+          setCompletionMenu(null)
+          refreshHistoryGhost(next)
+          break
+        }
+        if (message.replacement.length > currentToken.length) {
+          setDraftWithCaret(next, start + message.replacement.length)
           setCompletionMenu({
             start,
             end: start + message.replacement.length,
             candidates: message.candidates,
-            selectedIndex: -1,
+            selectedIndex: 0,
           })
         } else {
-          setCompletionMenu(null)
+          setCompletionMenu({ start, end, candidates: message.candidates, selectedIndex: 0 })
         }
+        setGhost('')
         break
       }
       case 'output':
@@ -636,7 +730,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         setConnState('disconnected')
         break
     }
-  }, [appendOutput, completeRunning, setDraftWithCaret])
+  }, [appendOutput, completeRunning, refreshHistoryGhost, setDraftWithCaret])
 
   // Stabilize the WS handler: it transitively depends on cursorVisible (blink),
   // which would otherwise reconnect the socket every 530ms and kill the PTY.
@@ -755,6 +849,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       draftRef.current = ''
       setDraft('')
       setCompletionMenu(null)
+      setGhost('')
       completionRequestRef.current = null
       const message: ClientMessage = { type: 'input', data: command + '\n' }
       ws.send(JSON.stringify(message))
@@ -764,10 +859,13 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     }
     const history = historyRef.current
     if (history[history.length - 1] !== command) history.push(command)
-    if (history.length > 500) history.splice(0, history.length - 500)
+    if (history.length > MAX_HISTORY_ENTRIES) {
+      history.splice(0, history.length - MAX_HISTORY_ENTRIES)
+    }
     historyIndexRef.current = null
     historyScratchRef.current = ''
     setCompletionMenu(null)
+    setGhost('')
     completionRequestRef.current = null
     const id = newBlockId()
     startedAtRef.current.set(id, Date.now())
@@ -934,19 +1032,44 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
           </div>
         )}
         <div className="dsh-warp-terminal-editor-wrap">
+          {ghost.length > 0 && (
+            <div className="dsh-warp-terminal-ghost" aria-hidden="true">
+              <span>{draft}</span>
+              <span className="dsh-warp-terminal-ghost-hint">{ghost}</span>
+              <span className="dsh-warp-terminal-ghost-accept">{t('editor.acceptHint')}</span>
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             className="dsh-warp-terminal-command-textarea"
-            placeholder={t('editor.placeholder')}
+            placeholder={ghost.length > 0 ? '' : t('editor.placeholder')}
             value={draft}
             rows={draftRows}
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
             disabled={connState !== 'ready' || altActive}
             onChange={(event) => {
-              draftRef.current = event.target.value
+              const value = event.target.value
+              draftRef.current = value
               historyIndexRef.current = null
-              completionRequestRef.current = null
+              setDraft(value)
+              if (value.trim().length === 0) {
+                completionRequestRef.current = null
+                setCompletionMenu(null)
+                setGhost('')
+                return
+              }
+              const menu = completionMenuRef.current
+              if (menu !== null && menu.candidates[0]?.kind === 'history') {
+                if (!openHistoryMenu(value)) {
+                  setCompletionMenu(null)
+                  refreshHistoryGhost(value)
+                }
+                return
+              }
               setCompletionMenu(null)
-              setDraft(event.target.value)
+              refreshHistoryGhost(value)
             }}
             onKeyDown={(event) => {
               const native = event.nativeEvent as { isComposing?: boolean; keyCode?: number }
@@ -964,6 +1087,15 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                     if (menu === null) return null
                     const count = menu.candidates.length
                     const selected = (menu.selectedIndex + step + count) % count
+                    const candidate = menu.candidates[selected]
+                    if (candidate?.kind === 'history') {
+                      const typed = draftRef.current
+                      setGhost(
+                        candidate.replacement.startsWith(typed) && candidate.replacement.length > typed.length
+                          ? candidate.replacement.slice(typed.length)
+                          : '',
+                      )
+                    }
                     return { ...menu, selectedIndex: selected }
                   })
                   return
@@ -990,8 +1122,24 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                     ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage))
                   }
                 } else {
-                  requestCompletion(cursor)
+                  requestCompletion(cursor, 'tab')
                 }
+                return
+              }
+
+              if (event.key === 'ArrowRight' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+                if (!running && ghostRef.current.length > 0 && cursor === value.length) {
+                  event.preventDefault()
+                  acceptGhost()
+                  return
+                }
+              }
+
+              if (event.key === 'Escape' && !running && (ghostRef.current.length > 0 || completionMenu !== null)) {
+                event.preventDefault()
+                setGhost('')
+                setCompletionMenu(null)
+                completionRequestRef.current = null
                 return
               }
 
@@ -1009,6 +1157,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                 if (!event.shiftKey && !event.altKey && !event.metaKey &&
                   historyRef.current.length > 0 && historyNavigationAllowed(value, cursor, direction)) {
                   event.preventDefault()
+                  if (direction < 0 && value.trim().length > 0 && openHistoryMenu(value)) return
                   navigateHistory(direction as -1 | 1)
                   return
                 }
@@ -1028,6 +1177,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                 }
                 draftRef.current = ''
                 setDraft('')
+                setGhost('')
                 setCompletionMenu(null)
                 return
               }
@@ -1045,11 +1195,18 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                   const next = value.slice(0, cursor) + value.slice(bounds.end)
                   setDraftWithCaret(next, cursor)
                 } else {
-                  const before = value.slice(bounds.start, cursor).replace(/\\s+$/, '').replace(/\\S+$/, '')
+                  const before = value.slice(bounds.start, cursor).replace(/\s+$/, '').replace(/\S+$/, '')
                   const next = value.slice(0, bounds.start) + before + value.slice(cursor)
                   setDraftWithCaret(next, bounds.start + before.length)
                 }
                 return
+              }
+              if (event.altKey && event.key === 'ArrowRight' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+                if (!running && ghostRef.current.length > 0 && cursor === value.length) {
+                  event.preventDefault()
+                  acceptGhostWord()
+                  return
+                }
               }
               if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
                 event.preventDefault()
@@ -1067,25 +1224,34 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                 killRunning()
                 draftRef.current = ''
                 setDraft('')
+                setGhost('')
               }
             }}
           />
           {completionMenu !== null && (
             <div className="dsh-warp-terminal-completion-menu" role="listbox">
-              {completionMenu.candidates.slice(0, 8).map((candidate, index) => (
+              {visibleCompletionRows(completionMenu).map((row) => (
                 <button
-                  key={candidate.label + ':' + candidate.kind}
+                  key={row.candidate.label + ':' + row.candidate.kind + ':' + String(row.index)}
                   type="button"
-                  className={'dsh-warp-terminal-completion-option' + (index === completionMenu.selectedIndex ? ' is-selected' : '')}
+                  className={'dsh-warp-terminal-completion-option' + (row.index === completionMenu.selectedIndex ? ' is-selected' : '')}
                   role="option"
-                  aria-selected={index === completionMenu.selectedIndex}
+                  aria-selected={row.index === completionMenu.selectedIndex}
+                  ref={(node) => {
+                    if (row.index === completionMenu.selectedIndex) node?.scrollIntoView({ block: 'nearest' })
+                  }}
                   onMouseDown={(mouseEvent) => {
                     mouseEvent.preventDefault()
-                    applyCompletionCandidate(index)
+                    applyCompletionCandidate(row.index)
                   }}
                 >
-                  <span>{candidate.label}</span>
-                  <span className="dsh-warp-terminal-completion-kind">{candidate.kind}</span>
+                  <span className="dsh-warp-terminal-completion-label">{row.candidate.label}</span>
+                  <span className="dsh-warp-terminal-completion-meta">
+                    {row.candidate.description !== undefined && row.candidate.description.length > 0 && (
+                      <span className="dsh-warp-terminal-completion-desc">{row.candidate.description}</span>
+                    )}
+                    <span className="dsh-warp-terminal-completion-kind">{t(KIND_LABEL[row.candidate.kind])}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -1146,6 +1312,65 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       </div>
     </div>
   )
+}
+
+const COMPLETION_MENU_ROWS = 12
+
+function visibleCompletionRows(menu: CompletionMenu): Array<{ index: number; candidate: TerminalCompletionCandidate }> {
+  const count = menu.candidates.length
+  const windowSize = Math.min(COMPLETION_MENU_ROWS, count)
+  const selected = Math.max(0, Math.min(menu.selectedIndex, count - 1))
+  const start = count <= windowSize ? 0 : Math.max(0, Math.min(selected - 2, count - windowSize))
+  return menu.candidates.slice(start, start + windowSize).map((candidate, offset) => ({
+    index: start + offset,
+    candidate,
+  }))
+}
+
+function historyGhost(history: string[], input: string): string | null {
+  if (input.length === 0) return null
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const command = history[index]
+    if (command.length > input.length && command.startsWith(input)) return command.slice(input.length)
+  }
+  return null
+}
+
+function historyPrefixMatches(history: string[], input: string, limit = 12): string[] {
+  const seen = new Set<string>()
+  const matches: string[] = []
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const command = history[index]
+    if (command.length === 0) continue
+    if (input.length > 0 && !command.startsWith(input)) continue
+    if (seen.has(command)) continue
+    seen.add(command)
+    matches.push(command)
+    if (matches.length >= limit) break
+  }
+  return matches
+}
+
+function mergeHistory(loaded: string[], session: string[]): string[] {
+  if (loaded.length === 0) return session.slice()
+  if (session.length === 0) return loaded.slice()
+  let overlap = 0
+  const maxOverlap = Math.min(loaded.length, session.length)
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    let same = true
+    for (let index = 0; index < size; index += 1) {
+      if (loaded[loaded.length - size + index] !== session[index]) {
+        same = false
+        break
+      }
+    }
+    if (same) {
+      overlap = size
+      break
+    }
+  }
+  const next = loaded.concat(session.slice(overlap))
+  return next.length > MAX_HISTORY_ENTRIES ? next.slice(next.length - MAX_HISTORY_ENTRIES) : next
 }
 
 function historyNavigationAllowed(value: string, cursor: number, direction: number): boolean {

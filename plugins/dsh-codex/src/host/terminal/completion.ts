@@ -1,6 +1,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import { delimiter, join, resolve } from 'node:path'
 import type { TerminalCompletionCandidate } from '../../shared/terminal-protocol'
+import { specOptions } from './specs'
 
 const COMMAND_CACHE_TTL_MS = 30_000
 const MAX_CANDIDATES = 100
@@ -18,6 +19,7 @@ interface CompletionOption {
   value: string
   label: string
   kind: TerminalCompletionCandidate['kind']
+  description?: string
 }
 
 export interface TerminalCompletionResult {
@@ -46,10 +48,21 @@ export async function completeTerminalInput(
   const token = tokenAt(input, safeCursor)
   const query = decodeToken(token.raw)
   const commandPosition = isCommandPosition(input, token.start)
-  const pathMode = !commandPosition || query.includes('/') || query.startsWith('.') || query.startsWith('~')
-  const options = pathMode
-    ? await pathOptions(query, cwd, env.HOME)
-    : await commandOptions(query, env.PATH)
+  const pathLike = query.includes('/') || query.startsWith('.') || query.startsWith('~')
+  let options: CompletionOption[]
+  if (query.startsWith('$')) {
+    options = envOptions(query, env)
+  } else if (commandPosition && !pathLike) {
+    options = await commandOptions(query, env.PATH)
+  } else {
+    const commandTokens = decodeTokens(input, token.start)
+    const fromSpec = specOptions(commandTokens, query)
+    if (fromSpec.length > 0) {
+      options = fromSpec
+    } else {
+      options = await pathOptions(query, cwd, env.HOME)
+    }
+  }
 
   if (options.length === 0) {
     return { start: token.start, end: token.end, replacement: token.raw, candidates: [] }
@@ -59,12 +72,13 @@ export async function completeTerminalInput(
   const common = commonPrefix(limited.map((option) => option.value))
   const candidates = limited.map((option) => ({
     label: option.label,
-    replacement: encodeToken(option.value, token.quote, option.kind !== 'directory'),
+    replacement: encodeToken(option.value, token.quote, option.kind !== 'directory', option.kind),
     kind: option.kind,
+    description: option.description,
   }))
   const replacement = options.length === 1
     ? candidates[0].replacement
-    : encodeToken(common, token.quote, false)
+    : encodeToken(common, token.quote, false, limited[0]?.kind)
 
   return { start: token.start, end: token.end, replacement, candidates }
 }
@@ -138,6 +152,45 @@ function isCommandPosition(input: string, tokenStart: number): boolean {
   return before.length === 0 || ';|&(\n'.includes(before.at(-1) ?? '')
 }
 
+function decodeTokens(input: string, end: number): string[] {
+  const tokens: string[] = []
+  let start = -1
+  let quote: "'" | '"' | null = null
+  let escaped = false
+  const flush = (index: number) => {
+    if (start !== -1 && index > start) tokens.push(decodeToken(input.slice(start, index)))
+    start = -1
+  }
+  for (let index = 0; index < end; index += 1) {
+    const char = input[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true
+      if (start === -1) start = index
+      continue
+    }
+    if (quote !== null) {
+      if (char === quote) quote = null
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = char
+      if (start === -1) start = index
+      continue
+    }
+    if (isTokenBreak(char)) {
+      flush(index)
+      continue
+    }
+    if (start === -1) start = index
+  }
+  flush(end)
+  return tokens
+}
+
 function decodeToken(raw: string): string {
   let output = ''
   let quote: "'" | '"' | null = null
@@ -162,6 +215,15 @@ function decodeToken(raw: string): string {
   }
   if (escaped) output += '\\'
   return output
+}
+
+function envOptions(prefix: string, env: NodeJS.ProcessEnv): CompletionOption[] {
+  const needle = prefix.startsWith('$') ? prefix.slice(1) : prefix
+  return Object.keys(env)
+    .filter((name) => name.startsWith(needle))
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, MAX_CANDIDATES)
+    .map((name) => ({ value: '$' + name, label: '$' + name, kind: 'variable' }))
 }
 
 async function commandOptions(prefix: string, pathValue: string | undefined): Promise<CompletionOption[]> {
@@ -247,7 +309,12 @@ function commonPrefix(values: string[]): string {
   return prefix
 }
 
-function encodeToken(value: string, quote: "'" | '"' | null, finalize: boolean): string {
+function encodeToken(
+  value: string,
+  quote: "'" | '"' | null,
+  finalize: boolean,
+  kind?: TerminalCompletionCandidate['kind'],
+): string {
   if (quote === "'") {
     const escaped = value.replaceAll("'", "'\\''")
     return "'" + escaped + (finalize ? "' " : '')
@@ -256,6 +323,9 @@ function encodeToken(value: string, quote: "'" | '"' | null, finalize: boolean):
     const escaped = value.replace(/[\\"$`]/g, '\\$&')
     return '"' + escaped + (finalize ? '" ' : '')
   }
-  const escaped = value.replace(/[\s\\"'`$!&|;()<>*?\[\]{}]/g, '\\$&')
+  const pattern = kind === 'variable'
+    ? /[\s\\"'`!&|;()<>*?\[\]{}]/g
+    : /[\s\\"'`$!&|;()<>*?\[\]{}]/g
+  const escaped = value.replace(pattern, '\\$&')
   return escaped + (finalize ? ' ' : '')
 }

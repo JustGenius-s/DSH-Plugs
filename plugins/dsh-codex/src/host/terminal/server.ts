@@ -26,6 +26,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { DEFAULT_CONFIG, type DshCodexConfig, type TerminalShell } from '../../shared/config'
 import type { BlockContext, ClientMessage, ServerMessage } from '../../shared/terminal-protocol'
 import { completeTerminalInput } from './completion'
+import { loadShellHistory } from './history'
 
 export const name = 'dsh-codex-terminal'
 
@@ -55,6 +56,8 @@ export interface TerminalSession {
   contextSeq: number
   mode: 'prompt' | 'output'
   promptBuf: string
+  history: string[] | undefined
+  historySent: boolean
 }
 
 /** Handle the main thread can dispose to tear the whole server down. */
@@ -212,7 +215,15 @@ export async function openSession(
     contextSeq: 0,
     mode: 'prompt',
     promptBuf: "",
+    history: undefined,
+    historySent: false,
   }
+
+  void loadShellHistory(shell).then((commands) => {
+    if (session.closed) return
+    session.history = commands
+    sendHistoryIfReady(session)
+  })
 
   ws.off('close', onEarlyClose)
   ws.on('close', () => {
@@ -351,25 +362,32 @@ export function closeSession(session: TerminalSession): void {
  * Shell-specific setup script. Every line executes inside the new interactive
  * shell. The prompt hook prints the block-end marker with exit code and cwd;
  * PS1 is emptied so no shell prompt is drawn.
+ *
+ * Like Warp, later lines are space-prefixed so hist_ignore_space / ignorespace
+ * keeps bootstrap out of the user's HISTFILE.
  */
 export function setupScript(shell: string): string {
   const name = basename(shell)
-  const lines: string[] = [
-    'stty -echo',
-    'export TERM=xterm-256color',
-    'export COLORTERM=truecolor',
-    "export PS1=''",
-    "export PS2=''",
-  ]
-  lines.push('printf \'\\e]777;warp-node-version;%s\\a\' "$(command -v node >/dev/null 2>&1 && node --version 2>/dev/null)"')
+  const quiet = (line: string) => ' ' + line
+  const lines: string[] = name === 'zsh'
+    ? ['setopt HIST_IGNORE_SPACE']
+    : ['HISTCONTROL="${HISTCONTROL:+$HISTCONTROL:}ignorespace"']
+  lines.push(
+    quiet('stty -echo'),
+    quiet('export TERM=xterm-256color'),
+    quiet('export COLORTERM=truecolor'),
+    quiet("export PS1=''"),
+    quiet("export PS2=''"),
+    quiet('printf \'\\e]777;warp-node-version;%s\\a\' "$(command -v node >/dev/null 2>&1 && node --version 2>/dev/null)"'),
+  )
   if (name === 'zsh') {
     lines.push(
-      'dsh_block_mark() { printf \'\\e]777;warp-block-end;%s;%s\\a\' "$?" "$PWD" }',
-      'precmd_functions+=dsh_block_mark',
+      quiet('dsh_block_mark() { printf \'\\e]777;warp-block-end;%s;%s\\a\' "$?" "$PWD" }'),
+      quiet('precmd_functions+=dsh_block_mark'),
     )
   } else {
     lines.push(
-      'PROMPT_COMMAND=\'printf "\\e]777;warp-block-end;%s;%s\\a" "$?" "$PWD"\'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"',
+      quiet('PROMPT_COMMAND=\'printf "\\e]777;warp-block-end;%s;%s\\a" "$?" "$PWD"\'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"'),
     )
   }
   return lines.join('\n') + '\n'
@@ -429,6 +447,7 @@ export function onTerminalData(session: TerminalSession, chunk: string): void {
         rows: session.rows,
         cols: session.cols,
       })
+      sendHistoryIfReady(session)
       void updateContext(session)
     } else {
       if (cwd.length > 0) session.cwd = cwd
@@ -523,6 +542,13 @@ async function getGitInfo(
   } catch {
     return {}
   }
+}
+
+function sendHistoryIfReady(session: TerminalSession): void {
+  if (session.closed || session.ready === false || session.historySent) return
+  if (session.history === undefined) return
+  session.historySent = true
+  send(session.ws, { type: 'history', commands: session.history })
 }
 
 function send(ws: WebSocket, message: ServerMessage): void {

@@ -15,7 +15,8 @@ export interface BlockContext {
 export interface TerminalCompletionCandidate {
   label: string
   replacement: string
-  kind: 'command' | 'file' | 'directory'
+  kind: 'command' | 'file' | 'directory' | 'flag' | 'subcommand' | 'variable' | 'history'
+  description?: string
 }
 
 export type ServerMessage =
@@ -36,6 +37,7 @@ export type ServerMessage =
       replacement: string
       candidates: TerminalCompletionCandidate[]
     }
+  | { type: 'history'; commands: string[] }
   | { type: 'block-end'; exitCode: number }
   | { type: 'exit'; exitCode: number | null; signal: string | null }
   | { type: 'error'; message: string }
