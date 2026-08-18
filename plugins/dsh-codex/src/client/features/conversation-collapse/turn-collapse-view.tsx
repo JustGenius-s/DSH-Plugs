@@ -71,7 +71,7 @@ function unmarkTurn(flow: Element, turn: number): void {
 }
 
 /**
- * Idle glyph for the Worked-for row. Official Lucide pickaxe, drawn
+ * Collapsed-state glyph for the Worked-for row. Official Lucide pickaxe, drawn
  * as a round-cap stroke (fill none) and displayed at DSH 14px.
  */
 function IconPickaxeOutline14(props: {

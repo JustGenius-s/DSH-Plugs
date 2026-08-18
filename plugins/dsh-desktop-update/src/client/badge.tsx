@@ -89,8 +89,8 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
     const b = bridge()
     if (b === undefined) return
     let alive = true
-    void b.getUpdateState().then((s) => { if (alive) setState(s) }).catch(() => {})
-    const off = b.onUpdateState((s) => { if (alive) setState(s) })
+    void b.updates.getState().then((s) => { if (alive) setState(s) }).catch(() => {})
+    const off = b.updates.onState((s) => { if (alive) setState(s) })
     return () => { alive = false; off() }
   }, [])
 
@@ -121,7 +121,7 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
     setOpen(next)
     // Re-check on open so a stale badge self-heals.
     const b = bridge()
-    if (b !== undefined) void b.checkNow().then((s) => setState(s)).catch(() => {})
+    if (b !== undefined) void b.updates.checkNow().then((s) => setState(s)).catch(() => {})
   }, [open])
 
   const doUpdateDsh = useCallback(async () => {
@@ -129,7 +129,7 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
     if (b === undefined) return
     setPhase('updating')
     try {
-      await b.updateDsh()
+      await b.updates.updateDsh()
       setPhase('done')
     } catch {
       setPhase('failed')
@@ -139,7 +139,7 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
   const skip = useCallback(async (kind: 'app' | 'dsh') => {
     const b = bridge()
     if (b === undefined) return
-    await b.skipVersion(kind).catch(() => {})
+    await b.updates.skipVersion(kind).catch(() => {})
     // 桥会把该行状态置 null（跳过记录持久化）；本地再标记一次，让行以
     // 「无动作」形态继续展示版本号，而不是整行消失。
     setSkipped((s) => ({ ...s, [kind]: true }))
@@ -150,7 +150,7 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
     const b = bridge()
     if (b === undefined) return
     try {
-      const next = await b.setGate(kind, enabled)
+      const next = await b.updates.setGate(kind, enabled)
       setState(next)
     } catch {
       // 写入失败保持现状；下一次状态推送会校正。
@@ -207,7 +207,7 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
                 <button type="button" className="dsh-desktop-update-link" onClick={() => void skip('app')}>
                   {t('action.skip')}
                 </button>
-                <button type="button" className="dsh-desktop-update-primary" onClick={() => void bridge()?.downloadAppUpdate()}>
+                <button type="button" className="dsh-desktop-update-primary" onClick={() => void bridge()?.updates.downloadApp()}>
                   {t('action.update.to')} {state.app.latest}
                 </button>
               </span>
@@ -235,7 +235,7 @@ export function UpdateBadge(props: { wide?: boolean; t: (key: string) => string 
                   </button>
                 )}
                 {phase === 'done' ? (
-                  <button type="button" className="dsh-desktop-update-primary" onClick={() => bridge()?.relaunch()}>
+                  <button type="button" className="dsh-desktop-update-primary" onClick={() => bridge()?.updates.relaunch()}>
                     {t('action.restart')}
                   </button>
                 ) : (

@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-desktop-update",
-  "description": "Desktop update plugin for DSH-Desktop: sidebar badge plus native applicationMenu/tray contributions via window.dshDesktop.seats",
+  "description": "Desktop update plugin for DSH-Desktop: sidebar badge plus native seats and notifications via window.dshDesktop (updates / seats / notify)",
   "version": "0.1.1",
   "publishConfig": {
     "access": "public"

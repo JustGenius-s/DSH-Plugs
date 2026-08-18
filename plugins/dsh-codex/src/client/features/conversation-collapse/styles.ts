@@ -36,23 +36,22 @@ const CSS = `
   align-items:center;
   justify-content:center;
   pointer-events:none;
+  transition:opacity .14s ease,transform .14s ease;
 }
-.dsh-codex-collapse-pickaxe{
-  opacity:1;
-  transition:opacity .14s ease;
-}
+.dsh-codex-collapse-pickaxe{opacity:1}
 .dsh-codex-collapse-chevron{
   opacity:0;
-  transition:transform .14s ease,opacity .14s ease;
-  transform:rotate(0deg);
-}
-.dsh-codex-collapse[aria-expanded="false"] .dsh-codex-collapse-chevron{
   transform:rotate(-90deg);
 }
-.dsh-codex-collapse:is(:hover,:focus-visible) .dsh-codex-collapse-pickaxe{
+.dsh-codex-collapse[aria-expanded="true"] .dsh-codex-collapse-pickaxe{opacity:0}
+.dsh-codex-collapse[aria-expanded="true"] .dsh-codex-collapse-chevron{
+  opacity:1;
+  transform:rotate(0deg);
+}
+.dsh-codex-collapse[aria-expanded="false"]:is(:hover,:focus-visible) .dsh-codex-collapse-pickaxe{
   opacity:0;
 }
-.dsh-codex-collapse:is(:hover,:focus-visible) .dsh-codex-collapse-chevron{
+.dsh-codex-collapse[aria-expanded="false"]:is(:hover,:focus-visible) .dsh-codex-collapse-chevron{
   opacity:1;
 }
 .dsh-codex-collapse-label{

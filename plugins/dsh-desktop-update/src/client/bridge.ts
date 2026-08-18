@@ -1,4 +1,5 @@
 // Shared DSH-Desktop preload surface. Absent in a plain browser.
+// Mirrors DSH-Desktop `src/api.ts`: updates / seats / notify. No Electron types.
 
 export interface DesktopUpdateInfo {
   current: string
@@ -13,6 +14,8 @@ export interface DesktopUpdateState {
   config: { checkApp: boolean; checkDsh: boolean }
   versions: { app: string; dsh: string | null }
 }
+
+export type DesktopUpdateKind = 'app' | 'dsh'
 
 export type DesktopSeatName = 'applicationMenu' | 'tray'
 
@@ -48,23 +51,47 @@ export interface DesktopSeatInfo {
   description: string
 }
 
-export interface DshDesktopBridge {
-  getUpdateState(): Promise<DesktopUpdateState>
-  onUpdateState(listener: (state: DesktopUpdateState) => void): () => void
-  downloadAppUpdate(): Promise<void>
-  updateDsh(): Promise<void>
-  checkNow(): Promise<DesktopUpdateState>
-  skipVersion(kind: 'app' | 'dsh'): Promise<void>
-  setGate(kind: 'app' | 'dsh', enabled: boolean): Promise<DesktopUpdateState>
-  relaunch(): void
-  seats?: {
+export interface DesktopNotifySpec {
+  contributor: string
+  id: string
+  title: string
+  body: string
+  silent?: boolean
+}
+
+export interface DesktopNotifyAction {
+  contributor: string
+  id: string
+}
+
+export interface DesktopNotifyResult {
+  shown: boolean
+}
+
+export interface DshDesktop {
+  updates: {
+    getState(): Promise<DesktopUpdateState>
+    onState(listener: (state: DesktopUpdateState) => void): () => void
+    checkNow(): Promise<DesktopUpdateState>
+    downloadApp(): Promise<void>
+    updateDsh(): Promise<void>
+    skipVersion(kind: DesktopUpdateKind): Promise<void>
+    setGate(kind: DesktopUpdateKind, enabled: boolean): Promise<DesktopUpdateState>
+    relaunch(): void
+  }
+  seats: {
     list(): Promise<DesktopSeatInfo[]>
     contribute(contribution: DesktopContribution): Promise<void>
     revoke(seat: DesktopSeatName, contributor: string): Promise<void>
     onAction(listener: (action: DesktopSeatAction) => void): () => void
   }
+  notify: {
+    show(spec: DesktopNotifySpec): Promise<DesktopNotifyResult>
+    close(contributor: string, id?: string): Promise<void>
+    onAction(listener: (action: DesktopNotifyAction) => void): () => void
+  }
 }
 
-export function bridge(): DshDesktopBridge | undefined {
-  return (window as unknown as { dshDesktop?: DshDesktopBridge }).dshDesktop
+export function bridge(): DshDesktop | undefined {
+  return (window as unknown as { dshDesktop?: DshDesktop }).dshDesktop
 }

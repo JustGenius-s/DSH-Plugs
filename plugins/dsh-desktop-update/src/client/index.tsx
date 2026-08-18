@@ -1,10 +1,10 @@
 // Browser half of @just-genius/dsh-desktop-update.
 //
 // Renders the sidebar update badge (`sidebar.footer.action`) and, when the
-// desktop shell is present, contributes Check for Updates / Download /
-// Update DSH / Restart into the native `applicationMenu` and `tray` seats
-// via `window.dshDesktop.seats`. All state still comes from the preload
-// bridge; a plain browser has no `dshDesktop` and this half stays inert.
+// desktop shell is present, uses the three-family `window.dshDesktop` API:
+// `updates` for check/download/upgrade/relaunch, `seats` for applicationMenu
+// + tray, `notify` for system notifications. A plain browser has no
+// `dshDesktop` and this half stays inert.
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-runtime/client'
