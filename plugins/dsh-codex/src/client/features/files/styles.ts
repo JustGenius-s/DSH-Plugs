@@ -1,3 +1,5 @@
+import { injectStyles } from '@just-genius/dsh-plugin-ui'
+
 const FILES_CSS = `
 .dsh-files{height:100%;display:flex;flex-direction:column;min-height:0;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
 .dsh-files-status{padding:16px 12px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b0b0b5)}
@@ -8,7 +10,7 @@ const FILES_CSS = `
 .dsh-files-search-input input{width:100%;min-width:0;height:30px;font-size:13px}
 .dsh-files-tree-list{flex:1;min-height:0;overflow:auto;padding:4px 0}
 .dsh-files-tree-row{display:flex;align-items:center;gap:2px;padding-right:4px}
-.dsh-files-tree-row-main{flex:1;min-width:0;display:flex;align-items:center;gap:4px;min-height:28px;padding:0 6px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
+.dsh-files-tree-row-main{flex:1;min-width:0;display:flex;align-items:center;gap:4px;min-height:30px;padding:0 6px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer}
 .dsh-files-tree-row-main:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-files-tree-chevron{flex:none;width:14px;height:14px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-files-file-glyph,.dsh-files-folder-glyph{flex:none;width:16px;height:16px;display:flex;align-items:center;justify-content:center}
@@ -28,7 +30,7 @@ const FILES_CSS = `
 .dsh-files-image{flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:16px}
 .dsh-files-image img{max-width:100%;height:auto;border-radius:6px;background:repeating-conic-gradient(rgba(128,128,128,.18) 0% 25%,transparent 0% 50%) 0 0/16px 16px}
 .dsh-files-preview .dsh-files-status,.dsh-files-diff .dsh-files-status{padding:16px 12px}
-.dsh-files-tree-dir{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;font-size:11px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
+.dsh-files-tree-dir{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-files-tree-note{padding:4px 12px;font-size:12px;line-height:18px}
 .dsh-files-view{position:relative;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:21px}
 .dsh-files-code{padding:0 0 8px}
@@ -46,23 +48,10 @@ const FILES_CSS = `
 .dsh-files-diff-row.is-add{color:#98c379;background:rgba(152,195,121,.12)}
 .dsh-files-diff-row.is-del{color:#e06c75;background:rgba(224,108,117,.12)}
 .dsh-files-diff-row.is-note{color:var(--dsw-alias-label-tertiary,#8b8b90);font-style:italic}
-.dsh-files-expand{display:block;width:100%;min-height:28px;padding:0 12px;border:none;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b90);font:inherit;font-size:12px;line-height:18px;text-align:left;cursor:pointer}
+.dsh-files-expand{display:block;width:100%;min-height:28px;padding:0 12px;border:none;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b90);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
 .dsh-files-expand:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 `
 
 export function ensureFilesStyles(): void {
-  if (typeof document === 'undefined') return
-  const tagId = '@just-genius/dsh-codex/files/styles.css'
-  const existing = document.querySelector(
-    'style[data-plugin-css=' + JSON.stringify(tagId) + ']',
-  )
-  if (existing instanceof HTMLStyleElement) {
-    existing.textContent = FILES_CSS
-    return
-  }
-  const tag = document.createElement('style')
-  tag.dataset.plugin = '@just-genius/dsh-codex'
-  tag.dataset.pluginCss = tagId
-  tag.textContent = FILES_CSS
-  document.head.appendChild(tag)
+  injectStyles('@just-genius/dsh-codex', '@just-genius/dsh-codex/files/styles.css', FILES_CSS)
 }

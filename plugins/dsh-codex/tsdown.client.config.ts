@@ -12,7 +12,9 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
-  deps: { alwaysBundle: [/^@xterm\//, 'shiki', /^shiki\//, /^@shikijs\//] },
+  // alwaysBundle inlines the shared UI package (never a runtime dep) beside
+  // the terminal/shiki stacks.
+  deps: { alwaysBundle: ['@just-genius/dsh-plugin-ui', /^@xterm\//, 'shiki', /^shiki\//, /^@shikijs\//] },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: 'window.__ModuleLoader__.load({ id: ' + JSON.stringify(id) + ', factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;',

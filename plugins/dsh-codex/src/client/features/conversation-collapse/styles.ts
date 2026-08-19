@@ -1,3 +1,5 @@
+import { injectStyles } from '@just-genius/dsh-plugin-ui'
+
 const CSS = `
 .dsh-codex-collapse{
   display:flex;
@@ -67,18 +69,5 @@ const CSS = `
 `
 
 export function ensureCollapseStyles(): void {
-  if (typeof document === 'undefined') return
-  const tagId = '@just-genius/dsh-codex/conversation-collapse/styles.css'
-  const existing = document.querySelector(
-    'style[data-plugin-css=' + JSON.stringify(tagId) + ']',
-  )
-  if (existing instanceof HTMLStyleElement) {
-    existing.textContent = CSS
-    return
-  }
-  const tag = document.createElement('style')
-  tag.dataset.plugin = '@just-genius/dsh-codex'
-  tag.dataset.pluginCss = tagId
-  tag.textContent = CSS
-  document.head.appendChild(tag)
+  injectStyles('@just-genius/dsh-codex', '@just-genius/dsh-codex/conversation-collapse/styles.css', CSS)
 }

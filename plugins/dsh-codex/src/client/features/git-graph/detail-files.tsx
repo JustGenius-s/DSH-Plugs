@@ -294,7 +294,7 @@ function FileRow(props: {
             onDiscard(file)
           }}
         >
-          <IconUndo size={14} />
+          <IconUndo size={16} />
         </span>
       ) : null}
       {stageAction === undefined || onStageChange === undefined ? null : (
@@ -309,7 +309,7 @@ function FileRow(props: {
             onStageChange(file, stageAction === 'stage')
           }}
         >
-          {stageAction === 'stage' ? <IconPlusOutline16 size={14} /> : <IconMinus size={14} />}
+          {stageAction === 'stage' ? <IconPlusOutline16 size={16} /> : <IconMinus size={16} />}
         </span>
       )}
       {file.added !== undefined || file.removed !== undefined ? (
@@ -325,43 +325,45 @@ function FileRow(props: {
   )
 }
 
-/** Lucide `undo-2`, inlined (the primitives sheet has no discard glyph). */
+/**
+ * Undo (discard) glyph, hand-drawn to the DSH fill-type spec (16px grid,
+ * 1.3px stroke equivalent) — the primitives sheet has no discard glyph.
+ */
 function IconUndo(props: { size?: number }) {
   const size = props.size ?? 16
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 16 16"
       fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M9 14 4 9l5-5" />
-      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11" />
+      <path
+        d="M5.9 2.2 2.2 5.9l3.7 3.7.9-.9-2.8-2.8 2.8-2.8z"
+        fill="currentColor"
+      />
+      <path d="M4.2 5.25h5.3v1.3H4.2z" fill="currentColor" />
+      <path
+        d="M9.5 5.25a3.75 3.75 0 0 1 3.75 3.75v.65a3.75 3.75 0 0 1-3.75 3.75H7.6v-1.3h1.9a2.45 2.45 0 0 0 2.45-2.45v-.65a2.45 2.45 0 0 0-2.45-2.45z"
+        fill="currentColor"
+      />
     </svg>
   )
 }
 
-/** Lucide `minus`, inlined (the primitives sheet has no minus glyph). */
+/** Minus glyph as a DSH fill-type bar (16px grid, 1.3px thick). */
 function IconMinus(props: { size?: number }) {
   const size = props.size ?? 16
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 16 16"
       fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M5 12h14" />
+      <path d="M2.75 7.35h10.5v1.3H2.75z" fill="currentColor" />
     </svg>
   )
 }
@@ -427,8 +429,8 @@ function TreeRows(props: {
             >
               <span className="dsh-git-graph-detail-caret" aria-hidden="true">
                 {open
-                  ? <IconChevronDownOutline14 size={12} />
-                  : <IconChevronRightOutline14 size={12} />}
+                  ? <IconChevronDownOutline14 size={14} />
+                  : <IconChevronRightOutline14 size={14} />}
               </span>
               <span
                 className="dsh-git-graph-detail-icon"
@@ -448,7 +450,7 @@ function TreeRows(props: {
                     props.onDiscardDir?.(dir.path)
                   }}
                 >
-                  <IconUndo size={14} />
+                  <IconUndo size={16} />
                 </span>
               ) : null}
               {props.stageAction === undefined || props.onStageDirChange === undefined ? null : (
@@ -463,7 +465,7 @@ function TreeRows(props: {
                     props.onStageDirChange?.(dir.path, props.stageAction === 'stage')
                   }}
                 >
-                  {props.stageAction === 'stage' ? <IconPlusOutline16 size={14} /> : <IconMinus size={14} />}
+                  {props.stageAction === 'stage' ? <IconPlusOutline16 size={16} /> : <IconMinus size={16} />}
                 </span>
               )}
             </button>

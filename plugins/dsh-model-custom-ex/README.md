@@ -85,7 +85,7 @@ ui-settings-models disable，否则官方 Models 页会消失。
 - `src/client/index.ts` — 注册 locale 字典 + Models section + onboarding（替代官方）。
 - `src/client/*` — 官方 `ui-settings-models` 的 fork 源码；**唯一改动**是 `ModelListEditor.tsx` 加了两个多选器。
 - `src/client/MultiSelectMenu.tsx` — 基于官方 `Menu`/`Pill` 原语的下拉多选组件。
-- `tsdown.client.config.ts` — 用 lightningcss 内联 `.module.css`，与官方 client bundle 一致。
+- `tsdown.client.config.ts` — 用 `@just-genius/dsh-plugin-ui/css-modules` 的 `dshCssModules` 内联 `.module.css`，与官方 client bundle 一致。
 
 ## 构建
 

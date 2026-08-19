@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Button,
-  IconChevronRightOutline14,
-  IconSearchOutline16,
   Input,
+  IconSearchOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  ExpandableRow,
+  FailureRow,
+  FilterChip,
+  FilterChips,
+  InlineNotice,
+  RowList,
+  SettingsSection,
+  StatusText,
+  Tag,
+  Tree,
+  TreeGroup,
+  TreeIndent,
+  TreeSubName,
+} from '@just-genius/dsh-plugin-ui'
 import type { ActionResult, InventorySnapshot, ManagedPlugin, PluginAction, PluginOrigin, PluginPlane } from '../types.ts'
 import type { ConfigKey } from './locales.ts'
 import styles from './ManageTab.module.css'
@@ -101,19 +115,19 @@ export function ManageTab({ loadInventory, runAction, t }: ManageTabInjected & {
   }
 
   return (
-    <div className={styles.section} aria-busy={state.status === 'loading'}>
-      {state.status === 'loading' ? <p className={styles.status}>{t('loading')}</p> : null}
+    <SettingsSection busy={state.status === 'loading'}>
+      {state.status === 'loading' ? <StatusText>{t('loading')}</StatusText> : null}
       {state.status === 'error' ? (
-        <div className={styles.failure}>
+        <FailureRow>
           <p role="alert">{t('error')}</p>
           <Button size="sm" variant="outline" onClick={() => setRequest((value) => value + 1)}>
             {t('retry')}
           </Button>
-        </div>
+        </FailureRow>
       ) : null}
       {state.status === 'ready' ? (
         <>
-          <p className={styles.hint}>{t('hint')}</p>
+          <StatusText>{t('hint')}</StatusText>
           <Input
             type="search"
             icon={<IconSearchOutline16 aria-hidden="true" />}
@@ -122,33 +136,33 @@ export function ManageTab({ loadInventory, runAction, t }: ManageTabInjected & {
             aria-label={t('search')}
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
-          <div className={styles.filters} role="group" aria-label={t('originAll')}>
-            <Chip active={origin === 'all'} onClick={() => setOrigin('all')}>{t('originAll')}</Chip>
-            <Chip active={origin === 'marketplace'} onClick={() => setOrigin('marketplace')}>{t('originMarketplace')}</Chip>
-            <Chip active={origin === 'external'} onClick={() => setOrigin('external')}>{t('originExternal')}</Chip>
-            <Chip active={origin === 'builtin'} onClick={() => setOrigin('builtin')}>{t('originBuiltin')}</Chip>
-          </div>
-          <div className={styles.filters} role="group" aria-label={t('planeAll')}>
-            <Chip active={plane === 'all'} onClick={() => setPlane('all')}>{t('planeAll')}</Chip>
-            <Chip active={plane === 'global'} onClick={() => setPlane('global')}>{t('planeGlobal')}</Chip>
-            <Chip active={plane === 'session'} onClick={() => setPlane('session')}>{t('planeSession')}</Chip>
-          </div>
-          {state.snapshot.plugins.length === 0 ? <p className={styles.status}>{t('empty')}</p> : null}
+          <FilterChips label={t('originAll')}>
+            <FilterChip active={origin === 'all'} onClick={() => setOrigin('all')}>{t('originAll')}</FilterChip>
+            <FilterChip active={origin === 'marketplace'} onClick={() => setOrigin('marketplace')}>{t('originMarketplace')}</FilterChip>
+            <FilterChip active={origin === 'external'} onClick={() => setOrigin('external')}>{t('originExternal')}</FilterChip>
+            <FilterChip active={origin === 'builtin'} onClick={() => setOrigin('builtin')}>{t('originBuiltin')}</FilterChip>
+          </FilterChips>
+          <FilterChips label={t('planeAll')}>
+            <FilterChip active={plane === 'all'} onClick={() => setPlane('all')}>{t('planeAll')}</FilterChip>
+            <FilterChip active={plane === 'global'} onClick={() => setPlane('global')}>{t('planeGlobal')}</FilterChip>
+            <FilterChip active={plane === 'session'} onClick={() => setPlane('session')}>{t('planeSession')}</FilterChip>
+          </FilterChips>
+          {state.snapshot.plugins.length === 0 ? <StatusText>{t('empty')}</StatusText> : null}
           {state.snapshot.plugins.length > 0 && filtered.length === 0 ? (
-            <p className={styles.status}>{t('emptySearch')}</p>
+            <StatusText>{t('emptySearch')}</StatusText>
           ) : null}
           {groups.length > 0 ? (
-            <div className={styles.tree}>
+            <Tree>
               {groups.map((originGroup) => (
-                <section key={originGroup.id} className={styles.origin}>
-                  <div className={styles.originHead}>
-                    <h3 className={styles.originTitle}>{t(originLabel(originGroup.id))}</h3>
-                    <span className={styles.originCount}>{originGroup.count}</span>
-                  </div>
+                <TreeGroup
+                  key={originGroup.id}
+                  title={t(originLabel(originGroup.id))}
+                  count={originGroup.count}
+                >
                   {originGroup.planes.map((planeGroup) => (
-                    <div key={planeGroup.id} className={styles.group}>
-                      <h4 className={styles.groupName}>{t(planeLabel(planeGroup.id))}</h4>
-                      <ul className={styles.rows}>
+                    <TreeIndent key={planeGroup.id}>
+                      <TreeSubName>{t(planeLabel(planeGroup.id))}</TreeSubName>
+                      <RowList>
                         {planeGroup.plugins.map((plugin) => (
                           <PluginRow
                             key={plugin.entryId}
@@ -166,24 +180,16 @@ export function ManageTab({ loadInventory, runAction, t }: ManageTabInjected & {
                             onUninstall={() => void onAction('uninstall', plugin)}
                           />
                         ))}
-                      </ul>
-                    </div>
+                      </RowList>
+                    </TreeIndent>
                   ))}
-                </section>
+                </TreeGroup>
               ))}
-            </div>
+            </Tree>
           ) : null}
         </>
       ) : null}
-    </div>
-  )
-}
-
-function Chip(props: { active: boolean; onClick: () => void; children: string }) {
-  return (
-    <button type="button" className={styles.chip} data-active={props.active ? 'true' : undefined} onClick={props.onClick}>
-      {props.children}
-    </button>
+    </SettingsSection>
   )
 }
 
@@ -237,29 +243,16 @@ function PluginRow(props: {
   const working = busy?.endsWith(`:${plugin.entryId}`) === true
   const action = busy?.split(':')[0]
   return (
-    <li
-      className={styles.plugin}
-      data-open={open ? 'true' : undefined}
-      data-conflict={plugin.nameConflict ? 'true' : undefined}
-    >
-      <div className={styles.pluginHead}>
-        <button
-          type="button"
-          className={styles.pluginMain}
-          aria-expanded={open}
-          aria-label={`${open ? t('collapse') : t('expand')}: ${plugin.shortName}`}
-          onClick={props.onToggle}
-        >
-          <IconChevronRightOutline14
-            className={open ? `${styles.pluginChevron} ${styles.pluginChevronOpen}` : styles.pluginChevron}
-            aria-hidden="true"
-          />
-          <span className={styles.titleBlock}>
-            <span className={styles.name} title={plugin.moduleName}>{plugin.shortName}</span>
-            <span className={styles.summary}>{plugin.packageName ?? plugin.moduleName}</span>
-          </span>
-        </button>
-        <div className={styles.pluginMeta}>
+    <ExpandableRow
+      open={open}
+      onToggle={props.onToggle}
+      toggleLabel={`${open ? t('collapse') : t('expand')}: ${plugin.shortName}`}
+      name={plugin.shortName}
+      nameTitle={plugin.moduleName}
+      summary={plugin.packageName ?? plugin.moduleName}
+      conflict={plugin.nameConflict}
+      meta={(
+        <>
           {plugin.enabled ? (
             <span
               className={styles.statusDot}
@@ -269,71 +262,68 @@ function PluginRow(props: {
               title={status}
             />
           ) : null}
-          <span className={styles.tag} data-enabled={plugin.enabled ? 'true' : 'false'}>
+          <Tag variant="text" tone={plugin.enabled ? 'strong' : undefined}>
             {plugin.enabled ? t('enabledTag') : t('disabledTag')}
-          </span>
-        </div>
-      </div>
-      {open ? (
-        <div className={styles.pluginBody}>
-          {plugin.nameConflict ? (
-            <p className={styles.conflict}>
-              {t('nameConflict')}
-              {plugin.conflictWith ? `: ${plugin.conflictWith}` : ''}
-            </p>
-          ) : null}
-          <dl className={styles.details}>
-            <dt>{t('module')}</dt>
-            <dd><code>{plugin.moduleName}</code></dd>
-            <dt>{t('entry')}</dt>
-            <dd><code>{plugin.entryId}</code></dd>
-            {plugin.packageName ? (
-              <>
-                <dt>{t('package')}</dt>
-                <dd><code>{plugin.packageName}</code></dd>
-              </>
-            ) : null}
-            {plugin.installSpec ? (
-              <>
-                <dt>{t('spec')}</dt>
-                <dd><code>{plugin.installSpec}</code></dd>
-              </>
-            ) : null}
-          </dl>
-          {plugin.protectedReason === 'core' ? <p className={styles.protect}>{t('protectedCore')}</p> : null}
-          {plugin.protectedReason === 'session-owned' ? <p className={styles.protect}>{t('protectedSession')}</p> : null}
-          {plugin.protectedReason === 'builtin' && !plugin.canUninstall ? <p className={styles.protect}>{t('protectedBuiltin')}</p> : null}
-          <div className={styles.actions}>
-            {plugin.canDisable ? (
-              <Button size="sm" variant="outline" disabled={working} onClick={props.onDisable}>
-                {working && action === 'disable' ? t('disabling') : t('disable')}
-              </Button>
-            ) : null}
-            {plugin.canEnable ? (
-              <Button size="sm" variant="primary" disabled={working} onClick={props.onEnable}>
-                {working && action === 'enable' ? t('enabling') : t('enable')}
-              </Button>
-            ) : null}
-            {plugin.canUninstall && !confirm ? (
-              <Button size="sm" variant="outline" disabled={working} onClick={props.onAskUninstall}>
-                {t('uninstall')}
-              </Button>
-            ) : null}
-            {plugin.canUninstall && confirm ? (
-              <>
-                <span className={styles.protect}>{t('confirmUninstall')}</span>
-                <Button size="sm" variant="primary" disabled={working} onClick={props.onUninstall}>
-                  {working && action === 'uninstall' ? t('uninstalling') : t('confirm')}
-                </Button>
-                <Button size="sm" variant="ghost" disabled={working} onClick={props.onCancelUninstall}>
-                  {t('cancel')}
-                </Button>
-              </>
-            ) : null}
-          </div>
-          {notice ? <p className={notice.kind === 'ok' ? styles.notice : styles.error}>{notice.text}</p> : null}
-        </div>
+          </Tag>
+        </>
+      )}
+    >
+      {plugin.nameConflict ? (
+        <p className={styles.conflict}>
+          {t('nameConflict')}
+          {plugin.conflictWith ? `: ${plugin.conflictWith}` : ''}
+        </p>
       ) : null}
-    </li>
+      <dl className={styles.details}>
+        <dt>{t('module')}</dt>
+        <dd><code>{plugin.moduleName}</code></dd>
+        <dt>{t('entry')}</dt>
+        <dd><code>{plugin.entryId}</code></dd>
+        {plugin.packageName ? (
+          <>
+            <dt>{t('package')}</dt>
+            <dd><code>{plugin.packageName}</code></dd>
+          </>
+        ) : null}
+        {plugin.installSpec ? (
+          <>
+            <dt>{t('spec')}</dt>
+            <dd><code>{plugin.installSpec}</code></dd>
+          </>
+        ) : null}
+      </dl>
+      {plugin.protectedReason === 'core' ? <p className={styles.protect}>{t('protectedCore')}</p> : null}
+      {plugin.protectedReason === 'session-owned' ? <p className={styles.protect}>{t('protectedSession')}</p> : null}
+      {plugin.protectedReason === 'builtin' && !plugin.canUninstall ? <p className={styles.protect}>{t('protectedBuiltin')}</p> : null}
+      <div className={styles.actions}>
+        {plugin.canDisable ? (
+          <Button size="sm" variant="outline" disabled={working} onClick={props.onDisable}>
+            {working && action === 'disable' ? t('disabling') : t('disable')}
+          </Button>
+        ) : null}
+        {plugin.canEnable ? (
+          <Button size="sm" variant="primary" disabled={working} onClick={props.onEnable}>
+            {working && action === 'enable' ? t('enabling') : t('enable')}
+          </Button>
+        ) : null}
+        {plugin.canUninstall && !confirm ? (
+          <Button size="sm" variant="outline" disabled={working} onClick={props.onAskUninstall}>
+            {t('uninstall')}
+          </Button>
+        ) : null}
+        {plugin.canUninstall && confirm ? (
+          <>
+            <span className={styles.protect}>{t('confirmUninstall')}</span>
+            <Button size="sm" variant="primary" disabled={working} onClick={props.onUninstall}>
+              {working && action === 'uninstall' ? t('uninstalling') : t('confirm')}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={working} onClick={props.onCancelUninstall}>
+              {t('cancel')}
+            </Button>
+          </>
+        ) : null}
+      </div>
+      {notice ? <InlineNotice kind={notice.kind}>{notice.text}</InlineNotice> : null}
+    </ExpandableRow>
   )
 }

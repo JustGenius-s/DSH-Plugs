@@ -59,6 +59,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@just-genius/dsh-plugin-ui": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent-default-model": "^0.1.0-rc.7",
     "@deepseek-ai/dsh-api-remotes": "^0.1.0-rc.6",

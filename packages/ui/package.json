@@ -7,6 +7,10 @@
     ".": {
       "types": "./lib/index.d.ts",
       "import": "./lib/index.js"
+    },
+    "./css-modules": {
+      "types": "./lib/css-modules.d.ts",
+      "import": "./lib/css-modules.js"
     }
   },
   "files": ["lib"],
@@ -18,7 +22,11 @@
   "peerDependencies": {
     "react": "^18.2.0"
   },
+  "dependencies": {
+    "lightningcss": "^1.29.2"
+  },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "react": "^18.2.0",
     "tsdown": "^0.22.14",

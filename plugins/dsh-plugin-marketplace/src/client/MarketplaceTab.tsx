@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Button,
-  IconChevronRightOutline14,
   IconCopyOutline16,
   IconSearchOutline16,
   Input,
@@ -9,6 +8,21 @@ import {
   writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  CommandRow,
+  ExpandableRow,
+  FailureRow,
+  IconButton,
+  InlineNotice,
+  RowList,
+  SettingsSection,
+  StatusText,
+  Tag,
+  Tree,
+  TreeGroup,
+  TreeIndent,
+  TreeSubName,
+} from '@just-genius/dsh-plugin-ui'
 import type { Catalog, CatalogPlugin } from '../catalog.ts'
 import { AWESOME_SOURCE, DSH_PLUGS_SOURCE, DSH_PLUGS_URL } from '../dsh-plugs.ts'
 import type { MarketplaceKey } from './locales.ts'
@@ -140,31 +154,6 @@ function IconRightUpOutline16() {
         strokeLinejoin="miter"
       />
     </svg>
-  )
-}
-
-function SourceIconButton(props: {
-  label: string
-  title?: string
-  active?: boolean
-  expanded?: boolean
-  hasPopup?: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  const { label, title, active, expanded, hasPopup, onClick, children } = props
-  return (
-    <button
-      type="button"
-      className={active === true ? `${styles.iconButton} ${styles.filterActive}` : styles.iconButton}
-      aria-label={label}
-      title={title ?? label}
-      aria-expanded={expanded}
-      aria-haspopup={hasPopup === true ? 'menu' : undefined}
-      onClick={onClick}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -324,15 +313,15 @@ export function MarketplaceTab(props: MarketplaceTabInjected & { t: Translate })
   }
 
   return (
-    <div className={styles.section} aria-busy={status === 'loading'}>
-      {status === 'loading' ? <p className={styles.status}>{t('loading')}</p> : null}
+    <SettingsSection busy={status === 'loading'}>
+      {status === 'loading' ? <StatusText>{t('loading')}</StatusText> : null}
       {status === 'error' ? (
-        <div className={styles.failure}>
+        <FailureRow>
           <p role="alert">{t('error')}</p>
           <Button size="sm" variant="outline" onClick={() => setRequest((value) => value + 1)}>
             {t('retry')}
           </Button>
-        </div>
+        </FailureRow>
       ) : null}
       {status === 'ready' && catalog ? (
         <div className={styles.catalog}>
@@ -344,12 +333,12 @@ export function MarketplaceTab(props: MarketplaceTabInjected & { t: Translate })
             aria-label={t('search')}
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
-          {catalog.plugins.length === 0 ? <p className={styles.status}>{t('empty')}</p> : null}
+          {catalog.plugins.length === 0 ? <StatusText>{t('empty')}</StatusText> : null}
           {catalog.plugins.length > 0 && groups.length === 0 ? (
-            <p className={styles.status}>{t('emptySearch')}</p>
+            <StatusText>{t('emptySearch')}</StatusText>
           ) : null}
           {groups.length > 0 ? (
-            <div className={styles.tree}>
+            <Tree>
               {groups.map((group) => {
                 const selectedCategory = sourceFilters[group.id] ?? 'all'
                 const visibleCategories = selectedCategory === 'all'
@@ -358,23 +347,15 @@ export function MarketplaceTab(props: MarketplaceTabInjected & { t: Translate })
                 const visibleCount = visibleCategories.reduce((sum, item) => sum + item.plugins.length, 0)
                 const open = searching || openSources[group.id] === true
                 return (
-                  <section key={group.id} className={styles.source}>
-                    <div className={styles.sourceHead}>
-                      <button
-                        type="button"
-                        className={styles.sourceToggle}
-                        aria-expanded={open}
-                        aria-label={`${open ? t('collapse') : t('expand')}: ${group.label}`}
-                        onClick={() => toggleSource(group.id)}
-                      >
-                        <IconChevronRightOutline14
-                          className={open ? `${styles.sourceChevron} ${styles.sourceChevronOpen}` : styles.sourceChevron}
-                          aria-hidden="true"
-                        />
-                        <span className={styles.sourceTitle}>{group.label}</span>
-                        <span className={styles.sourceCount}>{visibleCount}</span>
-                      </button>
-                      <div className={styles.sourceActions}>
+                  <TreeGroup
+                    key={group.id}
+                    title={group.label}
+                    count={visibleCount}
+                    open={open}
+                    onToggle={() => toggleSource(group.id)}
+                    toggleLabel={`${open ? t('collapse') : t('expand')}: ${group.label}`}
+                    actions={(
+                      <>
                         {group.categories.length > 1 ? (
                           <SourceCategoryFilter
                             label={`${t('filter')}: ${group.label}`}
@@ -386,39 +367,40 @@ export function MarketplaceTab(props: MarketplaceTabInjected & { t: Translate })
                           />
                         ) : null}
                         {group.href ? (
-                          <SourceIconButton
+                          <IconButton
                             label={`${t('openSource')}: ${group.label}`}
                             onClick={() => window.open(group.href!, '_blank', 'noopener,noreferrer')}
                           >
                             <IconRightUpOutline16 />
-                          </SourceIconButton>
+                          </IconButton>
                         ) : null}
-                      </div>
-                    </div>
+                      </>
+                    )}
+                  >
                     {open ? (
-                      <div className={styles.categories}>
+                      <TreeIndent>
                         {selectedCategory !== 'all' ? (
-                          <ul className={styles.rows}>
+                          <RowList>
                             {visibleCategories.flatMap((item) => item.plugins).map(renderPlugin)}
-                          </ul>
+                          </RowList>
                         ) : group.categories.map((categoryGroup) => (
                           <div key={categoryGroup.id} className={styles.category}>
-                            <h4 className={styles.categoryName}>{categoryGroup.label}</h4>
-                            <ul className={styles.rows}>
+                            <TreeSubName>{categoryGroup.label}</TreeSubName>
+                            <RowList>
                               {categoryGroup.plugins.map(renderPlugin)}
-                            </ul>
+                            </RowList>
                           </div>
                         ))}
-                      </div>
+                      </TreeIndent>
                     ) : null}
-                  </section>
+                  </TreeGroup>
                 )
               })}
-            </div>
+            </Tree>
           ) : null}
         </div>
       ) : null}
-    </div>
+    </SettingsSection>
   )
 }
 
@@ -456,7 +438,7 @@ function SourceCategoryFilter(props: {
       compact
       className={styles.iconMenu}
       anchor={(
-        <SourceIconButton
+        <IconButton
           label={label}
           title={active ? (categories.find((item) => item.id === selected)?.label ?? t('filter')) : t('filter')}
           active={active}
@@ -465,7 +447,7 @@ function SourceCategoryFilter(props: {
           onClick={() => setOpen((current) => !current)}
         >
           <IconFilterOutline16 />
-        </SourceIconButton>
+        </IconButton>
       )}
     />
   )
@@ -495,27 +477,17 @@ function PluginRow(props: {
   const title = plugin.packageName ?? plugin.name
   const description = locale === 'zh' ? plugin.description.zh : plugin.description.en
   return (
-    <li className={styles.plugin} data-open={open ? 'true' : undefined}>
-      <div className={styles.pluginHead}>
-        <button
-          type="button"
-          className={styles.pluginMain}
-          aria-expanded={open}
-          aria-label={`${open ? t('collapse') : t('expand')}: ${title}`}
-          onClick={onToggle}
-        >
-          <IconChevronRightOutline14
-            className={open ? `${styles.pluginChevron} ${styles.pluginChevronOpen}` : styles.pluginChevron}
-            aria-hidden="true"
-          />
-          <span className={styles.titleBlock}>
-            <span className={styles.name}>{title}</span>
-            {description ? <span className={styles.summary}>{description}</span> : null}
-          </span>
-        </button>
-        <div className={styles.pluginMeta}>
-          {installed ? <span className={styles.tag}>{t('installed')}</span> : null}
-          {pending && !installed ? <span className={`${styles.tag} ${styles.tagPending}`}>{t('pending')}</span> : null}
+    <ExpandableRow
+      open={open}
+      onToggle={onToggle}
+      toggleLabel={`${open ? t('collapse') : t('expand')}: ${title}`}
+      name={title}
+      summary={description || undefined}
+      summaryLines={2}
+      meta={(
+        <>
+          {installed ? <Tag variant="text">{t('installed')}</Tag> : null}
+          {pending && !installed ? <Tag variant="text" tone="business">{t('pending')}</Tag> : null}
           {!installed && !pending ? (
             <Button
               size="sm"
@@ -526,30 +498,27 @@ function PluginRow(props: {
               {installing ? t('installing') : t('install')}
             </Button>
           ) : null}
-        </div>
-      </div>
-      {open ? (
-        <div className={styles.pluginBody}>
-          <p className={styles.hint}>{t('restartHint')}</p>
-          <div className={styles.command}>
-            <span className={styles.commandLabel}>{t('command')}</span>
-            <code>{plugin.install}</code>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<IconCopyOutline16 aria-hidden="true" />}
-              aria-label={copied ? t('copied') : t('copyCommand')}
-              onClick={onCopy}
-            />
-          </div>
-          <a className={styles.repo} href={plugin.url} target="_blank" rel="noreferrer">
-            {t('repo')}
-          </a>
-          {notice ? (
-            <p className={notice.kind === 'ok' ? styles.notice : styles.error}>{notice.text}</p>
-          ) : null}
-        </div>
-      ) : null}
-    </li>
+        </>
+      )}
+    >
+      <InlineNotice>{t('restartHint')}</InlineNotice>
+      <CommandRow
+        label={t('command')}
+        command={plugin.install}
+        action={(
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconCopyOutline16 aria-hidden="true" />}
+            aria-label={copied ? t('copied') : t('copyCommand')}
+            onClick={onCopy}
+          />
+        )}
+      />
+      <a className={styles.repo} href={plugin.url} target="_blank" rel="noreferrer">
+        {t('repo')}
+      </a>
+      {notice ? <InlineNotice kind={notice.kind}>{notice.text}</InlineNotice> : null}
+    </ExpandableRow>
   )
 }

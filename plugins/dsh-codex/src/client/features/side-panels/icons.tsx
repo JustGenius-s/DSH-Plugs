@@ -6,7 +6,7 @@
  * 1. REUSE a native `ic_ds_*` glyph from `@deepseek-ai/dsh-client-ui-primitives`
  *    whenever one carries the right meaning. Reuse is free consistency — the
  *    glyph is byte-identical to what DSH draws elsewhere, and it tracks any
- *    upstream redraw. Four of the seven names below are pure reuse.
+ *    upstream redraw. Five of the seven names below are pure reuse.
  * 2. HAND-DRAW to DSH's spec only where that sheet has no equivalent
  *    (terminal, git-graph, and the generic panel mark). Spec reverse-engineered
  *    from the same sheet:
@@ -25,7 +25,7 @@
  * something outside this set overrides with its own thunk (SidePanelDescriptor).
  */
 import {
-  IconChecklistOutline14, IconFolderOpenOutline16,
+  IconBranchOutline16, IconChecklistOutline14, IconFolderOpenOutline16,
   IconGlobeOutline14, IconNewChatOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ReactNode } from 'react'
@@ -101,34 +101,6 @@ export function PanelIconDefault(props: PanelIconProps) {
 }
 
 /**
- * Git panel: Lucide's git-pull-request-arrow, used verbatim (stroke-type,
- * 24-grid) — the Git tab is the working-tree changes view, so a pull-request
- * glyph reads closer to "git operations" than a pure graph mark.
- */
-export function PanelIconGit({ size = 16, className }: PanelIconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <circle cx="5" cy="6" r="3" />
-      <path d="M5 9v12" />
-      <circle cx="19" cy="18" r="3" />
-      <path d="m15 9-3-3 3-3" />
-      <path d="M12 6h5a2 2 0 0 1 2 2v7" />
-    </svg>
-  )
-}
-
-/**
  * Commit graph: two stacked commits on the left, a full-height spine, and a
  * right-hand commit joining via a curved connector. Lucide's git-graph
  * composition, redrawn as DSH fill-type outlines so it sits with the rest
@@ -173,17 +145,16 @@ export function PanelIconGraph(props: PanelIconProps) {
  * (`icon: 'terminal'`) so the host owns the drawing and every panel row stays
  * on one visual language; a panel needing something else passes a thunk.
  *
- * `files`, `browser`, `chat` and `command` are native `ic_ds_*` glyphs
- * verbatim — the open-folder, meridian-globe, new-chat and checklist marks
- * DSH already uses for these meanings (checklist reads as a command list,
- * which is what a command panel shows). Globe and checklist are 14-grid
- * glyphs upstream; the size prop below still renders them at the row's 16px
- * box. `git` is the pull-request-arrow above — the Git panel is the
- * working-tree changes view, not the commit graph.
+ * `files`, `browser`, `chat`, `command` and `git` are native `ic_ds_*` glyphs
+ * verbatim — the open-folder, meridian-globe, new-chat, checklist and branch
+ * marks DSH already uses for these meanings (checklist reads as a command
+ * list, which is what a command panel shows; the branch mark is the canonical
+ * source-control glyph). Globe and checklist are 14-grid glyphs upstream; the
+ * size prop below still renders them at the row's 16px box.
  */
 export const PANEL_ICONS = {
   terminal: PanelIconTerminal,
-  git: PanelIconGit,
+  git: IconBranchOutline16,
   files: IconFolderOpenOutline16,
   browser: IconGlobeOutline14,
   chat: IconNewChatOutline16,

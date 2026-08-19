@@ -48,7 +48,7 @@ type QuickAction = Extract<
 >
 
 /** Tallest the commit box grows before it scrolls (about five lines). */
-const MESSAGE_MAX_HEIGHT = 108
+const MESSAGE_MAX_HEIGHT = 110
 
 /**
  * The Git tab's default body, modeled on VSCode's source-control panel: an
@@ -317,7 +317,6 @@ export function GitChangesView(props: GitChangesViewProps) {
       <Menu
         open={commitMenuOpen}
         portal
-        compact
         dense
         side="bottom"
         align="end"
@@ -330,7 +329,6 @@ export function GitChangesView(props: GitChangesViewProps) {
       <Menu
         open={overflowOpen}
         portal
-        compact
         dense
         side="bottom"
         align="end"
@@ -456,25 +454,31 @@ export function GitChangesView(props: GitChangesViewProps) {
   )
 }
 
-/** Lucide `folder-tree`, inlined (the primitives sheet has no tree glyph). */
+/**
+ * Folder-tree glyph, hand-drawn to the DSH fill-type spec (16px grid, 1.3px
+ * stroke equivalent) — the primitives sheet has no tree glyph.
+ */
 function IconFolderTree(props: { size?: number }) {
   const size = props.size ?? 16
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 16 16"
       fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" />
-      <path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z" />
-      <path d="M3 5a2 2 0 0 0 2 2h3" />
-      <path d="M3 3v13a2 2 0 0 0 2 2h3" />
+      <path d="M2.55 1.8h1.3v12.4h-1.3z" fill="currentColor" />
+      <path d="M3.85 4.85h2.55v1.3H3.85z" fill="currentColor" />
+      <path d="M3.85 10.85h2.55v1.3H3.85z" fill="currentColor" />
+      <path
+        d="M8 3.1h3.6a1.6 1.6 0 0 1 1.6 1.6v1.6a1.6 1.6 0 0 1-1.6 1.6H8a1.6 1.6 0 0 1-1.6-1.6V4.7A1.6 1.6 0 0 1 8 3.1z"
+        fill="currentColor"
+      />
+      <path
+        d="M8 9.1h3.6a1.6 1.6 0 0 1 1.6 1.6v1.6a1.6 1.6 0 0 1-1.6 1.6H8a1.6 1.6 0 0 1-1.6-1.6v-1.6A1.6 1.6 0 0 1 8 9.1z"
+        fill="currentColor"
+      />
     </svg>
   )
 }

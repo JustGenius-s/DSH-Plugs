@@ -14,6 +14,8 @@
 // The resize hit strip matches AppFrame's sidebar handle: an 8px, pill-less
 // col-resize strip centered on the panel's left border.
 
+import { injectStyles } from '@just-genius/dsh-plugin-ui'
+
 const CSS = `
 :root{--dsh-side-panels-width:0px}
 #root{margin-right:var(--dsh-side-panels-width);transition:margin-right var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
@@ -188,18 +190,5 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 /** Inject or refresh the shell stylesheet. Replacing textContent keeps HMR
  *  from leaving a stale tag that still matches the idempotent selector. */
 export function ensureSidePanelStyles(): void {
-  if (typeof document === 'undefined') return
-  const tagId = 'dsh-codex/side-panels.css'
-  const existing = document.querySelector(
-    'style[data-plugin-css=' + JSON.stringify(tagId) + ']',
-  )
-  if (existing instanceof HTMLStyleElement) {
-    existing.textContent = CSS
-    return
-  }
-  const tag = document.createElement('style')
-  tag.dataset.plugin = 'dsh-codex'
-  tag.dataset.pluginCss = tagId
-  tag.textContent = CSS
-  document.head.appendChild(tag)
+  injectStyles('@just-genius/dsh-codex', '@just-genius/dsh-codex/side-panels.css', CSS)
 }

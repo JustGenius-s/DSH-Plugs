@@ -13,23 +13,30 @@ import { useSyncExternalStore } from 'react'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { launcherVisible, type LauncherStore } from './launcher-store'
 
-/** Lucide `picture-in-picture-2`, per the design request. */
+/**
+ * Picture-in-picture glyph, hand-drawn to the DSH fill-type spec (16px grid,
+ * 1.35px frame via evenodd knockout) — the primitives sheet has no PiP mark.
+ */
 function IconPictureInPicture2({ size = 16 }: { size?: number }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 16 16"
       fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
       aria-hidden
     >
-      <path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4" />
-      <rect width="10" height="7" x="12" y="13" rx="2" />
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M2.95 2.55H13.05C14.38 2.55 15.45 3.62 15.45 4.95V11.05C15.45 12.38 14.38 13.45 13.05 13.45H2.95C1.62 13.45 0.55 12.38 0.55 11.05V4.95C0.55 3.62 1.62 2.55 2.95 2.55ZM2.95 3.9H13.05C13.63 3.9 14.1 4.37 14.1 4.95V11.05C14.1 11.63 13.63 12.1 13.05 12.1H2.95C2.37 12.1 1.9 11.63 1.9 11.05V4.95C1.9 4.37 2.37 3.9 2.95 3.9Z"
+        fill="currentColor"
+      />
+      <path
+        d="M9.3 7.4h3a1.3 1.3 0 0 1 1.3 1.3v1.6a1.3 1.3 0 0 1-1.3 1.3h-3a1.3 1.3 0 0 1-1.3-1.3V8.7a1.3 1.3 0 0 1 1.3-1.3z"
+        fill="currentColor"
+      />
     </svg>
   )
 }

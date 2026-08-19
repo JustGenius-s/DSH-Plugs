@@ -12,7 +12,9 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
-  deps: { neverBundle: true },
+  // neverBundle externalizes every package import; alwaysBundle wins for the
+  // shared UI package so it is inlined into this bundle (never a runtime dep).
+  deps: { neverBundle: true, alwaysBundle: ['@just-genius/dsh-plugin-ui'] },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {

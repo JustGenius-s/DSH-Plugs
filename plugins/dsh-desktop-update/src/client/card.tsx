@@ -1,15 +1,25 @@
 // Settings card for the `desktop-update` namespace, rendered inside the
 // Plugins section's configurable tab (rc.7+ keyed `settings.plugin.item`).
-// Chrome mirrors the official PluginCard: collapsible header, staged edits,
-// save/discard footer. Writes go through ctx.settingsScope (generic settings
-// RPC → settings.yaml); DSH-Desktop's main process watches the same file, so
-// both write paths converge. The version line + manual check ride the preload
-// bridge and only appear inside the desktop shell. On hosts that do not serve
-// the namespace (pre-rc.7, or a remote browser in memory mode) the card
-// leaves no trace.
+// Chrome comes from @just-genius/dsh-plugin-ui (the official PluginCard look:
+// collapsible header, staged edits, save/discard footer). Writes go through
+// ctx.settingsScope (generic settings RPC → settings.yaml); DSH-Desktop's
+// main process watches the same file, so both write paths converge. The
+// version line + manual check ride the preload bridge and only appear inside
+// the desktop shell. On hosts that do not serve the namespace (pre-rc.7, or
+// a remote browser in memory mode) the card leaves no trace.
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import {
+  ActionButton,
+  CardFooter,
+  DiscardButton,
+  Field,
+  PendingBadge,
+  SaveButton,
+  SettingsCard,
+  SwitchField,
+} from '@just-genius/dsh-plugin-ui'
 import { bridge, type DesktopUpdateState } from './bridge'
 import { ensureCardStyles } from './styles'
 
@@ -25,54 +35,6 @@ export interface DesktopUpdateConfig {
 export interface UpdateCardProps {
   t: (key: string) => string
   scope: SettingsScope<DesktopUpdateConfig>
-}
-
-function ChevronIcon(props: { open: boolean }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 14 14"
-      fill="none"
-      aria-hidden="true"
-      className={'dsh-du-chevron' + (props.open ? ' dsh-du-chevron-open' : '')}
-    >
-      <path
-        d="M3.5 5.25 7 8.75l3.5-3.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
-function GateField(props: {
-  id: string
-  label: string
-  hint: string
-  checked: boolean
-  disabled: boolean
-  onEdit: (enabled: boolean) => void
-}) {
-  return (
-    <div className="dsh-du-field">
-      <div className="dsh-du-field-head">
-        <label className="dsh-du-label" htmlFor={props.id}>{props.label}</label>
-        <input
-          id={props.id}
-          type="checkbox"
-          role="switch"
-          className="dsh-du-switch"
-          checked={props.checked}
-          disabled={props.disabled}
-          onChange={(e) => props.onEdit(e.target.checked)}
-        />
-      </div>
-      <p className="dsh-du-hint">{props.hint}</p>
-    </div>
-  )
 }
 
 export function UpdateCard(props: UpdateCardProps) {
@@ -142,87 +104,59 @@ export function UpdateCard(props: UpdateCardProps) {
 
   const title = t('card.title')
   return (
-    <li className={'dsh-du-card' + (open ? ' dsh-du-card-open' : '')}>
-      <button
-        type="button"
-        className="dsh-du-header"
-        aria-expanded={open}
-        aria-label={`${t(open ? 'card.collapse' : 'card.expand')}: ${title}`}
-        onClick={() => { setOpen(!open) }}
-      >
-        <span className="dsh-du-headtext">
-          <span className="dsh-du-name">{title}</span>
-          <span className="dsh-du-description">{t('card.description')}</span>
-        </span>
-        {dirty ? <span className="dsh-du-pending">{t('card.unsaved')}</span> : null}
-        <ChevronIcon open={open} />
-      </button>
-      {open
-        ? (
-          <div className="dsh-du-body">
-            {!writable ? <p className="dsh-du-readonly" role="status">{t('card.readOnly')}</p> : null}
-            {state !== null && (
-              <div className="dsh-du-field">
-                <div className="dsh-du-versions">
-                  <span>
-                    {[
-                      state.versions.app !== ''
-                        ? versionText(t('version.app'), state.versions.app, state.app?.latest)
-                        : '',
-                      state.versions.dsh !== null
-                        ? versionText(t('version.dsh'), state.versions.dsh, state.dsh?.latest)
-                        : '',
-                    ].filter((s) => s !== '').join(' · ')}
-                  </span>
-                  <button
-                    type="button"
-                    className="dsh-du-check"
-                    disabled={checking}
-                    onClick={checkNow}
-                  >
-                    {checking ? t('action.checking') : t('action.check')}
-                  </button>
-                </div>
-              </div>
-            )}
-            <GateField
-              id="plugin-config-desktop-update-check-app"
-              label={t('gate.app')}
-              hint={t('gate.appHint')}
-              checked={staged.checkApp}
-              disabled={disabled}
-              onEdit={(enabled) => { edit('checkApp', enabled) }}
-            />
-            <GateField
-              id="plugin-config-desktop-update-check-dsh"
-              label={t('gate.dsh')}
-              hint={t('gate.dshHint')}
-              checked={staged.checkDsh}
-              disabled={disabled}
-              onEdit={(enabled) => { edit('checkDsh', enabled) }}
-            />
-            <div className="dsh-du-footer">
-              {failed ? <p className="dsh-du-failed" role="status">{t('card.saveFailed')}</p> : null}
-              <button
-                type="button"
-                className="dsh-du-discard"
-                disabled={!dirty || saving}
-                onClick={discard}
-              >
-                {t('card.discard')}
-              </button>
-              <button
-                type="button"
-                className="dsh-du-save"
-                disabled={!dirty || saving}
-                onClick={save}
-              >
-                {t(saving ? 'card.saving' : 'card.save')}
-              </button>
-            </div>
+    <SettingsCard
+      title={title}
+      description={t('card.description')}
+      open={open}
+      onToggle={() => { setOpen(!open) }}
+      toggleLabel={`${t(open ? 'card.collapse' : 'card.expand')}: ${title}`}
+      pending={dirty ? <PendingBadge>{t('card.unsaved')}</PendingBadge> : undefined}
+    >
+      {!writable ? <p className="dsh-du-readonly" role="status">{t('card.readOnly')}</p> : null}
+      {state !== null && (
+        <Field>
+          <div className="dsh-du-versions">
+            <span>
+              {[
+                state.versions.app !== ''
+                  ? versionText(t('version.app'), state.versions.app, state.app?.latest)
+                  : '',
+                state.versions.dsh !== null
+                  ? versionText(t('version.dsh'), state.versions.dsh, state.dsh?.latest)
+                  : '',
+              ].filter((s) => s !== '').join(' · ')}
+            </span>
+            <ActionButton disabled={checking} onClick={checkNow}>
+              {checking ? t('action.checking') : t('action.check')}
+            </ActionButton>
           </div>
-        )
-        : null}
-    </li>
+        </Field>
+      )}
+      <SwitchField
+        id="plugin-config-desktop-update-check-app"
+        label={t('gate.app')}
+        hint={t('gate.appHint')}
+        checked={staged.checkApp}
+        disabled={disabled}
+        onChange={(enabled) => { edit('checkApp', enabled) }}
+      />
+      <SwitchField
+        id="plugin-config-desktop-update-check-dsh"
+        label={t('gate.dsh')}
+        hint={t('gate.dshHint')}
+        checked={staged.checkDsh}
+        disabled={disabled}
+        onChange={(enabled) => { edit('checkDsh', enabled) }}
+      />
+      <CardFooter>
+        {failed ? <p className="dsh-du-failed" role="status">{t('card.saveFailed')}</p> : null}
+        <DiscardButton disabled={!dirty || saving} onClick={discard}>
+          {t('card.discard')}
+        </DiscardButton>
+        <SaveButton disabled={!dirty || saving} onClick={save}>
+          {t(saving ? 'card.saving' : 'card.save')}
+        </SaveButton>
+      </CardFooter>
+    </SettingsCard>
   )
 }

@@ -107,7 +107,6 @@ export function CommitContextMenu(props: {
       <Menu
         open={menu !== null}
         portal
-        compact
         dense
         side="bottom"
         align="start"

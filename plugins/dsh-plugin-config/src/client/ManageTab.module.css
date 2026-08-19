@@ -1,218 +1,11 @@
-.section {
-  width: 100%;
-  max-width: 760px;
-  color: var(--dsw-alias-label-primary);
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
+/* Manage tab: only plugin-specific rules remain. The DSH-native chrome
+ * (section column, status lines, failure row, filter chips, tree groups,
+ * expandable rows, tags, notices) comes from @just-genius/dsh-plugin-ui and
+ * self-injects with the components. */
 
-.status,
-.failure p,
-.groupName,
-.hint,
-.notice,
-.error,
 .protect,
 .conflict {
   margin: 0;
-}
-
-.status,
-.hint {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.failure {
-  color: var(--dsw-alias-state-error-primary);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chip {
-  appearance: none;
-  margin: 0;
-  padding: 4px 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
-}
-
-.chip[data-active='true'] {
-  border-color: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-state-business-primary);
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
-}
-
-.chip:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: 1px;
-}
-
-.tree {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.origin {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.originHead {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  padding: 0 2px;
-}
-
-.originTitle {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.originCount {
-  color: var(--dsw-alias-label-tertiary);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-left: 7px;
-  padding-left: 12px;
-  border-left: 1px solid var(--dsw-alias-border-l2);
-}
-
-.groupName {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  padding: 0 2px;
-}
-
-.rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.plugin {
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-layer-3);
-  border-radius: 10px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.plugin[data-open='true'] {
-  border-color: var(--dsw-alias-border-l1);
-}
-
-.plugin[data-conflict='true'] {
-  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, var(--dsw-alias-border-l2));
-}
-
-.pluginHead {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-}
-
-.pluginMain {
-  appearance: none;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 8px 10px 10px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.pluginMain:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
-  outline-offset: -2px;
-}
-
-.pluginChevron {
-  color: var(--dsw-alias-label-tertiary);
-  flex: none;
-  margin-top: 3px;
-  transition: transform 0.16s;
-}
-
-.pluginChevronOpen {
-  transform: rotate(90deg);
-}
-
-.titleBlock {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.name {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.summary {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.pluginMeta {
-  display: flex;
-  align-items: center;
-  align-self: center;
-  gap: 6px;
-  flex: none;
-  padding: 8px 10px 8px 0;
 }
 
 .statusDot {
@@ -234,25 +27,6 @@
 .statusDot[data-phase='loading'],
 .statusDot[data-phase='pending'] {
   background: var(--dsw-alias-state-business-primary);
-}
-
-.tag {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-}
-
-.tag[data-enabled='true'] {
-  color: var(--dsw-alias-label-secondary);
-}
-
-.pluginBody {
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px 12px;
 }
 
 .details {
@@ -293,28 +67,8 @@
   line-height: 18px;
 }
 
-.protect,
-.notice {
+.protect {
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
   line-height: 18px;
-}
-
-.notice {
-  color: var(--dsw-alias-state-business-primary);
-}
-
-.error {
-  color: var(--dsw-alias-state-error-primary);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: pre-wrap;
-}
-
-.visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
 }
