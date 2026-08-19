@@ -44,24 +44,35 @@ function isCommitAction(action: GitGraphActionName): action is CommitAction {
 }
 
 /**
- * Working-tree actions from the Git changes panel. `commit` stages nothing
- * itself: with staged changes it commits the index, otherwise it falls back
- * to `commit -a` (all tracked changes, mirroring VSCode's smart commit —
- * untracked files are never swept in implicitly).
+ * Working-tree actions from the Git changes panel. Commit semantics mirror
+ * VSCode's source-control panel: with `all` the client already confirmed
+ * "stage all and commit", so everything (untracked included) is added first;
+ * otherwise the index is committed as-is, falling back to `commit -a` (all
+ * tracked changes) when nothing is staged. Amend never sweeps in unstaged
+ * changes implicitly.
  */
 async function runWorkdirAction(request: GitGraphActionRequest): Promise<string> {
   const cwd = request.cwd
   switch (request.action) {
     case 'commit':
-    case 'commit-push': {
+    case 'commit-push':
+    case 'commit-amend':
+    case 'commit-push-amend': {
       const message = (request.message ?? '').trim()
       if (message.length === 0) throw badRequest('empty commit message')
-      const staged = await hasStagedChanges(cwd)
-      const out = await gitText(
-        cwd,
-        staged ? ['commit', '-m', message] : ['commit', '-am', message],
-      )
-      if (request.action === 'commit') return out
+      const amend = request.action === 'commit-amend' || request.action === 'commit-push-amend'
+      if (request.all === true) await gitText(cwd, ['add', '-A'])
+      // Amend with nothing staged is legal and simply rewrites the message.
+      const args = ['commit']
+      if (amend) {
+        args.push('--amend', '-m', message)
+      } else if (request.all === true || (await hasStagedChanges(cwd))) {
+        args.push('-m', message)
+      } else {
+        args.push('-am', message)
+      }
+      const out = await gitText(cwd, args)
+      if (request.action === 'commit' || request.action === 'commit-amend') return out
       const push = await gitText(cwd, ['push'])
       return [out, push].filter((part) => part.length > 0).join('\n')
     }
@@ -92,6 +103,17 @@ async function runWorkdirAction(request: GitGraphActionRequest): Promise<string>
         }
         return gitText(cwd, ['rm', '-q', '-r', '--cached', '--ignore-unmatch', '--', '.'])
       }
+    }
+    case 'discard': {
+      // VSCode parity: untracked files are deleted, tracked files are
+      // restored from the index (worktree side only — staged changes stay).
+      const path = safePath(request.path)
+      const status = await gitText(cwd, ['status', '--porcelain', '-z', '--', path])
+      if (status.length === 0) return ''
+      if (status.startsWith('??')) {
+        return gitText(cwd, ['clean', '-f', '--', path])
+      }
+      return gitText(cwd, ['checkout', '--', path])
     }
     case 'discard-all': {
       const reset = await gitText(cwd, ['reset', '--hard', 'HEAD'])

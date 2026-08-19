@@ -69,12 +69,18 @@ const GRAPH_CSS = `
 .dsh-git-graph-detail-count .is-del{color:#e06c75}
 .dsh-git-graph-menu-anchor{position:fixed;width:0;height:0;overflow:hidden;pointer-events:none}
 .dsh-git-changes{height:100%;display:flex;flex-direction:column;min-height:0;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
-.dsh-git-changes-header{flex:none;display:flex;align-items:center;gap:6px;min-height:32px;padding:4px 8px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08))}
-.dsh-git-changes-message{flex:1;min-width:0}
-.dsh-git-changes-message input{width:100%;font-size:12px}
+.dsh-git-changes-header{flex:none;display:flex;flex-direction:column;gap:6px;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08))}
+.dsh-git-changes-message{box-sizing:border-box;width:100%;min-height:28px;max-height:108px;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08));border-radius:8px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,#e6e6e8);font:inherit;font-size:12px;line-height:18px;resize:none;outline:none;overflow-y:auto}
+.dsh-git-changes-message:focus{border-color:var(--dsw-alias-brand-primary,#4f7cff)}
+.dsh-git-changes-message::placeholder{color:var(--dsw-alias-label-dimmed,#8b8b90)}
+.dsh-git-changes-toolbar{display:flex;align-items:center;gap:6px}
+.dsh-git-changes-spacer{flex:1}
 .dsh-git-changes-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer}
 .dsh-git-changes-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-git-changes-icon.is-active{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-business-primary,#4f7cff)}
+.dsh-git-changes-icon:disabled{opacity:.5;cursor:default}
+@keyframes dsh-git-changes-spin{to{transform:rotate(360deg)}}
+.dsh-git-changes-icon.is-generating svg{animation:dsh-git-changes-spin 1s linear infinite}
 .dsh-git-graph-detail-caret{flex:none;display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-git-graph-detail-row.is-dir .dsh-git-graph-detail-name{font-size:12px;line-height:16px;color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-git-changes-commit{flex:none;display:inline-flex;align-items:stretch;height:22px;border-radius:6px;background:var(--dsw-alias-state-business-primary,#4f7cff);color:var(--dsw-alias-label-on-primary,#fff)}

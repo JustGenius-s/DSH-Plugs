@@ -9,6 +9,7 @@ import {
   GIT_GRAPH_DIFF_PATH,
   GIT_GRAPH_FILE_PATH,
   GIT_GRAPH_FILES_PATH,
+  GIT_GRAPH_MESSAGE_PATH,
   GIT_GRAPH_PATH,
   GIT_GRAPH_TREE_PATH,
   type GitGraphActionName,
@@ -19,6 +20,7 @@ import {
   type GitGraphErr,
   type GitGraphFileResponse,
   type GitGraphFilesResponse,
+  type GitGraphMessageResponse,
   type GitGraphResponse,
   type GitGraphTreeResponse,
   type GitResetMode,
@@ -26,6 +28,7 @@ import {
 import { runGraphAction } from './actions'
 import { loadChangeFiles, loadFile, loadFileDiff, loadTree } from './browse'
 import { clampLimit, clampSkip, loadCommitBody, loadGraphLog } from './log'
+import { generateCommitMessage } from './message'
 
 export interface DshCodexGitGraphServer {
   dispose(): void
@@ -67,6 +70,11 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
     path: GIT_GRAPH_DIFF_PATH,
     handler: handleDiff,
   })
+  const disposeMessage = ctx.webServer.register({
+    kind: 'exact',
+    path: GIT_GRAPH_MESSAGE_PATH,
+    handler: (req, res) => handleMessage(ctx, req, res),
+  })
   return {
     dispose() {
       disposeGraph()
@@ -76,6 +84,7 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
       disposeTree()
       disposeFile()
       disposeDiff()
+      disposeMessage()
     },
   }
 }
@@ -279,6 +288,33 @@ async function handleDiff(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
+async function handleMessage(ctx: Context, req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'POST') {
+    json(res, 405, fail('bad-request', 'method not allowed'))
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    json(res, 400, fail('bad-request', errorMessage(error)))
+    return
+  }
+  const candidate = body as { cwd?: unknown }
+  const cwd = readCwd(typeof candidate.cwd === 'string' ? candidate.cwd : null)
+  if (cwd === undefined) {
+    json(res, 400, fail('no-cwd', 'workspace directory is missing'))
+    return
+  }
+  try {
+    const message = await generateCommitMessage(ctx, cwd)
+    const value: GitGraphMessageResponse = { ok: true, message }
+    json(res, 200, value)
+  } catch (error) {
+    writeGitError(res, error)
+  }
+}
+
 function parseAction(value: unknown): GitGraphActionRequest | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const candidate = value as Partial<GitGraphActionRequest>
@@ -290,6 +326,7 @@ function parseAction(value: unknown): GitGraphActionRequest | undefined {
   if (typeof candidate.branch === 'string') request.branch = candidate.branch
   if (typeof candidate.message === 'string') request.message = candidate.message
   if (typeof candidate.path === 'string') request.path = candidate.path
+  if (candidate.all === true) request.all = true
   if (candidate.mode === 'soft' || candidate.mode === 'mixed' || candidate.mode === 'hard') {
     request.mode = candidate.mode as GitResetMode
   }
@@ -305,10 +342,13 @@ function parseActionName(value: unknown): GitGraphActionName | undefined {
     case 'reset':
     case 'commit':
     case 'commit-push':
+    case 'commit-amend':
+    case 'commit-push-amend':
     case 'stage':
     case 'unstage':
     case 'stage-all':
     case 'unstage-all':
+    case 'discard':
     case 'discard-all':
     case 'pull':
     case 'push':

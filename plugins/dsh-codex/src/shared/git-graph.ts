@@ -6,6 +6,7 @@ export const GIT_GRAPH_FILES_PATH = '/dsh-codex/git-graph/files'
 export const GIT_GRAPH_TREE_PATH = '/dsh-codex/git-graph/tree'
 export const GIT_GRAPH_FILE_PATH = '/dsh-codex/git-graph/file'
 export const GIT_GRAPH_DIFF_PATH = '/dsh-codex/git-graph/diff'
+export const GIT_GRAPH_MESSAGE_PATH = '/dsh-codex/git-graph/message'
 
 /** Sentinel `ref` query value: show every local, remote, and tag tip. */
 export const GIT_GRAPH_ALL_SCOPE = '__all__'
@@ -80,10 +81,13 @@ export type GitGraphActionName =
   | 'reset'
   | 'commit'
   | 'commit-push'
+  | 'commit-amend'
+  | 'commit-push-amend'
   | 'stage'
   | 'unstage'
   | 'stage-all'
   | 'unstage-all'
+  | 'discard'
   | 'discard-all'
   | 'pull'
   | 'push'
@@ -100,10 +104,15 @@ export interface GitGraphActionRequest {
   action: GitGraphActionName
   branch?: string
   mode?: GitResetMode
-  /** Commit message, required by `commit` / `commit-push`. */
+  /** Commit message, required by the `commit*` actions. */
   message?: string
-  /** Repo-relative file path, required by `stage` / `unstage`. */
+  /** Repo-relative file path, required by `stage` / `unstage` / `discard`. */
   path?: string
+  /**
+   * Commit actions only: stage every change (`git add -A`, untracked
+   * included) before committing — the confirmed "stage all and commit" flow.
+   */
+  all?: boolean
 }
 
 export interface GitGraphActionOk {
@@ -206,3 +215,15 @@ export interface GitGraphDiffOk {
 }
 
 export type GitGraphDiffResponse = GitGraphDiffOk | GitGraphErr
+
+export interface GitGraphMessageRequest {
+  cwd: string
+}
+
+export interface GitGraphMessageOk {
+  ok: true
+  /** The generated commit message, ready to drop into the commit box. */
+  message: string
+}
+
+export type GitGraphMessageResponse = GitGraphMessageOk | GitGraphErr

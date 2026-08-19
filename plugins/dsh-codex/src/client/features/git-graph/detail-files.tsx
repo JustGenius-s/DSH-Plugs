@@ -39,6 +39,13 @@ export interface GitGraphDetailProps {
   /** Section-header hover actions: stage/unstage every file in the group. */
   onStageAll?: () => void
   onUnstageAll?: () => void
+  /**
+   * Working-tree mode: discard one file's worktree changes from its row
+   * hover action (untracked files are deleted). Omitting it hides the button.
+   */
+  onDiscard?: (file: GitChangeFile) => void
+  /** Reports the fetched list so the parent can react to group counts. */
+  onFilesChange?: (files: readonly GitChangeFile[]) => void
 }
 
 /**
@@ -48,7 +55,7 @@ export interface GitGraphDetailProps {
  * side and render as two VSCode-style groups: staged on top, changes below.
  */
 export function GitGraphDetail(props: GitGraphDetailProps) {
-  const { cwd, sha, title, t, onOpenFile, display = 'flat', onStageChange, onStageAll, onUnstageAll } = props
+  const { cwd, sha, title, t, onOpenFile, display = 'flat', onStageChange, onStageAll, onUnstageAll, onDiscard, onFilesChange } = props
   const [files, setFiles] = useState<readonly GitChangeFile[] | null>(null)
   const [error, setError] = useState<string | undefined>()
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
@@ -65,9 +72,10 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
         return
       }
       setFiles(value.files)
+      onFilesChange?.(value.files)
     })
     return () => { cancelled = true }
-  }, [cwd, sha])
+  }, [cwd, sha, onFilesChange])
 
   const toggleDir = (path: string): void => {
     setCollapsed((current) => {
@@ -89,7 +97,7 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
     [files, grouped],
   )
 
-  const listProps = { display, collapsed, onToggleDir: toggleDir, sha, t, onOpenFile, onStageChange }
+  const listProps = { display, collapsed, onToggleDir: toggleDir, sha, t, onOpenFile, onStageChange, onDiscard }
 
   return (
     <div className="dsh-git-graph-detail">
@@ -138,6 +146,7 @@ function ChangeSection(props: {
   t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
+  onDiscard?: (file: GitChangeFile) => void
   /** Header hover action matching stageAction's direction (all files). */
   onStageAll?: () => void
 }) {
@@ -177,13 +186,14 @@ function FileList(props: {
   onOpenFile: (file: string, sha?: string) => void
   stageAction?: 'stage' | 'unstage'
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
+  onDiscard?: (file: GitChangeFile) => void
 }) {
-  const { files, display, collapsed, onToggleDir, sha, t, onOpenFile, stageAction, onStageChange } = props
+  const { files, display, collapsed, onToggleDir, sha, t, onOpenFile, stageAction, onStageChange, onDiscard } = props
   const tree = useMemo(
     () => (display !== 'tree' ? undefined : buildTree(files)),
     [files, display],
   )
-  const rowProps = { sha, t, onOpenFile, stageAction, onStageChange }
+  const rowProps = { sha, t, onOpenFile, stageAction, onStageChange, onDiscard }
   return (
     <div className="dsh-git-graph-detail-list">
       {tree !== undefined ? (
@@ -221,8 +231,10 @@ function FileRow(props: {
   /** Hover action this row offers; undefined = read-only row. */
   stageAction?: 'stage' | 'unstage'
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
+  /** Discard hover action, only meaningful on the unstaged (Changes) side. */
+  onDiscard?: (file: GitChangeFile) => void
 }) {
-  const { file, sha, t, stageAction, onStageChange } = props
+  const { file, sha, t, stageAction, onStageChange, onDiscard } = props
   // Tree rows skip the caret a directory row carries, so file icons line up
   // with directory icons at the same level (caret 12px + row gap 6px).
   const indent = 4 + props.depth * 14 + (props.showDir ? 0 : 18)
@@ -245,6 +257,21 @@ function FileRow(props: {
           <span className="dsh-git-graph-detail-dir">{fileDir(file.path)}</span>
         )}
       </span>
+      {stageAction === 'stage' && onDiscard !== undefined ? (
+        <span
+          role="button"
+          tabIndex={-1}
+          className="dsh-git-graph-detail-action"
+          aria-label={t('gitGraph.discard')}
+          title={t('gitGraph.discard')}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDiscard(file)
+          }}
+        >
+          <IconUndo size={14} />
+        </span>
+      ) : null}
       {stageAction === undefined || onStageChange === undefined ? null : (
         <span
           role="button"
@@ -270,6 +297,27 @@ function FileRow(props: {
         {STATUS_LABEL[file.status]}
       </span>
     </button>
+  )
+}
+
+/** Lucide `undo-2`, inlined (the primitives sheet has no discard glyph). */
+function IconUndo(props: { size?: number }) {
+  const size = props.size ?? 16
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11" />
+    </svg>
   )
 }
 
@@ -332,6 +380,7 @@ function TreeRows(props: {
   onOpenFile: (file: string, sha?: string) => void
   stageAction?: 'stage' | 'unstage'
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
+  onDiscard?: (file: GitChangeFile) => void
 }) {
   const { node, depth, collapsed } = props
   const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
@@ -372,6 +421,7 @@ function TreeRows(props: {
                 onOpenFile={props.onOpenFile}
                 stageAction={props.stageAction}
                 onStageChange={props.onStageChange}
+                onDiscard={props.onDiscard}
               />
             ) : null}
           </Fragment>
@@ -388,6 +438,7 @@ function TreeRows(props: {
           onOpenFile={props.onOpenFile}
           stageAction={props.stageAction}
           onStageChange={props.onStageChange}
+          onDiscard={props.onDiscard}
         />
       ))}
     </>
