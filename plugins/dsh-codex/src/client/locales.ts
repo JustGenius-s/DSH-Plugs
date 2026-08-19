@@ -106,6 +106,7 @@ export const zh = {
   'gitGraph.discardConfirm': '放弃',
   'gitGraph.confirmDiscardFile': '确定要放弃对 {file} 的更改吗？此操作无法撤销。',
   'gitGraph.confirmDiscardUntracked': '确定要删除未跟踪的文件 {file} 吗？此操作无法撤销。',
+  'gitGraph.confirmDiscardDir': '确定要放弃目录 {file} 下的所有更改吗？其中未跟踪的文件会被删除，此操作无法撤销。',
   'gitGraph.discardAll': '放弃所有更改',
   'gitGraph.confirmDiscard': '放弃所有更改会丢弃未提交的修改（包括未跟踪文件），且无法恢复。',
   'gitGraph.confirmDiscardAck': '我了解这会丢弃本地改动',
@@ -142,6 +143,7 @@ export const zh = {
   'status.connecting': '连接中…',
   'status.ready': '就绪',
   'status.disconnected': '已断开',
+  'status.reconnecting': '连接已断开，正在重新连接…',
   reconnect: '重新连接',
 } as const
 
@@ -253,6 +255,7 @@ export const en: Record<keyof typeof zh, string> = {
   'gitGraph.discardConfirm': 'Discard',
   'gitGraph.confirmDiscardFile': 'Discard the changes to {file}? This cannot be undone.',
   'gitGraph.confirmDiscardUntracked': 'Delete the untracked file {file}? This cannot be undone.',
+  'gitGraph.confirmDiscardDir': 'Discard all changes under {file}? Untracked files inside will be deleted. This cannot be undone.',
   'gitGraph.discardAll': 'Discard all changes',
   'gitGraph.confirmDiscard': 'Discarding all changes drops every uncommitted modification (including untracked files) and cannot be undone.',
   'gitGraph.confirmDiscardAck': 'I understand this discards local changes',
@@ -289,6 +292,7 @@ export const en: Record<keyof typeof zh, string> = {
   'status.connecting': 'Connecting…',
   'status.ready': 'Ready',
   'status.disconnected': 'Disconnected',
+  'status.reconnecting': 'Connection lost, reconnecting…',
   reconnect: 'Reconnect',
 }
 

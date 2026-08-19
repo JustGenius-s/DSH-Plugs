@@ -303,11 +303,10 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         setFailure(t('fetchEmpty'))
         return
       }
-      // Everything already configured starts unchecked, so adopting a
-      // selection never silently rewrites a capacity the user corrected.
-      const known = new Set(models.map(model => textOf(model, 'id')))
+      // Nothing starts checked: the user picks each model to adopt, so a
+      // fetch never smuggles rows into the profile unexamined.
       setCandidates(found)
-      setPicked(new Set(found.filter(model => !known.has(model.id)).map(model => model.id)))
+      setPicked(new Set())
     } catch (error) {
       // The transport rejected rather than answering; without this the button
       // would stay busy with nothing shown.

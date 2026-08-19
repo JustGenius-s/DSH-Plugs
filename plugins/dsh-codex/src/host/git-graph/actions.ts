@@ -107,13 +107,21 @@ async function runWorkdirAction(request: GitGraphActionRequest): Promise<string>
     case 'discard': {
       // VSCode parity: untracked files are deleted, tracked files are
       // restored from the index (worktree side only — staged changes stay).
+      // The path may be a directory (tree-view folder discard), which can
+      // hold both kinds at once, so each side is handled independently.
       const path = safePath(request.path)
       const status = await gitText(cwd, ['status', '--porcelain', '-z', '--', path])
       if (status.length === 0) return ''
-      if (status.startsWith('??')) {
-        return gitText(cwd, ['clean', '-f', '--', path])
+      const entries = status.split('\0').filter((entry) => entry.length > 0)
+      const out: string[] = []
+      if (entries.some((entry) => !entry.startsWith('??'))) {
+        out.push(await gitText(cwd, ['checkout', '--', path]))
       }
-      return gitText(cwd, ['checkout', '--', path])
+      if (entries.some((entry) => entry.startsWith('??'))) {
+        // -d: an untracked path can be a whole directory.
+        out.push(await gitText(cwd, ['clean', '-fd', '--', path]))
+      }
+      return out.filter((part) => part.length > 0).join('\n')
     }
     case 'discard-all': {
       const reset = await gitText(cwd, ['reset', '--hard', 'HEAD'])

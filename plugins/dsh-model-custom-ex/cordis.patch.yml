@@ -6,3 +6,12 @@
 - insert:
     - id: dsh-model-custom-ex
       name: '@just-genius/dsh-model-custom-ex'
+
+# Disable the official Models settings plugin: this package forks it (same
+# section id/locale/onboarding) to add per-model vision + reasoning-effort
+# selectors. Without this disable, both plugins would register a "models"
+# section and the nav rail would show two identical "Models" tabs. Bundle
+# patches apply in profile bundle order, and this package is listed after
+# @deepseek-ai/dsh-web-app, so the override lands after the official insert.
+- id: ui-settings-models
+  disabled: true

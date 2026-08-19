@@ -41,9 +41,19 @@ const BEL = '\x07'
 const WS_PATH = '/dsh-codex/terminal/ws'
 const MARKER_PREFIXES = [BLOCK_END_PREFIX, NODE_VERSION_PREFIX] as const
 const CONTEXT_TIMEOUT_MS = 2500
+/** How long a detached PTY outlives its socket, waiting for a reconnect. */
+const DETACH_GRACE_MS = 10 * 60 * 1000
+/** Total output (chars) buffered for replay while a session is detached. */
+const REPLAY_MAX_CHARS = 1024 * 1024
+/** Host pings every attached socket on this cadence; two misses kill it. */
+const HEARTBEAT_MS = 30_000
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
 
 export interface TerminalSession {
-  ws: WebSocket
+  /** Client-supplied reconnect token; one PTY per id survives socket drops. */
+  id: string
+  /** The currently attached socket; null while detached (client away). */
+  ws: WebSocket | null
   handle: SubprocessTerminalHandle
   cwd: string
   shell: string
@@ -52,6 +62,14 @@ export interface TerminalSession {
   pending: string
   ready: boolean
   closed: boolean
+  /** PTY already exited; a reattach only collects the buffered `exit`. */
+  exited: boolean
+  /** Liveness flag for the heartbeat: set on attach/pong, cleared per ping. */
+  alive: boolean
+  /** Messages emitted while detached, flushed on reattach. */
+  replay: ServerMessage[]
+  replayChars: number
+  detachTimer: ReturnType<typeof setTimeout> | undefined
   nodeVersion: string | undefined
   contextSeq: number
   mode: 'prompt' | 'output'
@@ -83,7 +101,7 @@ export function createDshCodexTerminalServer(
   getConfig: () => DshCodexConfig = () => DEFAULT_CONFIG,
 ): DshCodexTerminalServer {
   const wss = new WebSocketServer({ noServer: true })
-  const sessions = new Set<TerminalSession>()
+  const sessions = new Map<string, TerminalSession>()
 
   const disposeRoute = ctx.webServer.registerUpgrade({
     path: WS_PATH,
@@ -95,12 +113,19 @@ export function createDshCodexTerminalServer(
   })
 
   const onConnection = (ws: WebSocket, req: IncomingMessage) => {
-    void openSession(ctx, ws, req, getConfig)
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const sessionId = parseSessionId(url.searchParams.get('session'))
+    // A reconnect carries the same session id: reattach to the PTY that
+    // survived the drop instead of spawning a fresh shell (Warp behavior).
+    const existing = sessionId === undefined ? undefined : sessions.get(sessionId)
+    if (existing !== undefined && !existing.closed) {
+      attachSocket(existing, ws, sessions, true)
+      return
+    }
+    void openSession(ctx, ws, req, getConfig, sessionId, sessions)
       .then((session) => {
         if (session === undefined || session.closed) return
-        sessions.add(session)
-        const release = () => { sessions.delete(session) }
-        void session.handle.done.then(release, release)
+        sessions.set(session.id, session)
       })
       .catch((error) => {
         send(ws, { type: 'error', message: errorMessage(error) })
@@ -109,10 +134,26 @@ export function createDshCodexTerminalServer(
   }
   wss.on('connection', onConnection)
 
+  // Idle intermediaries drop silent WebSockets; ping so the connection looks
+  // alive, and terminate half-open sockets that stopped answering.
+  const heartbeat = setInterval(() => {
+    for (const session of sessions.values()) {
+      const ws = session.ws
+      if (ws === null || ws.readyState !== ws.OPEN) continue
+      if (!session.alive) {
+        try { ws.terminate() } catch { /* already closing */ }
+        continue
+      }
+      session.alive = false
+      try { ws.ping() } catch { /* already closing */ }
+    }
+  }, HEARTBEAT_MS)
+
   return {
     dispose() {
+      clearInterval(heartbeat)
       wss.off('connection', onConnection)
-      for (const session of sessions) closeSession(session)
+      for (const session of sessions.values()) closeSession(session)
       sessions.clear()
       disposeRoute()
       wss.close()
@@ -120,16 +161,83 @@ export function createDshCodexTerminalServer(
   }
 }
 
+/**
+ * Wire a socket onto a live session. On reattach (`rehandshake`) the client
+ * treats the socket as brand new, so resend `ready`, flush everything emitted
+ * while detached, and push a fresh prompt context.
+ */
+function attachSocket(
+  session: TerminalSession,
+  ws: WebSocket,
+  sessions: Map<string, TerminalSession>,
+  rehandshake: boolean,
+): void {
+  if (session.detachTimer !== undefined) {
+    clearTimeout(session.detachTimer)
+    session.detachTimer = undefined
+  }
+  session.ws = ws
+  session.alive = true
+  ws.on('pong', () => { session.alive = true })
+  ws.on('close', () => detachSession(session, ws, sessions))
+  ws.on('message', (raw) => onClientMessage(session, raw))
+  if (!rehandshake) return
+  send(ws, {
+    type: 'ready',
+    cwd: session.cwd,
+    shell: session.shell,
+    rows: session.rows,
+    cols: session.cols,
+  })
+  const replay = session.replay
+  session.replay = []
+  session.replayChars = 0
+  for (const message of replay) send(ws, message)
+  if (session.exited) {
+    try { ws.close() } catch { /* already closing */ }
+    return
+  }
+  void updateContext(session)
+}
+
+/**
+ * The socket dropped: keep the PTY alive for DETACH_GRACE_MS so a reconnect
+ * resumes the exact shell, and buffer its output for replay. Sessions whose
+ * shell already exited (or that never come back) are torn down immediately /
+ * when the grace timer fires.
+ */
+function detachSession(
+  session: TerminalSession,
+  ws: WebSocket,
+  sessions: Map<string, TerminalSession>,
+): void {
+  if (session.ws !== ws) return
+  session.ws = null
+  if (session.closed || session.exited) {
+    closeSession(session)
+    sessions.delete(session.id)
+    return
+  }
+  session.detachTimer = setTimeout(() => {
+    session.detachTimer = undefined
+    closeSession(session)
+    sessions.delete(session.id)
+  }, DETACH_GRACE_MS)
+}
+
 export async function openSession(
   ctx: Context,
   ws: WebSocket,
   req: IncomingMessage,
   getConfig: () => DshCodexConfig = () => DEFAULT_CONFIG,
+  sessionId?: string,
+  sessions?: Map<string, TerminalSession>,
 ): Promise<TerminalSession | undefined> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   const cwd = url.searchParams.get('cwd')?.trim() || process.cwd()
   const rows = clampInt(url.searchParams.get('rows'), 5, 200, 30)
   const cols = clampInt(url.searchParams.get('cols'), 20, 500, 100)
+  const registry = sessions ?? new Map<string, TerminalSession>()
   const config = getConfig()
   if (!config.terminalEnabled) {
     send(ws, { type: 'error', message: 'terminal disabled' })
@@ -202,7 +310,8 @@ export async function openSession(
   const handle = spawnedHandle
 
   const session: TerminalSession = {
-    ws,
+    id: sessionId ?? `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+    ws: null,
     handle,
     cwd,
     shell,
@@ -211,6 +320,11 @@ export async function openSession(
     pending: '',
     ready: false,
     closed: false,
+    exited: false,
+    alive: true,
+    replay: [],
+    replayChars: 0,
+    detachTimer: undefined,
     nodeVersion: undefined,
     contextSeq: 0,
     mode: 'prompt',
@@ -226,13 +340,11 @@ export async function openSession(
   })
 
   ws.off('close', onEarlyClose)
-  ws.on('close', () => {
-    closeSession(session)
-  })
   if (ws.readyState !== ws.OPEN) {
     closeSession(session)
     return undefined
   }
+  attachSocket(session, ws, registry, false)
 
   handle.output.on('data', (chunk: Buffer | string) => {
     if (session.closed) return
@@ -243,20 +355,27 @@ export async function openSession(
   void handle.done
     .then((outcome) => {
       if (session.closed) return
-      session.closed = true
+      session.exited = true
       if (session.ready && session.pending.length > 0) {
-        send(session.ws, { type: 'output', text: session.pending })
+        deliver(session, { type: 'output', text: session.pending })
         session.pending = ''
       }
-      send(session.ws, {
+      deliver(session, {
         type: 'exit',
         exitCode: outcome.exitCode,
         signal: outcome.signal,
       })
-      try {
-        session.ws.close()
-      } catch {
-        // already closing
+      const attached = session.ws
+      if (attached !== null) {
+        try {
+          attached.close()
+        } catch {
+          // already closing
+        }
+        // The close event detaches; an exited session is torn down there.
+      } else {
+        closeSession(session)
+        registry.delete(session.id)
       }
     })
     .catch(() => {})
@@ -267,94 +386,132 @@ export async function openSession(
   const setup = setupScript(shell)
   await handle.write(setup)
 
-  ws.on('message', (raw) => {
-    if (session.closed) return
-    let message: ClientMessage
-    try {
-      message = JSON.parse(String(raw)) as ClientMessage
-    } catch {
-      return
-    }
-    switch (message.type) {
-      case 'input': {
-        // Bytes buffered since the last block-end marker are the shell's own
-        // prompt (prompt frameworks redraw it from precmd, so PS1='' cannot
-        // suppress it). The client renders its own Warp-style prompt, so the
-        // shell prompt is discarded here and the mode switches back to output.
-        session.promptBuf = ""
-        session.mode = 'output'
-        session.pending = ""
-        void session.handle.write(message.data).catch(() => {})
-        break
-      }
-      case 'complete': {
-        if (
-          typeof message.requestId !== 'number' ||
-          typeof message.input !== 'string' ||
-          typeof message.cursor !== 'number' ||
-          message.input.length > 32_768
-        ) break
-        const requestId = Math.floor(message.requestId)
-        void completeTerminalInput(message.input, message.cursor, session.cwd)
-          .then((completion) => {
-            if (session.closed) return
-            send(session.ws, { type: 'completion', requestId, ...completion })
-          })
-          .catch(() => {
-            if (session.closed) return
-            send(session.ws, {
-              type: 'completion',
-              requestId,
-              start: Math.max(0, Math.min(message.input.length, Math.floor(message.cursor))),
-              end: Math.max(0, Math.min(message.input.length, Math.floor(message.cursor))),
-              replacement: '',
-              candidates: [],
-            })
-          })
-        break
-      }
-      case 'signal': {
-        void session.handle
-          .signalForeground(message.signal as SubprocessTerminalSignal)
-          .catch(() => {})
-        break
-      }
-      case 'resize': {
-        // The seam's SubprocessTerminalHandle does not expose resize, but the
-        // local provider's handle wraps a node-pty instance which does. Resize
-        // the PTY so full-screen programs (vim) lay out to the real panel
-        // dimensions instead of the spawn-time placeholder.
-        const cols = Math.max(20, Math.min(500, Math.floor(message.cols)))
-        const rows = Math.max(5, Math.min(200, Math.floor(message.rows)))
-        session.cols = cols
-        session.rows = rows
-        const pty = (session.handle as unknown as { terminal?: { resize?: (c: number, r: number) => void } }).terminal
-        try {
-          pty?.resize?.(cols, rows)
-        } catch {
-          // Ignore a resize racing terminal shutdown.
-        }
-        break
-      }
-      case 'kill': {
-        void session.handle.terminate().catch(() => {})
-        break
-      }
-    }
-  })
-
   if (session.closed) return undefined
   return session
+}
+
+/** Handle one client message on the session's currently attached socket. */
+function onClientMessage(session: TerminalSession, raw: unknown): void {
+  if (session.closed) return
+  let message: ClientMessage
+  try {
+    message = JSON.parse(String(raw)) as ClientMessage
+  } catch {
+    return
+  }
+  switch (message.type) {
+    case 'input': {
+      // Bytes buffered since the last block-end marker are the shell's own
+      // prompt (prompt frameworks redraw it from precmd, so PS1='' cannot
+      // suppress it). The client renders its own Warp-style prompt, so the
+      // shell prompt is discarded here and the mode switches back to output.
+      session.promptBuf = ""
+      session.mode = 'output'
+      session.pending = ""
+      void session.handle.write(message.data).catch(() => {})
+      break
+    }
+    case 'complete': {
+      if (
+        typeof message.requestId !== 'number' ||
+        typeof message.input !== 'string' ||
+        typeof message.cursor !== 'number' ||
+        message.input.length > 32_768
+      ) break
+      const requestId = Math.floor(message.requestId)
+      void completeTerminalInput(message.input, message.cursor, session.cwd)
+        .then((completion) => {
+          if (session.closed) return
+          deliver(session, { type: 'completion', requestId, ...completion })
+        })
+        .catch(() => {
+          if (session.closed) return
+          deliver(session, {
+            type: 'completion',
+            requestId,
+            start: Math.max(0, Math.min(message.input.length, Math.floor(message.cursor))),
+            end: Math.max(0, Math.min(message.input.length, Math.floor(message.cursor))),
+            replacement: '',
+            candidates: [],
+          })
+        })
+      break
+    }
+    case 'signal': {
+      void session.handle
+        .signalForeground(message.signal as SubprocessTerminalSignal)
+        .catch(() => {})
+      break
+    }
+    case 'resize': {
+      // The seam's SubprocessTerminalHandle does not expose resize, but the
+      // local provider's handle wraps a node-pty instance which does. Resize
+      // the PTY so full-screen programs (vim) lay out to the real panel
+      // dimensions instead of the spawn-time placeholder.
+      const cols = Math.max(20, Math.min(500, Math.floor(message.cols)))
+      const rows = Math.max(5, Math.min(200, Math.floor(message.rows)))
+      session.cols = cols
+      session.rows = rows
+      const pty = (session.handle as unknown as { terminal?: { resize?: (c: number, r: number) => void } }).terminal
+      try {
+        pty?.resize?.(cols, rows)
+      } catch {
+        // Ignore a resize racing terminal shutdown.
+      }
+      break
+    }
+    case 'kill': {
+      void session.handle.terminate().catch(() => {})
+      break
+    }
+  }
 }
 
 export function closeSession(session: TerminalSession): void {
   if (session.closed) return
   session.closed = true
+  if (session.detachTimer !== undefined) {
+    clearTimeout(session.detachTimer)
+    session.detachTimer = undefined
+  }
   void session.handle.terminate().catch(() => {})
-  try {
-    session.ws.close()
-  } catch {
-    // already closing
+  const ws = session.ws
+  session.ws = null
+  if (ws !== null) {
+    try {
+      ws.close()
+    } catch {
+      // already closing
+    }
+  }
+}
+
+/**
+ * Send to the attached socket, or buffer for replay while detached. Only
+ * transcript-bearing messages (output / block-end / exit / history) are
+ * replayed — ready, context, and completions are re-derived on reattach.
+ */
+function deliver(session: TerminalSession, message: ServerMessage): void {
+  const ws = session.ws
+  if (ws !== null && ws.readyState === ws.OPEN) {
+    send(ws, message)
+    return
+  }
+  if (
+    message.type !== 'output'
+    && message.type !== 'block-end'
+    && message.type !== 'exit'
+    && message.type !== 'history'
+  ) {
+    return
+  }
+  const chars = message.type === 'output' ? message.text.length : 64
+  session.replay.push(message)
+  session.replayChars += chars
+  while (session.replayChars > REPLAY_MAX_CHARS && session.replay.length > 0) {
+    const dropped = session.replay.shift()
+    if (dropped === undefined) break
+    session.replayChars -= dropped.type === 'output' ? dropped.text.length : 64
   }
 }
 
@@ -440,7 +597,7 @@ export function onTerminalData(session: TerminalSession, chunk: string): void {
     if (session.ready === false) {
       session.ready = true
       if (cwd.length > 0) session.cwd = cwd
-      send(session.ws, {
+      deliver(session, {
         type: 'ready',
         cwd: session.cwd,
         shell: session.shell,
@@ -451,7 +608,7 @@ export function onTerminalData(session: TerminalSession, chunk: string): void {
       void updateContext(session)
     } else {
       if (cwd.length > 0) session.cwd = cwd
-      send(session.ws, { type: 'block-end', exitCode })
+      deliver(session, { type: 'block-end', exitCode })
       void updateContext(session)
     }
     session.mode = 'prompt'
@@ -486,7 +643,7 @@ function emitOutput(session: TerminalSession, text: string): void {
     }
     return
   }
-  send(session.ws, { type: 'output', text })
+  deliver(session, { type: 'output', text })
 }
 
 /**
@@ -503,7 +660,7 @@ async function updateContext(session: TerminalSession): Promise<void> {
   if (seq !== session.contextSeq) return
   const context: BlockContext = { cwd, ...git }
   if (session.nodeVersion !== undefined) context.nodeVersion = session.nodeVersion
-  send(session.ws, { type: 'context', context })
+  deliver(session, { type: 'context', context })
 }
 
 async function getGitInfo(
@@ -548,7 +705,7 @@ function sendHistoryIfReady(session: TerminalSession): void {
   if (session.closed || session.ready === false || session.historySent) return
   if (session.history === undefined) return
   session.historySent = true
-  send(session.ws, { type: 'history', commands: session.history })
+  deliver(session, { type: 'history', commands: session.history })
 }
 
 function send(ws: WebSocket, message: ServerMessage): void {
@@ -561,6 +718,11 @@ function send(ws: WebSocket, message: ServerMessage): void {
 
 function parseTerminalShell(value: string | null): TerminalShell | undefined {
   return value === 'auto' || value === 'bash' || value === 'zsh' ? value : undefined
+}
+
+function parseSessionId(value: string | null): string | undefined {
+  if (value === null) return undefined
+  return SESSION_ID_RE.test(value) ? value : undefined
 }
 
 function clampInt(value: string | null, min: number, max: number, fallback: number): number {

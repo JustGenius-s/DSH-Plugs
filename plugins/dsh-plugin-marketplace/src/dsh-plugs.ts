@@ -73,6 +73,15 @@ export const DSH_PLUGS_PLUGINS: readonly DshPlugsPluginDef[] = [
       zh: '微信风格聊天皮肤：会话变成聊天，对面像真人一样用短气泡汇报进度，可从「我」切回经典界面。',
     },
   },
+  {
+    folder: 'dsh-debug-mode',
+    packageName: '@just-genius/dsh-debug-mode',
+    category: 'session',
+    description: {
+      en: 'Cursor-style debug mode: /debug, a reproduction card, and a Debug Logs dock. First slice — no automatic instrumentation yet.',
+      zh: 'Cursor 风格 Debug 模式：/debug、复现步骤卡和 Debug Logs 面板。第一版还没有自动埋点。',
+    },
+  },
 ]
 
 export function githubPathSpec(folder: string): string {

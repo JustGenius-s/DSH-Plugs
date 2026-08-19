@@ -22,7 +22,9 @@ const BLOCK_CSS = `
 .dsh-warp-block-chrome{position:relative;display:flex;align-items:flex-start;gap:8px;padding:14px 2px 0;border-top:1px solid var(--dsw-alias-border-l1,rgba(255,255,255,.06));pointer-events:auto}
 .dsh-warp-block-chrome .dsh-warp-terminal-prompt-line{flex:1;min-width:0}
 .dsh-warp-terminal-banner{display:flex;align-items:center;gap:10px;min-height:30px;padding:6px 10px;margin:0 0 8px;border:1px solid rgba(248,113,113,.35);border-radius:8px;background:rgba(248,113,113,.08);font-size:12px;color:var(--dsw-alias-label-primary,#e6e6e8)}
+.dsh-warp-terminal-banner.is-reconnecting{border-color:rgba(229,192,123,.35);background:rgba(229,192,123,.08)}
 .dsh-warp-terminal-error{color:#f87171;font-size:12px}
+.dsh-warp-terminal-reconnecting{color:#e5c07b;font-size:12px}
 .dsh-warp-terminal-reconnect{flex:none;height:24px;padding:0 10px;border:none;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;color:#fff;background:var(--dsw-alias-button-info-fill,#4176e6)}
 .dsh-warp-terminal-reconnect:hover{background:var(--dsw-alias-button-info-hover,#679efe)}
 

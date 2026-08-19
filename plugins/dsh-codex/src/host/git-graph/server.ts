@@ -12,6 +12,7 @@ import {
   GIT_GRAPH_MESSAGE_PATH,
   GIT_GRAPH_PATH,
   GIT_GRAPH_TREE_PATH,
+  GIT_GRAPH_WATCH_PATH,
   type GitGraphActionName,
   type GitGraphActionRequest,
   type GitGraphActionResponse,
@@ -29,6 +30,7 @@ import { runGraphAction } from './actions'
 import { loadChangeFiles, loadFile, loadFileDiff, loadTree } from './browse'
 import { clampLimit, clampSkip, loadCommitBody, loadGraphLog } from './log'
 import { generateCommitMessage } from './message'
+import { handleWatch } from './watch'
 
 export interface DshCodexGitGraphServer {
   dispose(): void
@@ -75,6 +77,11 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
     path: GIT_GRAPH_MESSAGE_PATH,
     handler: (req, res) => handleMessage(ctx, req, res),
   })
+  const disposeWatch = ctx.webServer.register({
+    kind: 'exact',
+    path: GIT_GRAPH_WATCH_PATH,
+    handler: handleWatchRoute,
+  })
   return {
     dispose() {
       disposeGraph()
@@ -85,7 +92,27 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
       disposeFile()
       disposeDiff()
       disposeMessage()
+      disposeWatch()
     },
+  }
+}
+
+async function handleWatchRoute(req: IncomingMessage, res: ServerResponse) {
+  if (req.method !== 'GET') {
+    json(res, 405, fail('bad-request', 'method not allowed'))
+    return
+  }
+  const url = readUrl(req)
+  const cwd = readCwd(url.searchParams.get('cwd'))
+  if (cwd === undefined) {
+    json(res, 400, fail('no-cwd', 'workspace directory is missing'))
+    return
+  }
+  try {
+    // Keeps the response open; the stream ends when the client disconnects.
+    await handleWatch(req, res, cwd)
+  } catch (error) {
+    writeGitError(res, error)
   }
 }
 

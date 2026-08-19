@@ -18,6 +18,7 @@ import { PanelIconGraph } from '../side-panels/icons'
 import {
   GIT_GRAPH_ACTION_PATH,
   GIT_GRAPH_MESSAGE_PATH,
+  GIT_GRAPH_WATCH_PATH,
   type GitChangeFile,
   type GitGraphActionName,
   type GitGraphActionRequest,
@@ -68,6 +69,7 @@ export function GitChangesView(props: GitChangesViewProps) {
   const [counts, setCounts] = useState({ staged: 0, total: 0 })
   const [commitAll, setCommitAll] = useState<{ action: CommitAction; message: string } | null>(null)
   const [discardFile, setDiscardFile] = useState<GitChangeFile | null>(null)
+  const [discardDir, setDiscardDir] = useState<string | null>(null)
   const [discardOpen, setDiscardOpen] = useState(false)
   const [acknowledged, setAcknowledged] = useState(false)
   const [toast, setToast] = useState<{ seq: number; text: string; kind: 'ok' | 'error' } | null>(null)
@@ -82,6 +84,32 @@ export function GitChangesView(props: GitChangesViewProps) {
     setToast({ seq: toastSeq.current, text, kind })
   }, [])
   const refresh = useCallback(() => setRefreshSeq((seq) => seq + 1), [])
+
+  // Auto-refresh, VSCode-style: the host's repo watcher pushes a `change`
+  // event over SSE whenever the worktree, index, or refs move. Window focus
+  // and tab visibility backstop environments where EventSource cannot
+  // connect (Electron's fetch bridge) or a watch event was missed.
+  useEffect(() => {
+    if (cwd === undefined || cwd.length === 0) return
+    let source: EventSource | undefined
+    if (typeof EventSource !== 'undefined') {
+      source = new EventSource(
+        `${GIT_GRAPH_WATCH_PATH}?cwd=${encodeURIComponent(cwd)}`,
+      )
+      source.addEventListener('change', refresh)
+    }
+    const onFocus = (): void => refresh()
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      source?.close()
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [cwd, refresh])
 
   // Auto-grow the commit box with its content, capped at MESSAGE_MAX_HEIGHT.
   useEffect(() => {
@@ -269,19 +297,21 @@ export function GitChangesView(props: GitChangesViewProps) {
           </button>
         </div>
       </div>
-      {/* Key prefixes matter: this list and the Toast below are siblings, and
-          two siblings sharing a numeric key corrupt React's keyed reconciliation
-          (the overwritten fiber is orphaned — never unmounted, never updated). */}
+      {/* refreshSeq re-fetches in place (rows and tree state survive); the
+          keyed Toast below must keep its `toast-` prefix — two siblings
+          sharing a numeric key corrupt React's keyed reconciliation. */}
       <GitGraphDetail
-        key={`detail-${refreshSeq}`}
         cwd={cwd}
         t={t}
         display={display}
+        refreshSeq={refreshSeq}
         onOpenFile={(file, sha) => onOpenFile?.(file, sha)}
         onStageChange={(file, stage) => void run(stage ? 'stage' : 'unstage', undefined, file.path)}
         onStageAll={() => void run('stage-all')}
         onUnstageAll={() => void run('unstage-all')}
         onDiscard={(file) => setDiscardFile(file)}
+        onStageDirChange={(path, stage) => void run(stage ? 'stage' : 'unstage', undefined, path)}
+        onDiscardDir={(path) => setDiscardDir(path)}
         onFilesChange={onFilesChange}
       />
       <Menu
@@ -361,6 +391,33 @@ export function GitChangesView(props: GitChangesViewProps) {
                 setDiscardFile(null)
                 if (file === null) return
                 void run('discard', undefined, file.path)
+              }}
+            >
+              {t('gitGraph.discardConfirm')}
+            </Button>
+          </>
+        )}
+      />
+      <Modal
+        open={discardDir !== null}
+        onClose={() => setDiscardDir(null)}
+        title={t('gitGraph.discard')}
+        closeLabel={t('gitGraph.close')}
+        description={t('gitGraph.confirmDiscardDir').replace('{file}', discardDir ?? '')}
+        footer={(
+          <>
+            <Button type="button" variant="outline" onClick={() => setDiscardDir(null)}>
+              {t('gitGraph.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={busy}
+              onClick={() => {
+                const dir = discardDir
+                setDiscardDir(null)
+                if (dir === null) return
+                void run('discard', undefined, dir)
               }}
             >
               {t('gitGraph.discardConfirm')}

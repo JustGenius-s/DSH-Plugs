@@ -7,6 +7,8 @@ export const GIT_GRAPH_TREE_PATH = '/dsh-codex/git-graph/tree'
 export const GIT_GRAPH_FILE_PATH = '/dsh-codex/git-graph/file'
 export const GIT_GRAPH_DIFF_PATH = '/dsh-codex/git-graph/diff'
 export const GIT_GRAPH_MESSAGE_PATH = '/dsh-codex/git-graph/message'
+/** SSE stream of `change` events, fired when the repository state moves. */
+export const GIT_GRAPH_WATCH_PATH = '/dsh-codex/git-graph/watch'
 
 /** Sentinel `ref` query value: show every local, remote, and tag tip. */
 export const GIT_GRAPH_ALL_SCOPE = '__all__'

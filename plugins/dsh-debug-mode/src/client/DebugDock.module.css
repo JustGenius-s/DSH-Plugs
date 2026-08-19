@@ -1,0 +1,135 @@
+.dock {
+  box-sizing: border-box;
+  width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset) - var(--dsh-composer-dock-inset));
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card,
+.repro {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));
+  margin: 0 auto;
+  border-radius: 16px;
+  background: var(--dsw-specific-input-major);
+  box-shadow: var(--dsw-shadow-lv2);
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+}
+
+.card,
+.repro,
+.card *,
+.repro * {
+  box-sizing: border-box;
+}
+
+.card {
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+
+.repro {
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, var(--dsw-alias-border-l1));
+}
+
+.logHeader,
+.reproHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.logGlyph,
+.flag {
+  color: var(--dsw-alias-label-tertiary);
+  display: inline-flex;
+}
+
+.flag {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.logBody,
+.reproBody {
+  min-height: 72px;
+  max-height: min(28vh, 240px);
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.empty {
+  color: var(--dsw-alias-label-caption);
+  font-variant: small-caps;
+  letter-spacing: .04em;
+}
+
+.line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.line + .line {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.lineMeta {
+  color: var(--dsw-alias-label-caption);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.lineText {
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reproFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px 12px;
+}
+
+.reproActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.kbd {
+  margin-left: 6px;
+  font: inherit;
+  font-size: 11px;
+  opacity: .7;
+}
+
+.feedback {
+  padding: 0 14px 10px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+@media (width <= 720px) {
+  .reproFooter,
+  .reproActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

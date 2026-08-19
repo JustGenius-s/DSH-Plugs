@@ -1,0 +1,8 @@
+# Bundle patch for @just-genius/dsh-debug-mode.
+#
+# Host half owns /debug, the debug policy section, wait_for_repro / debug_log,
+# and the log/repro HTTP routes. Browser half paints the Debug chip and dock.
+
+- insert:
+    - id: dsh-debug-mode
+      name: '@just-genius/dsh-debug-mode'

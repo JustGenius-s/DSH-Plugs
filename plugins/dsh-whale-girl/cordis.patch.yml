@@ -1,0 +1,9 @@
+# Bundle patch for @just-genius/dsh-whale-girl.
+#
+# Host half owns the pet ledger and /whale-girl/* routes (state, interact,
+# presence, overlay page, assets). Browser half mounts the in-page pet, or
+# opens a DSH-Desktop overlay when window.dshDesktop.overlays is present.
+
+- insert:
+    - id: dsh-whale-girl
+      name: '@just-genius/dsh-whale-girl'

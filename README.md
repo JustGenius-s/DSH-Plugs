@@ -38,6 +38,14 @@ A DSH-Desktop update badge next to the sidebar Settings button, driven by `windo
 
 Turns the web surface into a WeChat-style messenger: chat list, green/white bubbles, and an agent that texts short progress updates while it works. Switch back from 我.
 
+### [@just-genius/dsh-whale-girl](plugins/dsh-whale-girl)
+
+Desktop pet (whale-girl). In a plain browser it is the in-page companion; in DSH-Desktop it opens a transparent always-on-top overlay via `window.dshDesktop.overlays` so the pet sits on the OS desktop. Presence heartbeats hide the in-page pet while the overlay is online.
+
+### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
+
+Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with Proceed / Mark as fixed. The agent still instruments by editing files and calling `debug_log` — there is no automatic runtime probe bus yet.
+
 ## Repository layout
 
 ```

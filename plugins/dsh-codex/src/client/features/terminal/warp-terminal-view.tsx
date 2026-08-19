@@ -85,14 +85,26 @@ function newBlockId(): string {
   return 'b' + Date.now().toString(36) + '-' + blockCounter
 }
 
-function buildWsUrl(cwd: string | undefined, shell: TerminalShell): string {
+function buildWsUrl(cwd: string | undefined, shell: TerminalShell, sessionToken: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const query = new URLSearchParams()
   if (cwd) query.set('cwd', cwd)
   if (shell !== 'auto') query.set('shell', shell)
+  query.set('session', sessionToken)
   query.set('rows', '30')
   query.set('cols', '100')
   return proto + '//' + window.location.host + '/dsh-codex/terminal/ws?' + query.toString()
+}
+
+/**
+ * Reconnect token for one terminal view. The host keeps the PTY alive across
+ * socket drops keyed by this id, so a reconnect resumes the same shell.
+ */
+function newSessionToken(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12)
 }
 
 function displayPath(cwd: string): string {
@@ -195,7 +207,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const [completionMenu, setCompletionMenu] = useState<CompletionMenu | null>(null)
   const [ghost, setGhost] = useState('')
   const [currentContext, setCurrentContext] = useState<BlockContext | null>(null)
-  const [connState, setConnState] = useState<'connecting' | 'ready' | 'disconnected'>('connecting')
+  const [connState, setConnState] = useState<'connecting' | 'ready' | 'reconnecting' | 'disconnected'>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [reconnectToken, setReconnectToken] = useState(0)
@@ -243,7 +255,10 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const oscQueryBufferRef = useRef('')
   const handleServerMessageRef = useRef((m: ServerMessage) => { void m })
   const lastSessionKeyRef = useRef('')
-  const readySeenRef = useRef(false)
+  const sessionTokenRef = useRef(newSessionToken())
+  // Set when the host reported the shell's own `exit`: a real end of session,
+  // so no auto-reconnect (a reconnect would silently spawn a fresh shell).
+  const exitedRef = useRef(false)
   const retryCountRef = useRef(0)
   const retryTimerRef = useRef(0)
   const eraseScrollbackBufRef = useRef('')
@@ -750,7 +765,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const handleServerMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
       case 'ready':
-        readySeenRef.current = true
         retryCountRef.current = 0
         setConnState('ready')
         setError(null)
@@ -816,12 +830,14 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
           runningIdRef.current = null
           setRunningId(null)
         }
+        exitedRef.current = true
         setConnState('disconnected')
         break
       }
       case 'error':
+        // The host always closes the socket after an error; onclose drives
+        // the reconnect state, so here we only keep the message for the banner.
         setError(message.message)
-        setConnState('disconnected')
         break
     }
   }, [appendOutput, completeRunning, refreshHistoryGhost, setDraftWithCaret])
@@ -893,11 +909,13 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     const sessionKey = sessionId
     if (lastSessionKeyRef.current !== sessionKey) {
       lastSessionKeyRef.current = sessionKey
-      readySeenRef.current = false
+      // A new DSH session gets a fresh PTY, never a reattach.
+      sessionTokenRef.current = newSessionToken()
+      exitedRef.current = false
       retryCountRef.current = 0
     }
     let disposed = false
-    const ws = new WebSocket(buildWsUrl(sessionCwd, terminalShellRef.current))
+    const ws = new WebSocket(buildWsUrl(sessionCwd, terminalShellRef.current, sessionTokenRef.current))
     wsRef.current = ws
     ws.onmessage = (event) => {
       if (disposed) return
@@ -909,20 +927,26 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     }
     ws.onclose = () => {
       if (disposed) return
-      setConnState('disconnected')
-      setRunningId(null)
-      runningIdRef.current = null
-      // Intermittent host spawn failures (e.g. macOS node-pty 'posix_spawnp
-      // failed') recover on retry. If we never reached 'ready', auto-reconnect
-      // with backoff instead of leaving the panel dead until a manual click.
-      if (!readySeenRef.current && retryCountRef.current < 3) {
-        const attempt = retryCountRef.current
-        retryCountRef.current = attempt + 1
-        const delay = 400 * Math.pow(2, attempt)
-        retryTimerRef.current = window.setTimeout(() => {
-          if (!disposed) setReconnectToken((token) => token + 1)
-        }, delay)
+      // The shell itself exited (user ran `exit`): this is a real end of
+      // session, not a network drop — stay disconnected until a manual click.
+      if (exitedRef.current) {
+        setRunningId(null)
+        runningIdRef.current = null
+        setConnState('disconnected')
+        return
       }
+      // Keep the running block open across the reconnect: the host replays
+      // what the shell printed while detached, and it belongs to that block.
+      // Any other drop is auto-reconnected with capped exponential backoff.
+      // The host keeps the PTY alive for a grace period, so the reattach
+      // resumes the same shell and replays whatever it printed meanwhile.
+      setConnState('reconnecting')
+      const attempt = retryCountRef.current
+      retryCountRef.current = attempt + 1
+      const delay = Math.min(500 * Math.pow(2, attempt), 8000)
+      retryTimerRef.current = window.setTimeout(() => {
+        if (!disposed) setReconnectToken((token) => token + 1)
+      }, delay)
     }
     ws.onerror = () => { ws.close() }
     return () => {
@@ -1205,10 +1229,26 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   })()
   return (
     <div className="dsh-warp-terminal">
+      {connState === 'reconnecting' && (
+        <div className="dsh-warp-terminal-banner is-reconnecting">
+          <span className="dsh-warp-terminal-reconnecting">{error ?? t('status.reconnecting')}</span>
+          <button
+            type="button"
+            className="dsh-warp-terminal-reconnect"
+            onClick={() => {
+              retryCountRef.current = 0
+              window.clearTimeout(retryTimerRef.current)
+              setReconnectToken((token) => token + 1)
+            }}
+          >
+            {t('reconnect')}
+          </button>
+        </div>
+      )}
       {connState === 'disconnected' && (
         <div className="dsh-warp-terminal-banner">
           <span className="dsh-warp-terminal-error">{error ?? t('status.disconnected')}</span>
-          <button type="button" className="dsh-warp-terminal-reconnect" onClick={() => { readySeenRef.current = false; retryCountRef.current = 0; setReconnectToken((token) => token + 1) }}>
+          <button type="button" className="dsh-warp-terminal-reconnect" onClick={() => { exitedRef.current = false; retryCountRef.current = 0; setReconnectToken((token) => token + 1) }}>
             {t('reconnect')}
           </button>
         </div>

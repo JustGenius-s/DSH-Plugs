@@ -8,6 +8,7 @@ import {
 import {
   DEFAULT_GRAPH_LIMIT,
   GIT_GRAPH_PATH,
+  GIT_GRAPH_WATCH_PATH,
   type GitGraphRef,
   type GitGraphResponse,
   type GitGraphRow,
@@ -84,6 +85,7 @@ export function GitGraphView(props: GitGraphViewProps) {
     reset: boolean,
     skip = 0,
     refs: string[] | null = userScopeRef.current,
+    preserveSelection = false,
   ) => {
     if (cwd === undefined || cwd.length === 0) {
       setState({
@@ -98,8 +100,10 @@ export function GitGraphView(props: GitGraphViewProps) {
     }
     if (reset) {
       setState((current) => ({ ...current, status: 'loading' }))
-      setSelected(undefined)
-      setDetail(undefined)
+      if (!preserveSelection) {
+        setSelected(undefined)
+        setDetail(undefined)
+      }
     }    const response = await fetchGraph(cwd, skip, refs ?? undefined)
     if (!response.ok) {
       setState({
@@ -129,6 +133,25 @@ export function GitGraphView(props: GitGraphViewProps) {
     setUserScope(null)
     void load(true, 0, null)
   }, [load])
+
+  // Auto-refresh on repo movement: reload the rows but keep the selection
+  // (the detail effect re-resolves it against the new rows; a vanished sha
+  // simply closes the detail). detailSeq re-fetches an open file list in
+  // place so a workdir detail picks up the new changes too.
+  const [detailSeq, setDetailSeq] = useState(0)
+  useEffect(() => {
+    if (cwd === undefined || cwd.length === 0) return
+    if (typeof EventSource === 'undefined') return
+    const source = new EventSource(
+      `${GIT_GRAPH_WATCH_PATH}?cwd=${encodeURIComponent(cwd)}`,
+    )
+    const onChange = (): void => {
+      setDetailSeq((seq) => seq + 1)
+      void load(true, 0, userScopeRef.current, true)
+    }
+    source.addEventListener('change', onChange)
+    return () => source.close()
+  }, [cwd, load])
 
   useEffect(() => {
     if (selected === undefined) {
@@ -198,6 +221,7 @@ export function GitGraphView(props: GitGraphViewProps) {
           sha={detail.sha}
           title={detail.title}
           t={t}
+          refreshSeq={detailSeq}
           onOpenFile={(file, sha) => onOpenFile?.(file, sha)}
         />
       ) : null}
