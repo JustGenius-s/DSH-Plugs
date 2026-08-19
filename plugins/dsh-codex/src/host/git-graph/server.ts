@@ -289,6 +289,7 @@ function parseAction(value: unknown): GitGraphActionRequest | undefined {
   if (typeof candidate.sha === 'string') request.sha = candidate.sha
   if (typeof candidate.branch === 'string') request.branch = candidate.branch
   if (typeof candidate.message === 'string') request.message = candidate.message
+  if (typeof candidate.path === 'string') request.path = candidate.path
   if (candidate.mode === 'soft' || candidate.mode === 'mixed' || candidate.mode === 'hard') {
     request.mode = candidate.mode as GitResetMode
   }
@@ -304,7 +305,10 @@ function parseActionName(value: unknown): GitGraphActionName | undefined {
     case 'reset':
     case 'commit':
     case 'commit-push':
+    case 'stage':
+    case 'unstage':
     case 'stage-all':
+    case 'unstage-all':
     case 'discard-all':
     case 'pull':
     case 'push':

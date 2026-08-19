@@ -80,7 +80,10 @@ export type GitGraphActionName =
   | 'reset'
   | 'commit'
   | 'commit-push'
+  | 'stage'
+  | 'unstage'
   | 'stage-all'
+  | 'unstage-all'
   | 'discard-all'
   | 'pull'
   | 'push'
@@ -99,6 +102,8 @@ export interface GitGraphActionRequest {
   mode?: GitResetMode
   /** Commit message, required by `commit` / `commit-push`. */
   message?: string
+  /** Repo-relative file path, required by `stage` / `unstage`. */
+  path?: string
 }
 
 export interface GitGraphActionOk {
@@ -117,6 +122,12 @@ export interface GitChangeFile {
   /** File path relative to the repository root. */
   path: string
   status: GitChangeStatus
+  /**
+   * Working-tree mode only: true when this entry is the index (staged) side
+   * of the change, false/absent for the worktree side. A path modified in
+   * both appears twice, once per side. Never set for commit file lists.
+   */
+  staged?: boolean
   /** Old path for a rename/copy; undefined otherwise. */
   oldPath?: string
   /** Insertions, when git reported them. */

@@ -65,8 +65,34 @@ async function runWorkdirAction(request: GitGraphActionRequest): Promise<string>
       const push = await gitText(cwd, ['push'])
       return [out, push].filter((part) => part.length > 0).join('\n')
     }
+    case 'stage':
+      return gitText(cwd, ['add', '--', safePath(request.path)])
+    case 'unstage': {
+      const path = safePath(request.path)
+      try {
+        return await gitText(cwd, ['reset', '-q', 'HEAD', '--', path])
+      } catch (error) {
+        // Unborn HEAD (no commits yet): the index entry can only come out
+        // with rm --cached.
+        if (!/ambiguous argument|unknown revision|Failed to resolve/i.test(errorMessage(error))) {
+          throw error
+        }
+        return gitText(cwd, ['rm', '-q', '-r', '--cached', '--', path])
+      }
+    }
     case 'stage-all':
       return gitText(cwd, ['add', '-A'])
+    case 'unstage-all': {
+      try {
+        return await gitText(cwd, ['reset', '-q', 'HEAD', '--'])
+      } catch (error) {
+        // Unborn HEAD (no commits yet): empty the index with rm --cached.
+        if (!/ambiguous argument|unknown revision|Failed to resolve/i.test(errorMessage(error))) {
+          throw error
+        }
+        return gitText(cwd, ['rm', '-q', '-r', '--cached', '--ignore-unmatch', '--', '.'])
+      }
+    }
     case 'discard-all': {
       const reset = await gitText(cwd, ['reset', '--hard', 'HEAD'])
       const clean = await gitText(cwd, ['clean', '-fd'])
@@ -180,4 +206,23 @@ function badRequest(message: string): Error {
   const error = new Error(message)
   error.name = 'BadRequest'
   return error
+}
+
+/** Validate a repo-relative path coming from the client. */
+function safePath(path: string | undefined): string {
+  const value = (path ?? '').trim().replace(/\\/g, '/').replace(/^\/+/, '')
+  if (
+    value.length === 0
+    || value.includes('\0')
+    || value.includes('..')
+    || value.includes('//')
+    || value.startsWith('-')
+  ) {
+    throw badRequest('invalid path')
+  }
+  return value
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

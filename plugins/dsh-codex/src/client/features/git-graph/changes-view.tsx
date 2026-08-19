@@ -1,13 +1,11 @@
 import { useCallback, useRef, useState } from 'react'
 import {
-  Button,
   IconCheckOutline16,
   IconChevronDownOutline14,
   IconRefreshOutline14,
   IconWarningOutline16,
   Input,
   Menu,
-  Modal,
   RiskConfirmation,
   Toast,
   type MenuEntry,
@@ -33,15 +31,15 @@ export interface GitChangesViewProps {
 /** Workdir actions the dropdown can fire directly (no extra input). */
 type QuickAction = Extract<
   GitGraphActionName,
-  'stage-all' | 'pull' | 'push' | 'fetch' | 'stash' | 'stash-pop'
+  'stage-all' | 'unstage-all' | 'pull' | 'push' | 'fetch' | 'stash' | 'stash-pop'
 >
 
 /**
  * The Git tab's default body: the working-tree change list, VSCode-style.
- * The header carries a refresh action, the button that opens the commit
- * graph as its own tab, and — on the far right — a segmented commit button:
- * the left segment commits (message modal), the right segment opens a
- * dropdown with the other basic git operations.
+ * The header carries the commit-message input, a refresh action, the button
+ * that opens the commit graph as its own tab, and — on the far right — a
+ * segmented commit button: the left segment commits with the typed message,
+ * the right segment opens a dropdown with the other basic git operations.
  */
 export function GitChangesView(props: GitChangesViewProps) {
   const { cwd, t, onOpenFile, onOpenGraph } = props
@@ -49,7 +47,6 @@ export function GitChangesView(props: GitChangesViewProps) {
   const [display, setDisplay] = useState<'flat' | 'tree'>('flat')
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [commitAction, setCommitAction] = useState<'commit' | 'commit-push' | null>(null)
   const [message, setMessage] = useState('')
   const [discardOpen, setDiscardOpen] = useState(false)
   const [acknowledged, setAcknowledged] = useState(false)
@@ -64,43 +61,45 @@ export function GitChangesView(props: GitChangesViewProps) {
   }, [])
   const refresh = useCallback(() => setRefreshSeq((seq) => seq + 1), [])
 
-  const run = useCallback(async (action: GitGraphActionName, commitMessage?: string) => {
+  const run = useCallback(async (
+    action: GitGraphActionName,
+    commitMessage?: string,
+    path?: string,
+  ): Promise<boolean> => {
     if (cwd === undefined || cwd.length === 0) {
       showToast(t('gitGraph.noCwd'), 'error')
-      return
+      return false
     }
     setBusy(true)
     const request: GitGraphActionRequest = { cwd, action }
     if (commitMessage !== undefined) request.message = commitMessage
+    if (path !== undefined) request.path = path
     const result = await postAction(request)
     setBusy(false)
     if (!result.ok) {
       showToast(result.message, 'error')
-      return
+      return false
     }
-    showToast(result.message ?? t('gitGraph.actionOk'), 'ok')
+    if (action !== 'stage' && action !== 'unstage') {
+      showToast(result.message ?? t('gitGraph.actionOk'), 'ok')
+    }
     refresh()
+    return true
   }, [cwd, refresh, showToast, t])
 
-  const closeCommit = (): void => {
-    setCommitAction(null)
-    setMessage('')
-  }
-
-  const submitCommit = (): void => {
-    const action = commitAction
+  const submitCommit = (action: 'commit' | 'commit-push'): void => {
     const text = message.trim()
-    if (action === null || text.length === 0 || busy) return
-    closeCommit()
-    void run(action, text)
+    if (text.length === 0 || busy) return
+    void run(action, text).then((ok) => {
+      if (ok) setMessage('')
+    })
   }
 
   const onSelectMore = (id: string): void => {
     setMenuOpen(false)
     if (busy) return
     if (id === 'commit-push') {
-      setMessage('')
-      setCommitAction('commit-push')
+      submitCommit('commit-push')
       return
     }
     if (id === 'discard-all') {
@@ -118,7 +117,18 @@ export function GitChangesView(props: GitChangesViewProps) {
   return (
     <div className="dsh-git-changes" ref={panelRef}>
       <div className="dsh-git-changes-header">
-        <span className="dsh-git-changes-title">{t('gitGraph.workdir')}</span>
+        <Input
+          className="dsh-git-changes-message"
+          value={message}
+          placeholder={t('gitGraph.commitPlaceholder')}
+          aria-label={t('gitGraph.commitMessage')}
+          onChange={(event) => setMessage(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter') return
+            event.preventDefault()
+            submitCommit('commit')
+          }}
+        />
         <button
           type="button"
           className={'dsh-git-changes-icon' + (display === 'tree' ? ' is-active' : '')}
@@ -151,11 +161,8 @@ export function GitChangesView(props: GitChangesViewProps) {
           <button
             type="button"
             className="dsh-git-changes-commit-main"
-            disabled={busy}
-            onClick={() => {
-              setMessage('')
-              setCommitAction('commit')
-            }}
+            disabled={busy || message.trim().length === 0}
+            onClick={() => submitCommit('commit')}
           >
             {t('gitGraph.commit')}
           </button>
@@ -173,12 +180,18 @@ export function GitChangesView(props: GitChangesViewProps) {
           </button>
         </div>
       </div>
+      {/* Key prefixes matter: this list and the Toast below are siblings, and
+          two siblings sharing a numeric key corrupt React's keyed reconciliation
+          (the overwritten fiber is orphaned — never unmounted, never updated). */}
       <GitGraphDetail
-        key={refreshSeq}
+        key={`detail-${refreshSeq}`}
         cwd={cwd}
         t={t}
         display={display}
         onOpenFile={(file, sha) => onOpenFile?.(file, sha)}
+        onStageChange={(file, stage) => void run(stage ? 'stage' : 'unstage', undefined, file.path)}
+        onStageAll={() => void run('stage-all')}
+        onUnstageAll={() => void run('unstage-all')}
       />
       <Menu
         open={menuOpen}
@@ -193,44 +206,6 @@ export function GitChangesView(props: GitChangesViewProps) {
         onSelect={onSelectMore}
         onClose={() => setMenuOpen(false)}
       />
-      <Modal
-        open={commitAction !== null}
-        onClose={closeCommit}
-        title={t(commitAction === 'commit-push'
-          ? 'gitGraph.commitPushTitle'
-          : 'gitGraph.commitTitle')}
-        closeLabel={t('gitGraph.close')}
-        description={t('gitGraph.commitMessage')}
-        footer={(
-          <>
-            <Button type="button" variant="outline" onClick={closeCommit}>
-              {t('gitGraph.cancel')}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              disabled={busy || message.trim().length === 0}
-              onClick={submitCommit}
-            >
-              {t(commitAction === 'commit-push'
-                ? 'gitGraph.commitPush'
-                : 'gitGraph.commit')}
-            </Button>
-          </>
-        )}
-      >
-        <Input
-          autoFocus
-          value={message}
-          placeholder={t('gitGraph.commitPlaceholder')}
-          onChange={(event) => setMessage(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return
-            event.preventDefault()
-            submitCommit()
-          }}
-        />
-      </Modal>
       <RiskConfirmation
         open={discardOpen}
         title={t('gitGraph.discardAll')}
@@ -249,7 +224,7 @@ export function GitChangesView(props: GitChangesViewProps) {
       />
       {toast !== null ? (
         <Toast
-          key={toast.seq}
+          key={`toast-${toast.seq}`}
           text={toast.text}
           icon={toast.kind === 'error'
             ? <IconWarningOutline16 />
@@ -290,6 +265,7 @@ function moreItems(t: (key: string) => string): readonly MenuEntry[] {
     { id: 'commit-push', label: t('gitGraph.commitPush') },
     { type: 'separator', id: 'sep-commit' },
     { id: 'stage-all', label: t('gitGraph.stageAll') },
+    { id: 'unstage-all', label: t('gitGraph.unstageAll') },
     { id: 'discard-all', label: t('gitGraph.discardAll'), danger: true },
     { type: 'separator', id: 'sep-workdir' },
     { id: 'pull', label: t('gitGraph.pull') },

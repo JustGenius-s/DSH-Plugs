@@ -67,15 +67,16 @@ export async function loadChangeFiles(
   const files = parsePorcelainZ(porcelain)
   if (files.length === 0) return files
 
-  // Working-tree +/- counts: staged (--cached) plus unstaged, per path.
-  const numstat = await gitText(
-    cwd,
-    ['diff', '--numstat', 'HEAD', '--'],
-    GIT_TIMEOUT_MS,
-  ).catch(() => '')
-  const counts = parseNumstat(numstat)
+  // Per-side +/- counts: staged entries read the index diff, unstaged ones
+  // the worktree-vs-index diff (untracked files get no counts).
+  const [cachedNumstat, worktreeNumstat] = await Promise.all([
+    gitText(cwd, ['diff', '--cached', '--numstat', '--'], GIT_TIMEOUT_MS).catch(() => ''),
+    gitText(cwd, ['diff', '--numstat', '--'], GIT_TIMEOUT_MS).catch(() => ''),
+  ])
+  const cachedCounts = parseNumstat(cachedNumstat)
+  const worktreeCounts = parseNumstat(worktreeNumstat)
   for (const file of files) {
-    const count = counts.get(file.path)
+    const count = (file.staged === true ? cachedCounts : worktreeCounts).get(file.path)
     if (count !== undefined) {
       file.added = count.added
       file.removed = count.removed
@@ -381,6 +382,10 @@ function parseNameStatusZ(raw: string, followRenames: boolean): GitChangeFile[] 
  * (the target comes first). Untracked directories are only shown collapsed
  * (`?? dir/`) unless `-uall` was passed; callers pass `-uall` so untracked
  * files appear individually.
+ *
+ * X is the index (staged) side, Y the worktree side; a path changed in both
+ * (`MM`) yields one entry per side, flagged via `staged`, so the client can
+ * group them the way VSCode does.
  */
 function parsePorcelainZ(raw: string): GitChangeFile[] {
   const parts = raw.split('\0')
@@ -392,11 +397,12 @@ function parsePorcelainZ(raw: string): GitChangeFile[] {
     const y = token[1] ?? ' '
     const body = token.length >= 3 ? token.slice(3) : ''
     if (x === '?' && y === '?') {
-      files.push({ path: body, status: 'untracked' })
+      files.push({ path: body, status: 'untracked', staged: false })
       continue
     }
-    if ((x === 'R' || x === 'C') && y === ' ') {
-      // Two fields: <newPath> then <oldPath>.
+    if (x === 'R' || x === 'C') {
+      // Two fields: <newPath> then <oldPath>. The rename itself is staged;
+      // y may still flag further unstaged edits to the new path.
       const newPath = body
       const oldPath = parts[index + 1]
       if (newPath.length > 0 && oldPath !== undefined) {
@@ -404,13 +410,22 @@ function parsePorcelainZ(raw: string): GitChangeFile[] {
           path: newPath,
           oldPath,
           status: x === 'R' ? 'renamed' : 'copied',
+          staged: true,
         })
         index += 1
+        if (y !== ' ' && y !== '?') {
+          files.push({ path: newPath, status: STATUS_TO_CHANGE[y] ?? 'modified', staged: false })
+        }
         continue
       }
     }
-    const status = (x === ' ' ? STATUS_TO_CHANGE[y] : STATUS_TO_CHANGE[x]) ?? 'modified'
-    if (body.length > 0) files.push({ path: body, status })
+    if (body.length === 0) continue
+    if (x !== ' ' && x !== '?') {
+      files.push({ path: body, status: STATUS_TO_CHANGE[x] ?? 'modified', staged: true })
+    }
+    if (y !== ' ' && y !== '?') {
+      files.push({ path: body, status: STATUS_TO_CHANGE[y] ?? 'modified', staged: false })
+    }
   }
   return files
 }

@@ -41,6 +41,16 @@ const GRAPH_CSS = `
 .dsh-git-graph-detail-status{padding:6px 2px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-git-graph-detail-status.is-error{color:#f87171}
 .dsh-git-graph-detail-list{display:flex;flex-direction:column;gap:1px}
+.dsh-git-graph-detail-group + .dsh-git-graph-detail-group{margin-top:6px}
+.dsh-git-graph-detail-section{display:flex;align-items:center;gap:6px;padding:2px 4px 4px;font-size:11px;line-height:16px;font-weight:600;color:var(--dsw-alias-label-secondary,#b0b0b5)}
+.dsh-git-graph-detail-section-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-git-graph-detail-section-count{flex:none;min-width:16px;padding:0 5px;border-radius:8px;text-align:center;font-size:10px;line-height:14px;background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-tertiary,#8b8b90)}
+.dsh-git-graph-detail-action{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer;visibility:hidden}
+.dsh-git-graph-detail-row:hover .dsh-git-graph-detail-action{visibility:visible}
+.dsh-git-graph-detail-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#e6e6e8)}
+.dsh-git-graph-detail-section-action{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer;visibility:hidden}
+.dsh-git-graph-detail-section:hover .dsh-git-graph-detail-section-action{visibility:visible}
+.dsh-git-graph-detail-section-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-git-graph-detail-row{display:flex;align-items:center;gap:6px;width:100%;min-height:26px;padding:0 4px;border:none;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .dsh-git-graph-detail-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-git-graph-detail-status{flex:none;min-width:18px;height:18px;padding:0 4px;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10px;line-height:18px;text-align:center;background:rgba(152,195,121,.18);color:#98c379}
@@ -60,7 +70,8 @@ const GRAPH_CSS = `
 .dsh-git-graph-menu-anchor{position:fixed;width:0;height:0;overflow:hidden;pointer-events:none}
 .dsh-git-changes{height:100%;display:flex;flex-direction:column;min-height:0;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
 .dsh-git-changes-header{flex:none;display:flex;align-items:center;gap:6px;min-height:32px;padding:4px 8px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08))}
-.dsh-git-changes-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:16px;font-style:italic;color:var(--dsw-alias-label-secondary,#b0b0b5)}
+.dsh-git-changes-message{flex:1;min-width:0}
+.dsh-git-changes-message input{width:100%;font-size:12px}
 .dsh-git-changes-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer}
 .dsh-git-changes-icon:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-git-changes-icon.is-active{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-state-business-primary,#4f7cff)}

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import {
   IconChevronDownOutline14,
   IconChevronRightOutline14,
+  IconPlusOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   GIT_GRAPH_FILES_PATH,
@@ -30,15 +31,24 @@ export interface GitGraphDetailProps {
   onOpenFile: (file: string, sha?: string) => void
   /** List layout: flat rows (default) or a collapsible directory tree. */
   display?: 'flat' | 'tree'
+  /**
+   * Working-tree mode: stage/unstage one file from its row hover action.
+   * Omitting it hides the hover buttons (read-only lists).
+   */
+  onStageChange?: (file: GitChangeFile, stage: boolean) => void
+  /** Section-header hover actions: stage/unstage every file in the group. */
+  onStageAll?: () => void
+  onUnstageAll?: () => void
 }
 
 /**
  * The structured file list under the commit graph: every file a commit touched,
  * or every working-tree change. Rows are clickable and open the `files` panel
- * on that file's diff.
+ * on that file's diff. Working-tree lists arrive flagged per index/worktree
+ * side and render as two VSCode-style groups: staged on top, changes below.
  */
 export function GitGraphDetail(props: GitGraphDetailProps) {
-  const { cwd, sha, title, t, onOpenFile, display = 'flat' } = props
+  const { cwd, sha, title, t, onOpenFile, display = 'flat', onStageChange, onStageAll, onUnstageAll } = props
   const [files, setFiles] = useState<readonly GitChangeFile[] | null>(null)
   const [error, setError] = useState<string | undefined>()
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
@@ -59,10 +69,6 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
     return () => { cancelled = true }
   }, [cwd, sha])
 
-  const tree = useMemo(
-    () => (files === null || display !== 'tree' ? undefined : buildTree(files)),
-    [files, display],
-  )
   const toggleDir = (path: string): void => {
     setCollapsed((current) => {
       const next = new Set(current)
@@ -71,6 +77,19 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
       return next
     })
   }
+
+  // Commit lists never carry the staged flag; workdir lists split by it.
+  const grouped = sha === undefined
+  const stagedFiles = useMemo(
+    () => (grouped ? (files ?? []).filter((file) => file.staged === true) : []),
+    [files, grouped],
+  )
+  const unstagedFiles = useMemo(
+    () => (grouped ? (files ?? []).filter((file) => file.staged !== true) : []),
+    [files, grouped],
+  )
+
+  const listProps = { display, collapsed, onToggleDir: toggleDir, sha, t, onOpenFile, onStageChange }
 
   return (
     <div className="dsh-git-graph-detail">
@@ -83,30 +102,108 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
         <div className="dsh-git-graph-detail-status">{t('gitGraph.loading')}</div>
       ) : files.length === 0 ? (
         <div className="dsh-git-graph-detail-status">{t('gitGraph.noFiles')}</div>
+      ) : grouped ? (
+        <>
+          <ChangeSection
+            label={t('gitGraph.staged')}
+            files={stagedFiles}
+            stageAction="unstage"
+            onStageAll={onUnstageAll}
+            {...listProps}
+          />
+          <ChangeSection
+            label={t('gitGraph.changes')}
+            files={unstagedFiles}
+            stageAction="stage"
+            onStageAll={onStageAll}
+            {...listProps}
+          />
+        </>
       ) : (
-        <div className="dsh-git-graph-detail-list">
-          {tree !== undefined ? (
-            <TreeRows
-              node={tree}
-              depth={0}
-              collapsed={collapsed}
-              onToggleDir={toggleDir}
-              sha={sha}
-              onOpenFile={onOpenFile}
-            />
-          ) : (
-            files.map((file) => (
-              <FileRow
-                key={file.path}
-                file={file}
-                depth={0}
-                showDir
-                sha={sha}
-                onOpenFile={onOpenFile}
-              />
-            ))
-          )}
-        </div>
+        <FileList files={files} {...listProps} />
+      )}
+    </div>
+  )
+}
+
+/** One VSCode-style group header plus its file list; empty groups hide. */
+function ChangeSection(props: {
+  label: string
+  files: readonly GitChangeFile[]
+  stageAction: 'stage' | 'unstage'
+  display: 'flat' | 'tree'
+  collapsed: ReadonlySet<string>
+  onToggleDir: (path: string) => void
+  sha?: string
+  t: (key: string) => string
+  onOpenFile: (file: string, sha?: string) => void
+  onStageChange?: (file: GitChangeFile, stage: boolean) => void
+  /** Header hover action matching stageAction's direction (all files). */
+  onStageAll?: () => void
+}) {
+  const { label, files, stageAction, onStageAll, t, ...listProps } = props
+  if (files.length === 0) return null
+  const allLabel = stageAction === 'stage' ? 'gitGraph.stageAll' : 'gitGraph.unstageAll'
+  return (
+    <div className="dsh-git-graph-detail-group">
+      <div className="dsh-git-graph-detail-section">
+        <span className="dsh-git-graph-detail-section-label">{label}</span>
+        <span className="dsh-git-graph-detail-section-count">{files.length}</span>
+        {onStageAll === undefined ? null : (
+          <button
+            type="button"
+            className="dsh-git-graph-detail-section-action"
+            aria-label={t(allLabel)}
+            title={t(allLabel)}
+            onClick={onStageAll}
+          >
+            {stageAction === 'stage' ? <IconPlusOutline16 size={16} /> : <IconMinus size={16} />}
+          </button>
+        )}
+      </div>
+      <FileList files={files} stageAction={stageAction} t={t} {...listProps} />
+    </div>
+  )
+}
+
+/** Flat rows or a directory tree for one list of change files. */
+function FileList(props: {
+  files: readonly GitChangeFile[]
+  display: 'flat' | 'tree'
+  collapsed: ReadonlySet<string>
+  onToggleDir: (path: string) => void
+  sha?: string
+  t: (key: string) => string
+  onOpenFile: (file: string, sha?: string) => void
+  stageAction?: 'stage' | 'unstage'
+  onStageChange?: (file: GitChangeFile, stage: boolean) => void
+}) {
+  const { files, display, collapsed, onToggleDir, sha, t, onOpenFile, stageAction, onStageChange } = props
+  const tree = useMemo(
+    () => (display !== 'tree' ? undefined : buildTree(files)),
+    [files, display],
+  )
+  const rowProps = { sha, t, onOpenFile, stageAction, onStageChange }
+  return (
+    <div className="dsh-git-graph-detail-list">
+      {tree !== undefined ? (
+        <TreeRows
+          node={tree}
+          depth={0}
+          collapsed={collapsed}
+          onToggleDir={onToggleDir}
+          {...rowProps}
+        />
+      ) : (
+        files.map((file) => (
+          <FileRow
+            key={file.path}
+            file={file}
+            depth={0}
+            showDir
+            {...rowProps}
+          />
+        ))
       )}
     </div>
   )
@@ -119,9 +216,13 @@ function FileRow(props: {
   /** Flat mode shows the directory after the name; tree mode implies it. */
   showDir: boolean
   sha?: string
+  t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
+  /** Hover action this row offers; undefined = read-only row. */
+  stageAction?: 'stage' | 'unstage'
+  onStageChange?: (file: GitChangeFile, stage: boolean) => void
 }) {
-  const { file, sha } = props
+  const { file, sha, t, stageAction, onStageChange } = props
   // Tree rows skip the caret a directory row carries, so file icons line up
   // with directory icons at the same level (caret 12px + row gap 6px).
   const indent = 4 + props.depth * 14 + (props.showDir ? 0 : 18)
@@ -144,6 +245,21 @@ function FileRow(props: {
           <span className="dsh-git-graph-detail-dir">{fileDir(file.path)}</span>
         )}
       </span>
+      {stageAction === undefined || onStageChange === undefined ? null : (
+        <span
+          role="button"
+          tabIndex={-1}
+          className="dsh-git-graph-detail-action"
+          aria-label={t(stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
+          title={t(stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
+          onClick={(event) => {
+            event.stopPropagation()
+            onStageChange(file, stageAction === 'stage')
+          }}
+        >
+          {stageAction === 'stage' ? <IconPlusOutline16 size={14} /> : <IconMinus size={14} />}
+        </span>
+      )}
       {file.added !== undefined || file.removed !== undefined ? (
         <span className="dsh-git-graph-detail-count">
           <span className="is-add">+{String(file.added ?? 0)}</span>
@@ -154,6 +270,26 @@ function FileRow(props: {
         {STATUS_LABEL[file.status]}
       </span>
     </button>
+  )
+}
+
+/** Lucide `minus`, inlined (the primitives sheet has no minus glyph). */
+function IconMinus(props: { size?: number }) {
+  const size = props.size ?? 16
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 12h14" />
+    </svg>
   )
 }
 
@@ -192,7 +328,10 @@ function TreeRows(props: {
   collapsed: ReadonlySet<string>
   onToggleDir: (path: string) => void
   sha?: string
+  t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
+  stageAction?: 'stage' | 'unstage'
+  onStageChange?: (file: GitChangeFile, stage: boolean) => void
 }) {
   const { node, depth, collapsed } = props
   const dirs = [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))
@@ -229,7 +368,10 @@ function TreeRows(props: {
                 collapsed={collapsed}
                 onToggleDir={props.onToggleDir}
                 sha={props.sha}
+                t={props.t}
                 onOpenFile={props.onOpenFile}
+                stageAction={props.stageAction}
+                onStageChange={props.onStageChange}
               />
             ) : null}
           </Fragment>
@@ -242,7 +384,10 @@ function TreeRows(props: {
           depth={depth}
           showDir={false}
           sha={props.sha}
+          t={props.t}
           onOpenFile={props.onOpenFile}
+          stageAction={props.stageAction}
+          onStageChange={props.onStageChange}
         />
       ))}
     </>
