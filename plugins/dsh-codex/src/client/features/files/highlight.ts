@@ -7,7 +7,8 @@
  * through the global `--shiki-*` custom properties the theme package injects,
  * so preview colors match the conversation's code blocks exactly. Grammars
  * are bundled eagerly — the plugin ships a single client file and cannot lazy
- * `import()` chunks — so the allowlist stays small.
+ * `import()` chunks — so the list covers common languages without shipping
+ * shiki's full catalog.
  */
 import type { CSSProperties } from 'react'
 import { createCssVariablesTheme, createHighlighterCoreSync } from 'shiki/core'
@@ -16,8 +17,13 @@ import {
   defaultJavaScriptRegexConstructor,
 } from 'shiki/engine/javascript'
 import langTs from '@shikijs/langs/typescript'
+import langJavascript from '@shikijs/langs/javascript'
+import langJsx from '@shikijs/langs/jsx'
+import langTsx from '@shikijs/langs/tsx'
 import langBash from '@shikijs/langs/shellscript'
 import langJson from '@shikijs/langs/json'
+import langJsonc from '@shikijs/langs/jsonc'
+import langJson5 from '@shikijs/langs/json5'
 import langPython from '@shikijs/langs/python'
 import langGo from '@shikijs/langs/go'
 import langRust from '@shikijs/langs/rust'
@@ -35,11 +41,79 @@ import langCss from '@shikijs/langs/css'
 import langScss from '@shikijs/langs/scss'
 import langSql from '@shikijs/langs/sql'
 import langXml from '@shikijs/langs/xml'
+import langVue from '@shikijs/langs/vue'
+import langSvelte from '@shikijs/langs/svelte'
+import langAstro from '@shikijs/langs/astro'
+import langMdx from '@shikijs/langs/mdx'
+import langLess from '@shikijs/langs/less'
+import langSass from '@shikijs/langs/sass'
+import langStylus from '@shikijs/langs/stylus'
+import langPostcss from '@shikijs/langs/postcss'
+import langHandlebars from '@shikijs/langs/handlebars'
+import langPug from '@shikijs/langs/pug'
+import langJinja from '@shikijs/langs/jinja'
+import langTwig from '@shikijs/langs/twig'
+import langErb from '@shikijs/langs/erb'
+import langRazor from '@shikijs/langs/razor'
+import langDart from '@shikijs/langs/dart'
+import langSwift from '@shikijs/langs/swift'
+import langKotlin from '@shikijs/langs/kotlin'
+import langObjectiveC from '@shikijs/langs/objective-c'
+import langScala from '@shikijs/langs/scala'
+import langGroovy from '@shikijs/langs/groovy'
+import langLua from '@shikijs/langs/lua'
+import langPerl from '@shikijs/langs/perl'
+import langR from '@shikijs/langs/r'
+import langJulia from '@shikijs/langs/julia'
+import langPowershell from '@shikijs/langs/powershell'
+import langBat from '@shikijs/langs/bat'
+import langCoffeescript from '@shikijs/langs/coffeescript'
+import langDockerfile from '@shikijs/langs/dockerfile'
+import langMakefile from '@shikijs/langs/makefile'
+import langCmake from '@shikijs/langs/cmake'
+import langNginx from '@shikijs/langs/nginx'
+import langHcl from '@shikijs/langs/hcl'
+import langTerraform from '@shikijs/langs/terraform'
+import langIni from '@shikijs/langs/ini'
+import langReg from '@shikijs/langs/reg'
+import langDiff from '@shikijs/langs/diff'
+import langGraphql from '@shikijs/langs/graphql'
+import langPrisma from '@shikijs/langs/prisma'
+import langProtobuf from '@shikijs/langs/protobuf'
+import langCsv from '@shikijs/langs/csv'
+import langVim from '@shikijs/langs/vim'
+import langSolidity from '@shikijs/langs/solidity'
+import langWasm from '@shikijs/langs/wasm'
+import langTex from '@shikijs/langs/tex'
+import langLatex from '@shikijs/langs/latex'
+import langBibtex from '@shikijs/langs/bibtex'
+import langHaskell from '@shikijs/langs/haskell'
+import langOcaml from '@shikijs/langs/ocaml'
+import langElixir from '@shikijs/langs/elixir'
+import langErlang from '@shikijs/langs/erlang'
+import langClojure from '@shikijs/langs/clojure'
+import langElm from '@shikijs/langs/elm'
+import langNix from '@shikijs/langs/nix'
+import langLisp from '@shikijs/langs/lisp'
+import langScheme from '@shikijs/langs/scheme'
+import langRacket from '@shikijs/langs/racket'
+import langZig from '@shikijs/langs/zig'
+import langNim from '@shikijs/langs/nim'
+import langCrystal from '@shikijs/langs/crystal'
+import langV from '@shikijs/langs/v'
+import langFsharp from '@shikijs/langs/fsharp'
+import langVb from '@shikijs/langs/vb'
+import langGdscript from '@shikijs/langs/gdscript'
 
 const LANGS = [
   langTs,
+  langJavascript,
+  langJsx,
+  langTsx,
   langBash,
   langJson,
+  langJsonc,
+  langJson5,
   langPython,
   langGo,
   langRust,
@@ -57,28 +131,96 @@ const LANGS = [
   langScss,
   langSql,
   langXml,
+  langVue,
+  langSvelte,
+  langAstro,
+  langMdx,
+  langLess,
+  langSass,
+  langStylus,
+  langPostcss,
+  langHandlebars,
+  langPug,
+  langJinja,
+  langTwig,
+  langErb,
+  langRazor,
+  langDart,
+  langSwift,
+  langKotlin,
+  langObjectiveC,
+  langScala,
+  langGroovy,
+  langLua,
+  langPerl,
+  langR,
+  langJulia,
+  langPowershell,
+  langBat,
+  langCoffeescript,
+  langDockerfile,
+  langMakefile,
+  langCmake,
+  langNginx,
+  langHcl,
+  langTerraform,
+  langIni,
+  langReg,
+  langDiff,
+  langGraphql,
+  langPrisma,
+  langProtobuf,
+  langCsv,
+  langVim,
+  langSolidity,
+  langWasm,
+  langTex,
+  langLatex,
+  langBibtex,
+  langHaskell,
+  langOcaml,
+  langElixir,
+  langErlang,
+  langClojure,
+  langElm,
+  langNix,
+  langLisp,
+  langScheme,
+  langRacket,
+  langZig,
+  langNim,
+  langCrystal,
+  langV,
+  langFsharp,
+  langVb,
+  langGdscript,
 ]
 
 /**
  * Language hints (file-extension ids) → registered grammar ids. A Map, not an
  * object: extensions are file-authored, so a name like `constructor` must
- * miss instead of resolving an inherited property. The JS family maps to the
- * TypeScript grammar — the same approximation the app's highlighter makes.
+ * miss instead of resolving an inherited property. Several grammar ids differ
+ * from their module names (docker/make/proto/viml/common-lisp/coffee).
  */
 const LANG_ALIASES = new Map([
   ['typescript', 'typescript'],
   ['ts', 'typescript'],
-  ['tsx', 'typescript'],
-  ['javascript', 'typescript'],
-  ['js', 'typescript'],
-  ['jsx', 'typescript'],
+  ['mts', 'typescript'],
+  ['cts', 'typescript'],
+  ['tsx', 'tsx'],
+  ['javascript', 'javascript'],
+  ['js', 'javascript'],
+  ['mjs', 'javascript'],
+  ['cjs', 'javascript'],
+  ['jsx', 'jsx'],
   ['shellscript', 'shellscript'],
   ['bash', 'shellscript'],
   ['sh', 'shellscript'],
   ['shell', 'shellscript'],
   ['zsh', 'shellscript'],
   ['json', 'json'],
-  ['jsonc', 'json'],
+  ['jsonc', 'jsonc'],
+  ['json5', 'json5'],
   ['py', 'python'],
   ['python', 'python'],
   ['go', 'go'],
@@ -104,10 +246,102 @@ const LANG_ALIASES = new Map([
   ['htm', 'html'],
   ['css', 'css'],
   ['scss', 'scss'],
-  ['less', 'scss'],
   ['sql', 'sql'],
   ['xml', 'xml'],
   ['svg', 'xml'],
+  ['vue', 'vue'],
+  ['svelte', 'svelte'],
+  ['astro', 'astro'],
+  ['mdx', 'mdx'],
+  ['less', 'less'],
+  ['sass', 'sass'],
+  ['styl', 'stylus'],
+  ['pcss', 'postcss'],
+  ['hbs', 'handlebars'],
+  ['handlebars', 'handlebars'],
+  ['pug', 'pug'],
+  ['jade', 'pug'],
+  ['jinja', 'jinja'],
+  ['jinja2', 'jinja'],
+  ['j2', 'jinja'],
+  ['twig', 'twig'],
+  ['erb', 'erb'],
+  ['cshtml', 'razor'],
+  ['dart', 'dart'],
+  ['swift', 'swift'],
+  ['kt', 'kotlin'],
+  ['kts', 'kotlin'],
+  ['m', 'objective-c'],
+  ['mm', 'objective-c'],
+  ['scala', 'scala'],
+  ['sc', 'scala'],
+  ['groovy', 'groovy'],
+  ['gradle', 'groovy'],
+  ['gvy', 'groovy'],
+  ['lua', 'lua'],
+  ['pl', 'perl'],
+  ['pm', 'perl'],
+  ['r', 'r'],
+  ['jl', 'julia'],
+  ['ps1', 'powershell'],
+  ['psm1', 'powershell'],
+  ['psd1', 'powershell'],
+  ['bat', 'bat'],
+  ['cmd', 'bat'],
+  ['coffee', 'coffee'],
+  ['dockerfile', 'docker'],
+  ['mk', 'make'],
+  ['cmake', 'cmake'],
+  ['nginx', 'nginx'],
+  ['hcl', 'hcl'],
+  ['tf', 'terraform'],
+  ['tfvars', 'terraform'],
+  ['ini', 'ini'],
+  ['cfg', 'ini'],
+  ['properties', 'ini'],
+  ['reg', 'reg'],
+  ['diff', 'diff'],
+  ['patch', 'diff'],
+  ['graphql', 'graphql'],
+  ['gql', 'graphql'],
+  ['prisma', 'prisma'],
+  ['proto', 'proto'],
+  ['csv', 'csv'],
+  ['vim', 'viml'],
+  ['sol', 'solidity'],
+  ['wat', 'wasm'],
+  ['tex', 'latex'],
+  ['sty', 'latex'],
+  ['cls', 'latex'],
+  ['bib', 'bibtex'],
+  ['hs', 'haskell'],
+  ['ml', 'ocaml'],
+  ['mli', 'ocaml'],
+  ['ex', 'elixir'],
+  ['exs', 'elixir'],
+  ['erl', 'erlang'],
+  ['hrl', 'erlang'],
+  ['clj', 'clojure'],
+  ['cljs', 'clojure'],
+  ['cljc', 'clojure'],
+  ['elm', 'elm'],
+  ['nix', 'nix'],
+  ['lisp', 'common-lisp'],
+  ['lsp', 'common-lisp'],
+  ['cl', 'common-lisp'],
+  ['el', 'common-lisp'],
+  ['scm', 'scheme'],
+  ['ss', 'scheme'],
+  ['rkt', 'racket'],
+  ['zig', 'zig'],
+  ['nim', 'nim'],
+  ['cr', 'crystal'],
+  ['v', 'v'],
+  ['fs', 'fsharp'],
+  ['fsx', 'fsharp'],
+  ['fsi', 'fsharp'],
+  ['vb', 'vb'],
+  ['gd', 'gdscript'],
 ])
 
 /** Token colors resolve through the global `--shiki-*` custom properties. */

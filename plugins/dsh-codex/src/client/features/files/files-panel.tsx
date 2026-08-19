@@ -460,11 +460,33 @@ function basename(path: string): string {
   return slash === -1 ? path : path.slice(slash + 1)
 }
 
-function extensionOf(path: string): string {
-  const name = basename(path)
+/**
+ * Well-known filenames whose language isn't conveyed by an extension
+ * (`Dockerfile`, `Makefile`, …). Keys are lowercase basenames.
+ */
+const FILENAME_LANG_HINTS = new Map([
+  ['dockerfile', 'docker'],
+  ['containerfile', 'docker'],
+  ['makefile', 'make'],
+  ['gnumakefile', 'make'],
+  ['cmakelists.txt', 'cmake'],
+  ['gemfile', 'ruby'],
+  ['rakefile', 'ruby'],
+  ['podfile', 'ruby'],
+  ['vagrantfile', 'ruby'],
+  ['brewfile', 'ruby'],
+  ['fastfile', 'ruby'],
+  ['nginx.conf', 'nginx'],
+  ['.editorconfig', 'ini'],
+])
+
+function langHintOf(path: string): string {
+  const name = basename(path).toLowerCase()
+  const byName = FILENAME_LANG_HINTS.get(name)
+  if (byName !== undefined) return byName
   const dot = name.lastIndexOf('.')
   if (dot <= 0) return ''
-  return name.slice(dot + 1).toLowerCase()
+  return name.slice(dot + 1)
 }
 
 function viewLabels(t: (key: string) => string): ViewLabels {
@@ -503,7 +525,7 @@ function FilesPreview(props: {
     <div className="dsh-files-preview">
       <FileCodeView
         content={data.content}
-        lang={extensionOf(props.file)}
+        lang={langHintOf(props.file)}
         labels={viewLabels(t)}
       />
     </div>
