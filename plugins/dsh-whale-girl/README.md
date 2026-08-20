@@ -1,19 +1,37 @@
 # @just-genius/dsh-whale-girl
 
-DSH 桌面宠物（鲸鱼娘）：浏览器里是页面内悬浮宠物；在 DSH-Desktop 里走 `window.dshDesktop.overlays`，开一扇透明置顶窗常驻操作系统桌面。不必再单独打包 Tauri/Electron 伴侣。
+Desktop pet (whale-girl) for DSH. In a plain browser it is an in-page floating companion; in [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop) it opens a transparent always-on-top overlay via `window.dshDesktop.overlays`, so the pet sits on the OS desktop — no separate Tauri/Electron companion app to package.
 
-- Host：账本（XP/称号/回忆）、`/whale-girl/state|events|interact|presence|config|assets|overlay`
-- Client：探测 `dshDesktop.overlays` → 打开 `/whale-girl/overlay`；普通浏览器回退页面内宠物
-- Overlay 在线时 `POST /presence`，网页端宠物因 `companionOnline` 自动隐藏
-- 设置：Settings → Plugins 里有「桌面宠物」卡片（显示/游走/尺寸/透明度/打盹），和更新插件同一位置
+Assets and the state machine come from [whale-girl](https://github.com/vlln/whale-girl) (MIT; character design by ZipZipPipe).
 
-素材与状态机来自 [whale-girl](https://github.com/vlln/whale-girl)（MIT，角色形象 ZipZipPipe）。本插件不启动独立 Tauri/Electron 伴侣。
+## Features
 
-## 安装
+- **Two runtimes, one plugin** — the client probes `dshDesktop.overlays`; when present it opens the overlay window at `/whale-girl/overlay`, otherwise it falls back to the in-page pet.
+- **Presence heartbeats** — while the overlay is online it POSTs to `/whale-girl/presence`, and the in-page pet hides itself (`companionOnline`) so the two never appear at once.
+- **Persistent ledger** — XP, titles, and memories are kept host-side (`/whale-girl/state|events|interact`).
+- **Settings card** — Settings → Plugins gets a 桌面宠物 card (visibility, roaming, size, opacity, napping), next to the update plugin's entry.
 
-```bash
-pnpm install && pnpm --filter @just-genius/dsh-whale-girl build
+## Design
+
+| Half | Role |
+| --- | --- |
+| host `src/index.ts` | Ledger + routes: `state` / `events` / `interact` / `presence` / `config` / `assets` / `overlay` |
+| client `src/client/**` | Overlay detection, in-page pet, settings card |
+
+The host serves the overlay page and the pet assets, so the transparent desktop window is just another browser view of the same plugin — state stays in one place.
+
+## Develop
+
+```sh
+pnpm install
+pnpm typecheck
+pnpm build
+```
+
+## Install
+
+```sh
 dsh plugin --profile web add ./plugins/dsh-whale-girl
 ```
 
-装完重启 web。Desktop 里会看到桌宠；浏览器里仍是右下角页面宠物。
+Restart DSH web. In DSH-Desktop the pet appears on the OS desktop; in a plain browser it stays in the bottom-right corner of the page.

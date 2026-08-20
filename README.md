@@ -1,18 +1,24 @@
-# DSH-Plugs
+<h1 align="center">DSH-Plugs</h1>
 
-A monorepo of plugins for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) — **one folder = one plugin**.
+<p align="center">
+  A monorepo of plugins for <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> (DSH) — one folder = one plugin.
+</p>
 
 ## Plugins
 
-### [@just-genius/dsh-session-navigator](plugins/session-navigator)
-
-A Codex-style message navigator rail: a vertical tick rail on the conversation transcript with one tick per user message, active highlight, stepped hover, and smooth jump.
-
-![Session navigator](public/session-nav.png)
-
 ### [@just-genius/dsh-codex](plugins/dsh-codex)
 
-The consolidated Codex shell: settings, Codex-style navigation, Cursor-style per-turn **Worked for** collapsing, the right-side `side.panel` host, a Warp-style Terminal panel backed by a real login-shell PTY at `/dsh-codex/terminal/ws`, and a read-only commit-graph panel that walks `git log` at `/dsh-codex/git-graph`.
+The consolidated Codex shell: Codex-style message navigation, Cursor-style per-turn **Worked for** collapsing, a right-side `side.panel` host with a file tree / preview / diff view (VSCode Light+/Dark+ syntax themes), a Warp-style terminal panel backed by a real login-shell PTY, and a read-only git commit-graph panel.
+
+### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
+
+Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with **Proceed** / **Mark as fixed**.
+
+### [@just-genius/dsh-desktop-update](plugins/dsh-desktop-update)
+
+Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop) next to the sidebar Settings button, driven by the `window.dshDesktop` Electron bridge. App updates jump to GitHub Releases; DSH runtime updates install in place. Renders nothing in a plain browser.
+
+![Desktop update](public/desktop-update.png)
 
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 
@@ -22,17 +28,11 @@ Replaces the official Models settings page (fork of `ui-settings-models`) to add
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
-Replaces the official **Plugin list** tab. Plugins are grouped by origin (built-in / marketplace / external) and mount plane (global vs session). Mounted profile plugins can be disabled or uninstalled from the UI.
+Replaces the official read-only **Plugin list** tab. Plugins are grouped by origin (built-in / marketplace / external) and mount plane (global vs session), and profile plugins can be disabled or uninstalled from the UI.
 
 ### [@just-genius/dsh-plugin-marketplace](plugins/dsh-plugin-marketplace)
 
-Adds a Marketplace tab to **Settings → Plugins**. It browses this repo plus the [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) catalog, marks already-installed plugins, and can copy or run the catalog install command (restart required).
-
-### [@just-genius/dsh-desktop-update](plugins/dsh-desktop-update)
-
-A DSH-Desktop update badge next to the sidebar Settings button, driven by `window.dshDesktop` (Electron preload bridge). Idle state is a quiet question-mark that opens versions and auto-check gates; when an update is available it turns into an accent arrow. App updates jump to GitHub Releases; DSH runtime updates install in place (pnpm) and ask for a restart. Skip a version and the prompt returns only when a newer one appears. In a plain browser (no bridge) it renders nothing.
-
-![Desktop update](public/desktop-update.png)
+Adds a **Marketplace** tab to **Settings → Plugins**. Browses this repo plus the [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) catalog, marks already-installed plugins, and can copy or run the catalog install command (restart required).
 
 ### [@just-genius/dsh-wechat-chat](plugins/dsh-wechat-chat)
 
@@ -40,11 +40,7 @@ Turns the web surface into a WeChat-style messenger: chat list, green/white bubb
 
 ### [@just-genius/dsh-whale-girl](plugins/dsh-whale-girl)
 
-Desktop pet (whale-girl). In a plain browser it is the in-page companion; in DSH-Desktop it opens a transparent always-on-top overlay via `window.dshDesktop.overlays` so the pet sits on the OS desktop. Presence heartbeats hide the in-page pet while the overlay is online.
-
-### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
-
-Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with Proceed / Mark as fixed. The agent still instruments by editing files and calling `debug_log` — there is no automatic runtime probe bus yet.
+Desktop pet (whale-girl). In a plain browser it is the in-page companion; in DSH-Desktop it opens a transparent always-on-top overlay via `window.dshDesktop.overlays` so the pet sits on the OS desktop.
 
 ## Repository layout
 
@@ -54,7 +50,7 @@ DSH-Plugs/
 ├── pnpm-workspace.yaml   # packages: ['plugins/*']
 ├── tsconfig.base.json    # shared TS config
 └── plugins/
-    └── session-navigator/   # one plugin per folder
+    └── <plugin>/         # one plugin per folder
 ```
 
 ## What a plugin is
@@ -64,16 +60,16 @@ A plugin is a Cordis plugin npm package split in two halves:
 | Half | Source | Output | Role |
 | --- | --- | --- | --- |
 | node | `src/index.ts` | `lib/index.js` | Host entry (usually an empty `apply` for pure UI plugins) |
-| browser | `src/client/index.tsx` | `lib/client.js` | Browser entry, registered via `window.__ModuleLoader__.load({ id, factory })` and mounting React panels with `ctx.slots.register` in `apply` |
+| browser | `src/client/index.tsx` | `lib/client.js` | Browser entry, registered via `window.__ModuleLoader__.load({ id, factory })`, mounting React UI with `ctx.slots.register` in `apply` |
 
 Two key declarations in `package.json`:
 
 - `dsh.client` — declares the browser-side injection (`inject` lists the client package names it depends on; `platform: web`).
 - `dsh.bundle.patch` — points at `cordis.patch.yml`, so installing the package automatically inserts its loader row into the profile.
 
-## Commands
+## Develop
 
-```bash
+```sh
 pnpm install      # install dependencies
 pnpm build        # build all plugins (src → lib)
 pnpm watch        # watch and rebuild
@@ -90,15 +86,15 @@ pnpm clean        # remove all lib/
 
 ## Installing a plugin
 
-```bash
+```sh
 # Link a local folder into the profile (relative paths anchor to the current directory)
-dsh plugin --profile web add ./plugins/session-navigator
+dsh plugin --profile web add ./plugins/dsh-codex
 ```
 
-Because the package declares `dsh.bundle.patch`, it joins the profile's bundle layer automatically on install; **refresh the web page** to see it.
+Because the package declares `dsh.bundle.patch`, it joins the profile's bundle layer automatically on install; **restart DSH web** (a plain refresh is not enough for bundle-stack changes).
 
 Uninstall:
 
-```bash
-dsh plugin --profile web remove @just-genius/dsh-session-navigator
+```sh
+dsh plugin --profile web remove @just-genius/dsh-codex
 ```

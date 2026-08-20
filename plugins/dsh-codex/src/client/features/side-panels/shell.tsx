@@ -278,6 +278,57 @@ export function SidePanelsShell(props: ShellProps) {
     return () => { document.removeEventListener('pointerdown', onDown) }
   }, [adding])
 
+  // The tab strip scrolls horizontally when instances overflow (stylesheet:
+  // tabs are flex:none inside an overflow-x scrollport). Wheel handling is a
+  // reduced port of VSCode's tabs scrollbar (multiEditorTabsControl.ts uses a
+  // ScrollableElement with scrollYToX; scrollableElement.ts _onMouseWheel):
+  // one dominant axis per event, a vertical-only delta steers the horizontal
+  // scroll, and pixel deltas get a 1.25 gain (their ÷40 normalization × 50
+  // sensitivity). Critically, EVERY wheel event over the strip goes through
+  // this one manual path — letting some events scroll natively and others
+  // not (the old deltaX-dominant passthrough) makes the browser kill the
+  // trackpad gesture's momentum mid-stream, which read as "scrolls once,
+  // then stuck". As in VSCode, an event that would not move the strip
+  // (either end) is not consumed, so it can chain to whatever lies beneath.
+  //
+  // The listener sits on the whole HEADER, not just the strip: the header is
+  // 74px tall but the strip only fills its bottom ~29px content box, so wheel
+  // events over the top 40px of padding used to fall on dead chrome and the
+  // gesture read as hindered. VSCode's tab bar has no such dead zone.
+  const tabsRef = useRef<HTMLDivElement | null>(null)
+  const headerRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const header = headerRef.current
+    const el = tabsRef.current
+    if (header === null || el === null) return
+    const onWheel = (event: WheelEvent): void => {
+      if (el.scrollWidth <= el.clientWidth) return
+      // deltaMode: 0 = pixel, 1 = line (Firefox wheel), 2 = page.
+      const unit = event.deltaMode === 1 ? 50 / 3 : event.deltaMode === 2 ? el.clientWidth : 1.25
+      let deltaX = event.deltaX * unit
+      let deltaY = event.deltaY * unit
+      // scrollPredominantAxis: keep the dominant axis, drop the other.
+      if (Math.abs(deltaY) >= Math.abs(deltaX)) deltaX = 0
+      else deltaY = 0
+      // scrollYToX: a vertical-only delta steers the horizontal strip.
+      if (deltaX === 0) deltaX = deltaY
+      if (deltaX === 0) return
+      const max = el.scrollWidth - el.clientWidth
+      const next = Math.min(max, Math.max(0, el.scrollLeft + deltaX))
+      if (next === el.scrollLeft) return
+      event.preventDefault()
+      el.scrollLeft = next
+    }
+    header.addEventListener('wheel', onWheel, { passive: false })
+    return () => header.removeEventListener('wheel', onWheel)
+  }, [])
+  useEffect(() => {
+    const el = tabsRef.current
+    if (el === null || activeKey === null) return
+    el.querySelector('[data-tab-key="' + activeKey + '"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeKey, snapshot.width])
+
   const [dragging, setDragging] = useState(false)
   const origin = useRef(0)
   const latest = useRef(0)
@@ -457,8 +508,8 @@ export function SidePanelsShell(props: ShellProps) {
         aria-label={t('aria.resize')}
       />
       <div className="dsh-side-panels-inner">
-      <div className="dsh-side-panels-header">
-        <div className="dsh-side-panels-tabs" role="tablist">
+      <div className="dsh-side-panels-header" ref={headerRef}>
+        <div className="dsh-side-panels-tabs" role="tablist" ref={tabsRef}>
           {live.map((instance) => {
             const info = panelById.get(instance.panelId)
             const isActive = instance.key === activeKey
@@ -466,6 +517,7 @@ export function SidePanelsShell(props: ShellProps) {
             return (
               <div
                 key={instance.key}
+                data-tab-key={instance.key}
                 className={[
                   'dsh-side-panels-tab',
                   isActive ? 'dsh-side-panels-tab-active' : '',

@@ -133,6 +133,12 @@ function SettingsBody(props: CodexSettingsInjected) {
         </FieldRow>
       </Group>
 
+      <Group title={t('groupFiles')}>
+        <FieldRow label={t('fileLinksInPanel')}>
+          <Switch label={t('fileLinksInPanel')} checked={value.fileLinksInPanel} onChange={next => set('fileLinksInPanel', next)} />
+        </FieldRow>
+      </Group>
+
       <Group title={t('groupGitGraph')}>
         <FieldRow label={t('gitGraphEnabled')}>
           <Switch label={t('gitGraphEnabled')} checked={value.gitGraphEnabled} onChange={next => set('gitGraphEnabled', next)} />

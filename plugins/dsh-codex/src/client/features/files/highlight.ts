@@ -1,21 +1,25 @@
 /**
  * Syntax highlighting for the files panel's code preview.
  *
- * Mirrors the app's own highlighter (`dsh-client-ui-primitives` markdown/
- * highlight, which is not exported): a synchronous shiki core on the
- * JavaScript regex engine with a CSS-variables theme. Token colors resolve
- * through the global `--shiki-*` custom properties the theme package injects,
- * so preview colors match the conversation's code blocks exactly. Grammars
- * are bundled eagerly — the plugin ships a single client file and cannot lazy
- * `import()` chunks — so the list covers common languages without shipping
- * shiki's full catalog.
+ * A synchronous shiki core on the JavaScript regex engine, themed with
+ * VSCode's default token colors: `light-plus` / `dark-plus` (the "Light
+ * Modern" / "Dark Modern" themes share Dark+/Light+'s TextMate token colors;
+ * the Modern variants only re-skinned the workbench). Both themes ride one
+ * tokenization through shiki's dual-theme mode: each token carries its light
+ * color as `var(--shiki-light)` plus a `--shiki-dark` custom property, and
+ * the panel stylesheet flips on `body[data-ds-dark-theme]` — the same marker
+ * the app's ui-theme package uses. Grammars are bundled eagerly — the plugin
+ * ships a single client file and cannot lazy `import()` chunks — so the list
+ * covers common languages without shipping shiki's full catalog.
  */
 import type { CSSProperties } from 'react'
-import { createCssVariablesTheme, createHighlighterCoreSync } from 'shiki/core'
+import { createHighlighterCoreSync } from 'shiki/core'
 import {
   createJavaScriptRegexEngine,
   defaultJavaScriptRegexConstructor,
 } from 'shiki/engine/javascript'
+import themeDarkPlus from '@shikijs/themes/dark-plus'
+import themeLightPlus from '@shikijs/themes/light-plus'
 import langTs from '@shikijs/langs/typescript'
 import langJavascript from '@shikijs/langs/javascript'
 import langJsx from '@shikijs/langs/jsx'
@@ -344,13 +348,6 @@ const LANG_ALIASES = new Map([
   ['gd', 'gdscript'],
 ])
 
-/** Token colors resolve through the global `--shiki-*` custom properties. */
-const cssVariablesTheme = createCssVariablesTheme({
-  name: 'css-variables',
-  variablePrefix: '--shiki-',
-  fontStyle: true,
-})
-
 const regexEngine = createJavaScriptRegexEngine({
   forgiving: true,
   regexConstructor: (pattern) =>
@@ -363,7 +360,7 @@ let singleton: ReturnType<typeof createHighlighter> | undefined
 
 function createHighlighter() {
   return createHighlighterCoreSync({
-    themes: [cssVariablesTheme],
+    themes: [themeLightPlus, themeDarkPlus],
     langs: LANGS,
     engine: regexEngine,
   })
@@ -385,6 +382,13 @@ export interface HighlightSpan {
  * registered grammar; `undefined` means the caller renders its plain
  * fallback. The trailing newline shiki appends as a final empty line is
  * dropped so the run count matches the caller's own line array.
+ *
+ * Dual-theme mode: each token's `color` is `var(--shiki-light)` (the default
+ * color) and both theme values ride the `--shiki-light`/`--shiki-dark`
+ * custom properties in `htmlStyle`; the panel CSS swaps to the dark value
+ * under `body[data-ds-dark-theme]`. Font styles are dropped on purpose —
+ * VSCode's default themes italicize nothing here, so plain colors match the
+ * editor.
  */
 export function highlightLines(
   code: string,
@@ -397,7 +401,8 @@ export function highlightLines(
   if (resolved === undefined) return undefined
   const { tokens } = highlighter().codeToTokens(code, {
     lang: resolved,
-    theme: 'css-variables',
+    themes: { light: 'light-plus', dark: 'dark-plus' },
+    cssVariablePrefix: '--shiki-',
   })
   const last = tokens[tokens.length - 1]
   const rows =
@@ -405,9 +410,14 @@ export function highlightLines(
       ? tokens.slice(0, -1)
       : tokens
   return rows.map((line) =>
-    line.map((token) => ({
-      text: token.content,
-      style: { color: token.color },
-    })),
+    line.map((token) => {
+      const style: CSSProperties = {}
+      if (token.color !== undefined) style.color = token.color
+      const extra = token.htmlStyle
+      if (extra !== undefined && typeof extra !== 'string') {
+        Object.assign(style, extra)
+      }
+      return { text: token.content, style }
+    }),
   )
 }

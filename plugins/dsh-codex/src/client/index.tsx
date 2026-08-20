@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createCodexFeatureManager } from './core/feature-manager'
 import { createCodexSettingsStore } from './config/codex-settings-store'
 import { createConversationCollapseFeature } from './features/conversation-collapse'
+import { createFileLinksFeature } from './features/file-links'
 import { createFilesFeature } from './features/files'
 import { createGitGraphFeature } from './features/git-graph'
 import { createNavigatorFeature } from './features/navigator'
@@ -24,7 +25,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const NS = 'settings.codex'
 
-export const inject = ['slots', 'locale', 'connection', 'remote', 'sessions', 'conversationEvents'] as const
+export const inject = ['slots', 'locale', 'connection', 'remote', 'sessions', 'workspaces', 'conversationEvents'] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-codex: dictionaries')
@@ -48,6 +49,9 @@ export function apply(ctx: ClientContext): void {
     createTerminalFeature(ctx, scope, t),
     createGitGraphFeature(ctx, scope, t),
     createFilesFeature(ctx, scope, t),
+    // After side-panels/files: the patch reroutes chat file links into the
+    // panel those features provide.
+    createFileLinksFeature(ctx, scope),
   ])
   ctx.effect(() => {
     features.activate()

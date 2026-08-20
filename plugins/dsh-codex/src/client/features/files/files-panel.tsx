@@ -508,6 +508,9 @@ function FilesPreview(props: {
   if (data === null || !data.exists) {
     return <div className="dsh-files-status">{t('files.missing')}</div>
   }
+  if (data.directory === true) {
+    return <div className="dsh-files-status">{t('files.directory')}</div>
+  }
   if (data.binary === true) {
     return <div className="dsh-files-status">{t('files.binary')}</div>
   }

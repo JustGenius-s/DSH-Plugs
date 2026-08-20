@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { join, posix } from 'node:path'
 import { execGit } from './git-exec'
@@ -158,6 +159,8 @@ export interface LoadedFile {
   encoding: 'utf8' | 'base64'
   mime?: string
   binary?: boolean
+  /** True when the path names a directory, not a file (worktree reads). */
+  directory?: boolean
   exists: boolean
 }
 
@@ -173,10 +176,19 @@ export async function loadFile(
   path: string,
   sha?: string,
 ): Promise<LoadedFile> {
-  await assertGitRepo(cwd)
+  // Working-tree reads are plain file IO — no repository needed, so chat
+  // file links preview in any workspace, git-tracked or not.
+  if (sha !== undefined) await assertGitRepo(cwd)
   const safePath = posixSafe(path)
   if (safePath.length === 0) {
     throw badRequest('invalid file path')
+  }
+  if (sha === undefined) {
+    const info = await stat(join(cwd, ...safePath.split('/'))).catch(() => null)
+    if (info === null) return { content: '', encoding: 'utf8', exists: false }
+    if (info.isDirectory()) {
+      return { content: '', encoding: 'utf8', directory: true, exists: true }
+    }
   }
   const bytes = await readFileBytes(cwd, safePath, sha)
   if (bytes === null) {

@@ -69,32 +69,35 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 .dsh-side-panels-header [role='tab'],
 .dsh-side-panels-header [role='menuitem'],
 .dsh-side-panels-header input,
-.dsh-side-panels-header select{-webkit-app-region:no-drag}
+.dsh-side-panels-header select,
+.dsh-side-panels-tabs{-webkit-app-region:no-drag}
 /* Tab strip: one tab per open INSTANCE. Each tab is a row (icon + label +
    close), so the 2px active bar rides the wrapper while the label button and
    the close button stay separately clickable. */
-/* No overflow scrolling here. The active bar is drawn by .dsh-side-panels-tab
-   :after positioned in the header's bottom padding (bottom:-30px), which counts
-   as overflow — with overflow-x:auto that painted an 8px scrollbar thumb in the
-   strip (ui-theme/scrollbar.css styles every scroll container globally), showing
-   up as a stray vertical bar between the last tab and the + button. A tab strip
-   should not scroll anyway: tabs are few and each label already ellipsises, so
-   visible overflow is the correct behaviour and also lets the bar paint. */
-.dsh-side-panels-tabs{display:flex;align-items:stretch;gap:16px;flex:1;min-width:0;min-height:0}
+/* Overflow SCROLLS horizontally instead of squeezing every tab: tabs are
+   flex:none and the strip is the scrollport. Two details keep the old look:
+   the active bar hangs 4px below a tab's box (bottom:-4px, into the header's
+   bottom padding), which overflow would clip — so the strip carries a 4px
+   bottom padding balanced by a -4px margin, letting the bar paint inside the
+   padding box while the header's height is unchanged; and the scrollbar is
+   hidden (a visible thumb would sit right on the active bar), with scrolling
+   by trackpad or the shell's wheel handler. */
+.dsh-side-panels-tabs{display:flex;align-items:stretch;gap:16px;flex:1;min-width:0;min-height:0;overflow-x:auto;overflow-y:hidden;padding-bottom:4px;margin-bottom:-4px;scrollbar-width:none}
+.dsh-side-panels-tabs::-webkit-scrollbar{display:none}
 /* Tab fills the header's content box and puts its active bar on the bottom
    edge. The old padding-bottom + negative margin-bottom trick came from
    ConversationRoot, where tabs own a row of their own; here they share a row
    with 28px controls, so the negative margin sank the tab out of alignment
    with them. Stretching instead keeps label and controls on one centre line. */
-.dsh-side-panels-tab{flex:0 1 auto;min-width:0;position:relative;display:flex;align-items:center;gap:2px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
+.dsh-side-panels-tab{flex:none;position:relative;display:flex;align-items:center;gap:2px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
 .dsh-side-panels-tab:after{content:"";position:absolute;right:0;bottom:-4px;left:0;height:2px;border-radius:2px;background:transparent}
 .dsh-side-panels-tab:hover{color:var(--dsw-alias-label-primary)}
 .dsh-side-panels-tab-active{color:var(--dsw-alias-state-business-primary)}
 .dsh-side-panels-tab-active:after{background:var(--dsw-alias-state-business-primary)}
 .dsh-side-panels-tab-button{display:flex;min-width:0;align-items:center;gap:6px;border:none;background:transparent;padding:0;font-family:inherit;font-size:13px;line-height:16px;font-weight:500;color:inherit;cursor:pointer;white-space:nowrap}
-/* Long labels ellipsise in place — the strip no longer scrolls, so the button
-   must be allowed to shrink and the label to clip. */
-.dsh-side-panels-tab-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Tabs no longer shrink, so an over-long caption ellipsises at a cap instead
+   of compressing its neighbours. */
+.dsh-side-panels-tab-label{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-side-panels-tab-icon{display:inline-flex;flex:none;width:14px;height:14px;align-items:center;justify-content:center}
 .dsh-side-panels-tab-icon>svg{width:14px;height:14px}
 /* Bare glyph, not a button plate: no hover fill and no round background —

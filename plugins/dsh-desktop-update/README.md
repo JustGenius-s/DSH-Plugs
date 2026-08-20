@@ -1,25 +1,40 @@
 # @just-genius/dsh-desktop-update
 
-DSH-Desktop 的更新插件：侧栏徽章 + 原生菜单/托盘 + 系统通知，数据来自
-DSH-Desktop preload 暴露的三族 API `window.dshDesktop`
-（`updates` / `seats` / `notify`）。契约见 DSH-Desktop `docs/desktop-api.md`。
+Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop): a sidebar badge plus native menu/tray seats and system notifications, all driven by the `window.dshDesktop` preload bridge (`updates` / `seats` / `notify`). The contract lives in DSH-Desktop's `docs/desktop-api.md`.
 
-- 浏览器半侧注册 `sidebar.footer.action` 列表 slot 条目。
-- 桌面壳里走 `updates` 检查/下载/升级/重启；向 `seats` 贡献
-  `applicationMenu` / `tray`；有更新时用 `notify.show` 弹系统通知。
-- 插件卸载时 `revoke` 席位并 `notify.close`。
-- 普通浏览器没有 `window.dshDesktop`，插件保持惰性。
+## Features
 
-## 安装
+- **Sidebar badge** — quiet question-mark idle state that opens version info and auto-check gates; turns into an accent arrow when an update is available.
+- **Two update channels** — app updates jump to GitHub Releases; DSH runtime updates install in place (pnpm) and ask for a restart.
+- **Version skipping** — skip a version and the prompt returns only when a newer one appears.
+- **Native seats** — contributes `applicationMenu` / `tray` entries and fires `notify.show` system notifications when an update lands.
+- **Graceful degradation** — in a plain browser (no bridge) the plugin renders nothing.
 
-通常由 DSH-Desktop 主进程自动完成（scripts/install-desktop-plugin.mjs，
-npm 优先、本目录源码回退）。手动安装：
+## Design
 
-```bash
-pnpm install && pnpm build
-# 在 ~/.dsh/profiles/web/package.json 中：
-#   dsh.profile.bundles 加 "@just-genius/dsh-desktop-update"
-#   dependencies 加 "@just-genius/dsh-desktop-update": "link:<本目录>"
+| Source | Role |
+| --- | --- |
+| `src/index.ts` | Host entry (no-op; the plugin is client-only) |
+| `src/client/bridge.ts` | Typed wrapper over `window.dshDesktop`, with presence detection |
+| `src/client/seats.ts` | Menu/tray seat contributions, revoked on dispose |
+| `src/client/card.tsx`, `src/client/index.tsx` | The badge UI, registered into the `sidebar.footer.action` slot |
+
+The plugin depends on the bridge **contract**, not on Electron packaging code, so the desktop shell can evolve independently. On unmount it revokes its seats and closes notifications.
+
+## Develop
+
+```sh
+pnpm install
+pnpm typecheck
+pnpm build
 ```
 
-禁用：在 `~/.dsh/cordis.patch.yml` 加 `- id: desktop-update\n  disabled: true`。
+## Install
+
+Usually installed automatically by DSH-Desktop's main process (`scripts/install-desktop-plugin.mjs`, npm first with a local-source fallback). Manual install:
+
+```sh
+dsh plugin --profile web add ./plugins/dsh-desktop-update
+```
+
+To disable without uninstalling, add `- id: desktop-update\n  disabled: true` to `~/.dsh/cordis.patch.yml`.

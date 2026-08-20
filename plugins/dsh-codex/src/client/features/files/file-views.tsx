@@ -99,19 +99,23 @@ export function FileDiffView(props: { patch: string; labels: ViewLabels }) {
       <div className="dsh-files-diff-body">
         {visible.map((row, index) => (
           <div key={index} className={'dsh-files-diff-row is-' + row.kind}>
-            <span
-              className="dsh-files-diff-ln"
-              style={{ width: gutterWidth + 'ch' }}
-            >
-              {row.oldLn ?? ''}
+            {/* One sticky gutter: both line numbers and the sign stay pinned
+                while the text scrolls horizontally under them. */}
+            <span className="dsh-files-diff-gutter">
+              <span
+                className="dsh-files-diff-ln"
+                style={{ width: gutterWidth + 'ch' }}
+              >
+                {row.oldLn ?? ''}
+              </span>
+              <span
+                className="dsh-files-diff-ln"
+                style={{ width: gutterWidth + 'ch' }}
+              >
+                {row.newLn ?? ''}
+              </span>
+              <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
             </span>
-            <span
-              className="dsh-files-diff-ln"
-              style={{ width: gutterWidth + 'ch' }}
-            >
-              {row.newLn ?? ''}
-            </span>
-            <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
             <span className="dsh-files-diff-text">
               {row.text.length === 0 ? ' ' : row.text}
             </span>

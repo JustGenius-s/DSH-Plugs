@@ -190,6 +190,8 @@ export interface GitGraphFileOk {
   mime?: string
   /** True for binary files with no preview form (content stays empty). */
   binary?: boolean
+  /** True when the path names a directory, not a file (worktree reads). */
+  directory?: boolean
   /** True when the path exists; false when it does not (deleted file, missing path). */
   exists: boolean
 }
