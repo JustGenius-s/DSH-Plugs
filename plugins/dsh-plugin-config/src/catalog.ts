@@ -8,6 +8,7 @@ export const KNOWN_MARKETPLACE = new Set([
   '@just-genius/dsh-plugin-marketplace',
   '@just-genius/dsh-desktop-update',
   '@just-genius/dsh-wechat-chat',
+  '@just-genius/dsh-memory',
   SELF_PACKAGE,
 ].map((name) => name.toLowerCase()))
 

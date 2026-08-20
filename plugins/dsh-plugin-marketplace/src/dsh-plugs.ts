@@ -82,6 +82,15 @@ export const DSH_PLUGS_PLUGINS: readonly DshPlugsPluginDef[] = [
       zh: 'Cursor 风格 Debug 模式：/debug、复现步骤卡和 Debug Logs 面板。仅当前进程会话生效（不写进持久化日志）。尚无自动埋点。',
     },
   },
+  {
+    folder: 'dsh-memory',
+    packageName: '@just-genius/dsh-memory',
+    category: 'session',
+    description: {
+      en: 'Global markdown memory: Settings page, AI propose-with-confirm, and system-prompt injection.',
+      zh: '全局 Markdown 记忆：独立设置页、AI 写入需确认、启用条目注入系统提示。',
+    },
+  },
 ]
 
 export function githubPathSpec(folder: string): string {

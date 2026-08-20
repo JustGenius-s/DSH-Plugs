@@ -1,0 +1,9 @@
+# Bundle patch for @just-genius/dsh-memory.
+#
+# Host half owns markdown memory storage under ~/.dsh/memory, memory_propose,
+# system-prompt injection, and the /dsh-memory/* HTTP routes. Browser half
+# mounts the Settings → Memory page and the propose confirmation dock.
+
+- insert:
+    - id: dsh-memory
+      name: '@just-genius/dsh-memory'

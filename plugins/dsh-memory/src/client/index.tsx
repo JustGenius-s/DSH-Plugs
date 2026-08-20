@@ -1,0 +1,63 @@
+import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { MemoryDock } from './MemoryDock.tsx'
+import { MemorySection } from './MemorySection.tsx'
+import type { MemorySectionInjected } from './MemorySection.tsx'
+import { installMemorySettingsIcon } from './memory-settings-icon.ts'
+import { en, zh, type MemoryKey } from './locales.ts'
+import { PROPOSE_PATH, type MemoryHttpResult, type MemoryProposeAction } from '../shared.ts'
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface LocaleNamespaceMap {
+    memory: MemoryKey
+  }
+}
+
+const NS = 'memory'
+
+export const inject = ['slots', 'locale'] as const
+
+export function apply(ctx: ClientContext): void {
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-memory: dictionaries')
+
+  const t = ctx.locale.bind(NS) as MemorySectionInjected['t']
+
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'memory',
+    order: 45,
+    label: () => t('nav'),
+    inject: () => ({ t }),
+  }, MemorySection))
+  ctx.effect(() => installMemorySettingsIcon(() => t('nav')), 'dsh-memory: settings icon')
+
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock',
+    id: 'memory-propose',
+    order: 8,
+    locale: NS,
+    inject: (sessionId) => ({
+      sessionId: String(sessionId),
+      resolvePropose: (action: MemoryProposeAction, title: string, content: string) =>
+        postJson(PROPOSE_PATH, { sessionId, action, title, content }),
+    }),
+  }, MemoryDock as never))
+}
+
+async function postJson(path: string, body: unknown): Promise<string | null> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify(body),
+  })
+  let value: MemoryHttpResult<unknown>
+  try {
+    value = await response.json() as MemoryHttpResult<unknown>
+  } catch {
+    return `request failed (${response.status})`
+  }
+  if (value.ok) return null
+  return value.message
+}
