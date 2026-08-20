@@ -6,14 +6,44 @@
  * in a plugin bundle those components render unstyled. These views draw with
  * the panel's own CSS (same `--dsw-*` tokens as the git-graph panel), which
  * keeps the files panel visually consistent with the rest of the sidebar.
+ *
+ * Performance gates mirror VS Code's editor defaults:
+ *  - `MAX_TOKENIZATION_LINE_LENGTH` (in highlight.ts): overlong lines skip
+ *    the grammar entirely.
+ *  - `STOP_RENDERING_LINE_AFTER`: DOM only paints the first N characters of
+ *    a line (`editor.stopRenderingLineAfter`).
+ *  - Viewport virtualization: only rows near the scroll window mount.
  */
-import { useMemo, useState } from 'react'
-import { highlightLines, type HighlightSpan } from './highlight'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+  type UIEvent,
+} from 'react'
+import {
+  highlightLines,
+  type HighlightSpan,
+} from './highlight'
 
 /** Lines shown before a long file collapses behind an expand row. */
 const MAX_PREVIEW_LINES = 400
 /** Diff rows shown before a long patch collapses behind an expand row. */
 const MAX_DIFF_ROWS = 240
+/**
+ * VS Code `editor.stopRenderingLineAfter` default. Characters past this
+ * stay in the source string but are not painted.
+ */
+const STOP_RENDERING_LINE_AFTER = 10_000
+/** Must match `.dsh-files-code-line` / `.dsh-files-diff-row` line-height. */
+const ROW_HEIGHT = 21
+/** Extra rows above/below the viewport so scroll feels continuous. */
+const OVERSCAN_ROWS = 24
 
 export interface ViewLabels {
   /** Expand-row label; `{count}` is the hidden row count. */
@@ -35,36 +65,48 @@ export function FileCodeView(props: {
   )
   const [expanded, setExpanded] = useState(false)
   const capped = !expanded && lines.length > MAX_PREVIEW_LINES
-  const visible = capped ? lines.slice(0, MAX_PREVIEW_LINES) : lines
+  const list = capped ? lines.slice(0, MAX_PREVIEW_LINES) : lines
   const gutterWidth = String(lines.length).length
+  const { start, end, onScroll, totalHeight, offsetY, scrollerRef } = useVirtualWindow(list.length)
+
   return (
-    <div className="dsh-files-view">
-      <div className="dsh-files-code">
-        {visible.map((line, index) => (
-          <div key={index} className="dsh-files-code-line">
-            <span
-              className="dsh-files-code-ln"
-              style={{ width: gutterWidth + 'ch' }}
-            >
-              {index + 1}
-            </span>
-            <span className="dsh-files-code-text">
-              {line.length === 0
-                ? ' '
-                : (highlighted?.[index]?.map((span, spanIndex) => (
-                    <span key={spanIndex} style={span.style}>
-                      {span.text}
-                    </span>
-                  )) ?? line)}
-            </span>
-          </div>
-        ))}
+    <div className="dsh-files-view" ref={scrollerRef} onScroll={onScroll}>
+      <div
+        className="dsh-files-code"
+        style={{ height: totalHeight + (capped ? 28 : 0) }}
+      >
+        <div
+          className="dsh-files-virt-window"
+          style={{ top: offsetY }}
+        >
+          {list.slice(start, end).map((line, offset) => {
+            const index = start + offset
+            return (
+              <div key={index} className="dsh-files-code-line">
+                <span
+                  className="dsh-files-code-ln"
+                  style={{ width: gutterWidth + 'ch' }}
+                >
+                  {index + 1}
+                </span>
+                <span className="dsh-files-code-text">
+                  {renderLineText(line, highlighted?.[index])}
+                </span>
+              </div>
+            )
+          })}
+        </div>
         {capped ? (
-          <ExpandRow
-            count={lines.length - MAX_PREVIEW_LINES}
-            labels={labels}
-            onExpand={() => setExpanded(true)}
-          />
+          <div
+            className="dsh-files-expand-slot"
+            style={{ top: list.length * ROW_HEIGHT }}
+          >
+            <ExpandRow
+              count={lines.length - MAX_PREVIEW_LINES}
+              labels={labels}
+              onExpand={() => setExpanded(true)}
+            />
+          </div>
         ) : null}
       </div>
     </div>
@@ -94,55 +136,177 @@ export function FileDiffView(props: {
   const highlighted = useMemo(() => highlightDiffRows(rows, lang), [rows, lang])
   const [expanded, setExpanded] = useState(false)
   const capped = !expanded && rows.length > MAX_DIFF_ROWS
-  const visible = capped ? rows.slice(0, MAX_DIFF_ROWS) : rows
+  const list = capped ? rows.slice(0, MAX_DIFF_ROWS) : rows
   let maxLn = 0
   for (const row of rows) {
     maxLn = Math.max(maxLn, row.oldLn ?? 0, row.newLn ?? 0)
   }
   const gutterWidth = String(Math.max(maxLn, 1)).length
+  const { start, end, onScroll, totalHeight, offsetY, scrollerRef } = useVirtualWindow(list.length)
+
   return (
-    <div className="dsh-files-view">
-      <div className="dsh-files-diff-body">
-        {visible.map((row, index) => (
-          <div key={index} className={'dsh-files-diff-row is-' + row.kind}>
-            {/* One sticky gutter: both line numbers and the sign stay pinned
-                while the text scrolls horizontally under them. */}
-            <span className="dsh-files-diff-gutter">
-              <span
-                className="dsh-files-diff-ln"
-                style={{ width: gutterWidth + 'ch' }}
-              >
-                {row.oldLn ?? ''}
-              </span>
-              <span
-                className="dsh-files-diff-ln"
-                style={{ width: gutterWidth + 'ch' }}
-              >
-                {row.newLn ?? ''}
-              </span>
-              <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
-            </span>
-            <span className="dsh-files-diff-text">
-              {row.text.length === 0
-                ? ' '
-                : (highlighted[index]?.map((span, spanIndex) => (
-                    <span key={spanIndex} style={span.style}>
-                      {span.text}
-                    </span>
-                  )) ?? row.text)}
-            </span>
-          </div>
-        ))}
+    <div className="dsh-files-view" ref={scrollerRef} onScroll={onScroll}>
+      <div
+        className="dsh-files-diff-body"
+        style={{ height: totalHeight + (capped ? 28 : 0) }}
+      >
+        <div
+          className="dsh-files-virt-window"
+          style={{ top: offsetY }}
+        >
+          {list.slice(start, end).map((row, offset) => {
+            const index = start + offset
+            return (
+              <div key={index} className={'dsh-files-diff-row is-' + row.kind}>
+                {/* One sticky gutter: both line numbers and the sign stay pinned
+                    while the text scrolls horizontally under them. */}
+                <span className="dsh-files-diff-gutter">
+                  <span
+                    className="dsh-files-diff-ln"
+                    style={{ width: gutterWidth + 'ch' }}
+                  >
+                    {row.oldLn ?? ''}
+                  </span>
+                  <span
+                    className="dsh-files-diff-ln"
+                    style={{ width: gutterWidth + 'ch' }}
+                  >
+                    {row.newLn ?? ''}
+                  </span>
+                  <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
+                </span>
+                <span className="dsh-files-diff-text">
+                  {renderLineText(row.text, highlighted[index])}
+                </span>
+              </div>
+            )
+          })}
+        </div>
         {capped ? (
-          <ExpandRow
-            count={rows.length - MAX_DIFF_ROWS}
-            labels={labels}
-            onExpand={() => setExpanded(true)}
-          />
+          <div
+            className="dsh-files-expand-slot"
+            style={{ top: list.length * ROW_HEIGHT }}
+          >
+            <ExpandRow
+              count={rows.length - MAX_DIFF_ROWS}
+              labels={labels}
+              onExpand={() => setExpanded(true)}
+            />
+          </div>
         ) : null}
       </div>
     </div>
   )
+}
+
+/**
+ * Track the visible row window inside a vertically scrolling `.dsh-files-view`.
+ * Horizontal scroll is unchanged (sticky gutters still pin to `left: 0`).
+ */
+function useVirtualWindow(count: number): {
+  start: number
+  end: number
+  offsetY: number
+  totalHeight: number
+  scrollerRef: RefObject<HTMLDivElement | null>
+  onScroll: (event: UIEvent<HTMLDivElement>) => void
+} {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [window, setWindow] = useState({ start: 0, end: Math.min(count, 60) })
+  const raf = useRef(0)
+
+  const syncWindow = useCallback((top: number, height: number): void => {
+    const first = Math.max(0, Math.floor(top / ROW_HEIGHT) - OVERSCAN_ROWS)
+    const last = Math.min(
+      count,
+      Math.ceil((top + height) / ROW_HEIGHT) + OVERSCAN_ROWS,
+    )
+    setWindow((current) => (
+      current.start === first && current.end === last
+        ? current
+        : { start: first, end: last }
+    ))
+  }, [count])
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current
+    if (el === null) {
+      setWindow({ start: 0, end: Math.min(count, 60) })
+      return
+    }
+    syncWindow(el.scrollTop, el.clientHeight)
+  }, [count, syncWindow])
+
+  const onScroll = useCallback((event: UIEvent<HTMLDivElement>): void => {
+    const top = event.currentTarget.scrollTop
+    const height = event.currentTarget.clientHeight
+    cancelAnimationFrame(raf.current)
+    raf.current = requestAnimationFrame(() => {
+      syncWindow(top, height)
+    })
+  }, [syncWindow])
+
+  useEffect(() => () => cancelAnimationFrame(raf.current), [])
+
+  const start = Math.min(window.start, count)
+  const end = Math.min(Math.max(window.end, start), count)
+  return {
+    start,
+    end,
+    offsetY: start * ROW_HEIGHT,
+    totalHeight: count * ROW_HEIGHT,
+    scrollerRef,
+    onScroll,
+  }
+}
+
+/**
+ * Paint one line's text, truncating past `STOP_RENDERING_LINE_AFTER` and
+ * falling back to plain text when highlight spans are missing or empty
+ * (overlong lines skipped by the tokenizer).
+ */
+function renderLineText(
+  line: string,
+  spans: readonly HighlightSpan[] | undefined,
+): ReactNode {
+  if (line.length === 0) return ' '
+  const cut = line.length > STOP_RENDERING_LINE_AFTER
+  const text = cut ? line.slice(0, STOP_RENDERING_LINE_AFTER) : line
+  if (spans === undefined || spans.length === 0) {
+    return cut ? text + '…' : text
+  }
+  const clipped = clipSpans(spans, STOP_RENDERING_LINE_AFTER)
+  return (
+    <>
+      {clipped.map((span, spanIndex) => (
+        <span key={spanIndex} style={span.style as CSSProperties}>
+          {span.text}
+        </span>
+      ))}
+      {cut ? '…' : null}
+    </>
+  )
+}
+
+/** Keep spans whose cumulative length stays within `max` characters. */
+function clipSpans(
+  spans: readonly HighlightSpan[],
+  max: number,
+): HighlightSpan[] {
+  const out: HighlightSpan[] = []
+  let used = 0
+  for (const span of spans) {
+    if (used >= max) break
+    const room = max - used
+    if (span.text.length <= room) {
+      out.push(span)
+      used += span.text.length
+      continue
+    }
+    out.push({ text: span.text.slice(0, room), style: span.style })
+    break
+  }
+  return out
 }
 
 function ExpandRow(props: {

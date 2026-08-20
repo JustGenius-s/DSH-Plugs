@@ -26,20 +26,22 @@ const FILES_CSS = `
 .dsh-files-status-badge.is-renamed,.dsh-files-status-badge.is-copied{background:rgba(9,105,218,.14);color:#0550ae}
 .dsh-files-status-badge.is-untracked{background:rgba(31,122,55,.14);color:#116329}
 .dsh-files-status-badge.is-conflicted{background:rgba(130,80,223,.14);color:#8250df}
-.dsh-files-preview,.dsh-files-diff{flex:1;min-height:0;overflow:auto}
+/* Preview/diff hosts fill the panel; the inner .dsh-files-view owns both
+   vertical (virtualized) and horizontal scrolling so sticky gutters keep
+   working against the same scrollport. */
+.dsh-files-preview,.dsh-files-diff{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
 .dsh-files-image{flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:16px}
 .dsh-files-image img{max-width:100%;height:auto;border-radius:6px;background:repeating-conic-gradient(rgba(128,128,128,.18) 0% 25%,transparent 0% 50%) 0 0/16px 16px}
 .dsh-files-preview .dsh-files-status,.dsh-files-diff .dsh-files-status{padding:16px 12px}
 .dsh-files-tree-dir{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-files-tree-note{padding:4px 12px;font-size:12px;line-height:18px}
-/* width:max-content makes every row span the full scroll width (rows are
-   block-level and stretch to the view), which is what lets the sticky gutter
-   stay pinned for the WHOLE horizontal scroll range — a sticky element can
-   never leave its own row, so rows sized to the viewport would drag their
-   gutter away once scrolled past one viewport width. min-width:100% keeps
-   short files filling the panel so row hover/tint bands stay full-width. */
-.dsh-files-view{position:relative;width:max-content;min-width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:21px}
-.dsh-files-code{padding:0 0 8px}
+/* The view is the scrollport. Its content wrapper is height-sized to the full
+   virtual list; width:max-content on the painted window keeps sticky gutters
+   pinned across horizontal scroll the same way the pre-virtual layout did. */
+.dsh-files-view{flex:1;min-height:0;overflow:auto;position:relative;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:21px}
+.dsh-files-code,.dsh-files-diff-body{position:relative;width:max-content;min-width:100%;padding:0 0 8px;box-sizing:content-box}
+.dsh-files-virt-window{position:absolute;left:0;width:max-content;min-width:100%}
+.dsh-files-expand-slot{position:absolute;left:0;right:0;width:100%}
 .dsh-files-code-line{display:flex;min-height:21px;padding-right:8px;white-space:pre}
 .dsh-files-code-line:hover{background:var(--dsw-alias-interactive-bg-hover)}
 /* The gutter is sticky and opaque: code scrolls horizontally UNDER it. The
@@ -49,7 +51,6 @@ const FILES_CSS = `
 .dsh-files-code-ln{position:sticky;left:0;z-index:1;flex:none;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-alias-bg-base)}
 .dsh-files-code-line:hover .dsh-files-code-ln{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-alias-bg-base)}
 .dsh-files-code-text{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e8)}
-.dsh-files-diff-body{padding:0 0 8px}
 .dsh-files-diff-row{display:flex;min-height:21px;padding-right:8px;white-space:pre}
 /* Same sticky trick for the diff gutter (old ln + new ln + sign ride one
    pinned wrapper); tinted rows composite their tint over the panel base so

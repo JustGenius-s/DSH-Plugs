@@ -371,6 +371,22 @@ function highlighter() {
   return singleton
 }
 
+/**
+ * Cap for per-line tokenization. VS Code's editor default is 20_000
+ * (`editor.maxTokenizationLineLength`); the files panel uses a stricter
+ * 4_000 because this is a sidebar preview — files like generated icon
+ * maps ship few lines with multi-kilobyte string literals, and the grammar
+ * cost scales with line length, not line count.
+ */
+export const MAX_TOKENIZATION_LINE_LENGTH = 4_000
+/**
+ * When a large file already has several overlong lines, skip highlighting
+ * the whole buffer. Per-line blanking alone still leaves Shiki chewing on
+ * many kilobyte-scale neighbours (measured ~0.5–1s on icon data maps).
+ */
+const SKIP_ALL_HIGHLIGHT_BYTES = 200_000
+const SKIP_ALL_HIGHLIGHT_OVERLONG = 10
+
 /** One highlighted run of a line: text plus the inline style shiki assigned. */
 export interface HighlightSpan {
   text: string
@@ -394,6 +410,10 @@ export interface HighlightSpan {
  * properties — which nothing consumes unless mapped back onto real style
  * properties. Both themes share the same seven fontStyle rules, so the light
  * value (dark as fallback) is applied directly.
+ *
+ * Overlong lines (see `MAX_TOKENIZATION_LINE_LENGTH`) are skipped — same
+ * intent as VS Code's line-length gate — so a 97 KB SVG string literal does
+ * not stall the main thread for seconds.
  */
 export function highlightLines(
   code: string,
@@ -404,12 +424,40 @@ export function highlightLines(
       ? undefined
       : LANG_ALIASES.get(lang.toLowerCase())
   if (resolved === undefined) return undefined
-  // Shiki's tokenize loop skips empty lines WITHOUT advancing the grammar
-  // stack, so rules whose `while`/`end` is keyed on a blank line (markdown's
-  // HTML block ends on one) never see it and swallow the rest of the file.
-  // Tokenize a copy with blank lines massaged to a single space — invisible
-  // in the rendered output, but the grammar's blank-line checks fire.
-  const massaged = code.replace(/^[^\S\n]*$/gm, ' ')
+  // Split once so we can both massage blanks AND blank out overlong lines
+  // before Shiki sees them. Trailing empty segment from a final `\n` is kept
+  // so the massaged string still ends with `\n` when the source did.
+  const rawLines = code.split('\n')
+  const overlong = new Set<number>()
+  const massagedLines: string[] = []
+  for (let index = 0; index < rawLines.length; index += 1) {
+    const line = rawLines[index] ?? ''
+    // The last empty piece after a trailing newline is not a real content
+    // line; leave it alone so `code.endsWith('\n')` still drops the phantom
+    // token row below.
+    if (index === rawLines.length - 1 && line.length === 0 && code.endsWith('\n')) {
+      massagedLines.push('')
+      continue
+    }
+    if (line.length >= MAX_TOKENIZATION_LINE_LENGTH) {
+      overlong.add(index)
+      massagedLines.push(' ')
+      continue
+    }
+    // Shiki's tokenize loop skips empty lines WITHOUT advancing the grammar
+    // stack, so rules whose `while`/`end` is keyed on a blank line (markdown's
+    // HTML block ends on one) never see it and swallow the rest of the file.
+    massagedLines.push(/^[^\S\n]*$/.test(line) ? ' ' : line)
+  }
+  // Generated dumps (icon SVGs-in-TS, …): many overlong neighbours in a big
+  // buffer — fall back to plain text for the whole file.
+  if (
+    overlong.size > 0
+    && (overlong.size >= SKIP_ALL_HIGHLIGHT_OVERLONG || code.length >= SKIP_ALL_HIGHLIGHT_BYTES)
+  ) {
+    return undefined
+  }
+  const massaged = massagedLines.join('\n')
   const { tokens } = highlighter().codeToTokens(massaged, {
     lang: resolved,
     themes: { light: 'light-plus', dark: 'dark-plus' },
@@ -419,8 +467,11 @@ export function highlightLines(
   // (space) row, so drop it based on the source, not on row emptiness.
   const rows =
     tokens.length > 1 && code.endsWith('\n') ? tokens.slice(0, -1) : tokens
-  return rows.map((line) =>
-    line.map((token) => {
+  return rows.map((line, lineIndex) => {
+    // Overlong source lines: pretend there were no tokens so the view falls
+    // back to plain text (then truncates for DOM via stopRenderingLineAfter).
+    if (overlong.has(lineIndex)) return []
+    return line.map((token) => {
       const style: CSSProperties = {}
       if (token.color !== undefined) style.color = token.color
       const extra = token.htmlStyle
@@ -434,6 +485,6 @@ export function highlightLines(
         if (textDecoration !== undefined) style.textDecoration = textDecoration
       }
       return { text: token.content, style }
-    }),
-  )
+    })
+  })
 }
