@@ -297,8 +297,10 @@ function GraphBody(props: {
   onScroll: (event: UIEvent<HTMLDivElement>) => void
 }) {
   const { state, t } = props
+  // First paint while the log is in flight: stay blank. A "loading…" status
+  // flashes and looks worse than an empty panel for a short fetch.
   if (state.status === 'loading' && state.rows.length === 0) {
-    return <div className="dsh-git-graph-status">{t('gitGraph.loading')}</div>
+    return null
   }
   if (state.status === 'error') {
     return <div className="dsh-git-graph-status is-error">{errorText(state, t)}</div>

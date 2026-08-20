@@ -200,9 +200,7 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
       )}
       {error !== undefined ? (
         <div className="dsh-git-graph-detail-status is-error">{error}</div>
-      ) : files === null ? (
-        <div className="dsh-git-graph-detail-status">{t('gitGraph.loading')}</div>
-      ) : files.length === 0 ? null : grouped ? (
+      ) : files === null || files.length === 0 ? null : grouped ? (
         <>
           <ChangeSection
             label={t('gitGraph.staged')}
