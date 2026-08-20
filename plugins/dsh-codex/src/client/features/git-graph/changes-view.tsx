@@ -149,10 +149,7 @@ export function GitChangesView(props: GitChangesViewProps) {
       showToast(result.message, 'error')
       return false
     }
-    // Row-level workdir actions stay silent; the list refresh is the feedback.
-    if (action !== 'stage' && action !== 'unstage' && action !== 'discard') {
-      showToast(result.message ?? t('gitGraph.actionOk'), 'ok')
-    }
+    // Success stays silent everywhere: the list/graph refresh is the feedback.
     refresh()
     return true
   }, [cwd, refresh, showToast, t])

@@ -75,7 +75,7 @@ export function CommitContextMenu(props: {
       onNotice(result.message, 'error')
       return
     }
-    onNotice(result.message ?? t('gitGraph.actionOk'), 'ok')
+    // Success stays silent: the graph reload is the feedback.
     onRan()
   }, [cwd, onNotice, onRan, t])
 
