@@ -10,7 +10,7 @@
 // active, matching Warp's AltScreen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent, ClipboardEvent as ReactClipboardEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import type {
   BlockContext,
@@ -28,6 +28,18 @@ ensureWarpTerminalStyles()
 
 const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const LINE_HEIGHT = 1.2
+
+// Paste pipeline mirrored from Warp (crates/warp_tui/src/terminal_content_element.rs):
+// CRLF/LF normalize to CR, and the payload is wrapped in the bracketed-paste
+// markers only when the receiving line editor / program enabled mode ?2004.
+function normalizePasteText(text: string): string {
+  return text.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
+}
+
+function pasteInputBytes(text: string, bracketedPaste: boolean): string {
+  const normalized = normalizePasteText(text)
+  return bracketedPaste ? '\x1b[200~' + normalized + '\x1b[201~' : normalized
+}
 
 // Canvas themes: the dark palette is the panel's original One Dark flavor,
 // the light palette is VSCode's Light+ terminal. Background/foreground/cursor
@@ -289,6 +301,9 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const lastSentDimsRef = useRef('')
   const termcapBufferRef = useRef('')
   const oscQueryBufferRef = useRef('')
+  // Reported by the host's setup probe: the shell's line editor accepts
+  // bracketed paste, so multi-line submissions can arrive as one buffer.
+  const shellBracketedPasteRef = useRef(false)
   const handleServerMessageRef = useRef((m: ServerMessage) => { void m })
   const lastSessionKeyRef = useRef('')
   const sessionTokenRef = useRef(newSessionToken())
@@ -817,6 +832,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     switch (message.type) {
       case 'ready':
         retryCountRef.current = 0
+        shellBracketedPasteRef.current = message.bracketedPaste
         setConnState('ready')
         setError(null)
         requestAnimationFrame(() => sendResizeRef.current())
@@ -1023,7 +1039,11 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       setCompletionMenu(null)
       setGhost('')
       completionRequestRef.current = null
-      const message: ClientMessage = { type: 'input', data: command + '\n' }
+      // Multi-line input for the foreground process: wrap it when that
+      // program enabled bracketed paste (Warp's needs_bracketed_paste).
+      const grid = gridsRef.current.get(running)
+      const wrap = command.includes('\n') && (grid?.term.modes.bracketedPasteMode ?? false)
+      const message: ClientMessage = { type: 'input', data: pasteInputBytes(command, wrap) + '\n' }
       ws.send(JSON.stringify(message))
       rebuildDoc()
       schedulePaint()
@@ -1070,7 +1090,14 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     }
     draftRef.current = ''
     setDraft('')
-    const message: ClientMessage = { type: 'input', data: command + '\n' }
+    // A multi-line submission wrapped in bracketed paste is accepted by the
+    // shell's line editor as ONE buffer: it executes as a single command with
+    // a single prompt cycle, so the block model gets exactly one block-end.
+    // Unwrapped, each \n is an accept-line and later lines' output would
+    // leak past the completed block. Without shell support, fall back to the
+    // raw stream (line-by-line execution, as before).
+    const wrap = command.includes('\n') && shellBracketedPasteRef.current
+    const message: ClientMessage = { type: 'input', data: pasteInputBytes(command, wrap) + '\n' }
     ws.send(JSON.stringify(message))
     rebuildDoc()
     schedulePaint()
@@ -1125,24 +1152,38 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     ws.send(JSON.stringify(message))
   }, [])
 
-  // Paste with the editor hidden targets the scroll surface (never an
-  // editable element), so forward the clipboard text as stdin here.
-  useEffect(() => {
-    const onPaste = (event: ClipboardEvent) => {
-      if (runningIdRef.current === null || altActiveRef.current) return
-      const target = event.target
-      if (target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
-      const text = event.clipboardData?.getData('text') ?? ''
-      if (text.length === 0) return
+  // Paste routing (Warp parity): with the alt screen up or a command running,
+  // the clipboard goes straight to the PTY — CR-normalized and wrapped in the
+  // bracketed-paste markers when that program enabled mode ?2004. Otherwise
+  // the text lands in the command editor, wherever in the panel it landed.
+  // Bound on the scroll surface (not document) so pastes elsewhere in the app
+  // are never hijacked; native paste inside the textarea bubbles up and is
+  // left alone here.
+  const onScrollPaste = useCallback((event: ReactClipboardEvent) => {
+    const target = event.target
+    if (target instanceof HTMLElement && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return
+    const text = event.clipboardData.getData('text')
+    if (text.length === 0) return
+    if (altActiveRef.current || runningIdRef.current !== null) {
       const ws = wsRef.current
       if (ws === null || ws.readyState !== WebSocket.OPEN) return
       event.preventDefault()
-      const message: ClientMessage = { type: 'input', data: text }
+      const term = altActiveRef.current
+        ? altTermRef.current
+        : gridsRef.current.get(runningIdRef.current ?? '')?.term
+      const message: ClientMessage = {
+        type: 'input',
+        data: pasteInputBytes(text, term?.modes.bracketedPasteMode ?? false),
+      }
       ws.send(JSON.stringify(message))
+      return
     }
-    document.addEventListener('paste', onPaste)
-    return () => document.removeEventListener('paste', onPaste)
-  }, [])
+    event.preventDefault()
+    const textarea = textareaRef.current
+    const current = draftRef.current
+    const caret = textarea !== null && document.activeElement === textarea ? textarea.selectionStart : current.length
+    setDraftWithCaret(current.slice(0, caret) + text + current.slice(caret), caret + text.length, true)
+  }, [setDraftWithCaret])
 
   const pointToCell = useCallback((clientX: number, clientY: number): { row: number; col: number } => {
     const canvas = canvasRef.current
@@ -1223,6 +1264,33 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     schedulePaint()
   }, [schedulePaint])
 
+  // Auto-grow the textarea from its measured content height. Counting '\n'
+  // is not enough: a long line soft-wraps onto extra visual rows, and a
+  // fixed rows=N height would clip them (overflow:hidden). Capped at 8
+  // rows, then it scrolls.
+  const adjustEditorHeight = useCallback(() => {
+    const el = textareaRef.current
+    if (el === null) return
+    el.style.height = '0px'
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 21
+    const max = Math.ceil(lineHeight * 8) + 4
+    el.style.height = Math.min(el.scrollHeight, max) + 'px'
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden'
+  }, [])
+
+  useEffect(() => {
+    adjustEditorHeight()
+  }, [draft, adjustEditorHeight])
+
+  // Soft wraps reflow when the panel width changes, so re-measure then too.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (el === null || editorHidden) return
+    const observer = new ResizeObserver(() => adjustEditorHeight())
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [adjustEditorHeight, editorHidden])
+
   // The editor rides the document as its last block, so its height is part of
   // the scrollable extent. Measured (not computed from draftRows) because the
   // chips row wraps and the textarea caps at 8 rows. Hidden while a command
@@ -1260,7 +1328,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     if (stickToBottomRef.current) el.scrollTop = el.scrollHeight
   }, [doc, blocks.length, editorHeight])
 
-  const draftRows = Math.min(8, Math.max(1, draft.split('\n').length))
   const chips = contextChips(currentContext)
 
   const totalHeight = (doc?.totalRows ?? 0) * metrics.cellHeight
@@ -1305,7 +1372,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         </div>
       )}
 
-      <div className="dsh-warp-terminal-scroll" ref={scrollRef} onScroll={onScroll} tabIndex={-1} onKeyDown={onScrollKeyDown}>
+      <div className="dsh-warp-terminal-scroll" ref={scrollRef} onScroll={onScroll} tabIndex={-1} onKeyDown={onScrollKeyDown} onPaste={onScrollPaste}>
         <div className="dsh-warp-terminal-doc" style={{ height: totalHeight + editorHeight }}>
           <div className="dsh-warp-terminal-viewport" style={{ height: viewHeight }}>
             <canvas
@@ -1379,7 +1446,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
             className="dsh-warp-terminal-command-textarea"
             placeholder={ghost.length > 0 ? '' : t('editor.placeholder')}
             value={draft}
-            rows={draftRows}
+            rows={1}
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"

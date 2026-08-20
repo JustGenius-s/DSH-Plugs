@@ -106,6 +106,7 @@ export function isInternalHistoryCommand(command: string): boolean {
   const trimmed = command.trim()
   if (trimmed.length === 0) return true
   if (trimmed.includes('warp-block-end') || trimmed.includes('warp-node-version')) return true
+  if (trimmed.includes('warp-caps')) return true
   if (trimmed.includes('dsh_block_mark')) return true
   if (trimmed === 'stty -echo') return true
   if (trimmed === 'export TERM=xterm-256color') return true

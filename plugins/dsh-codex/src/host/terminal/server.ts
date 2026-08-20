@@ -37,9 +37,10 @@ const execFileAsync = promisify(execFile)
 
 const BLOCK_END_PREFIX = '\x1b]777;warp-block-end;'
 const NODE_VERSION_PREFIX = '\x1b]777;warp-node-version;'
+const CAPS_PREFIX = '\x1b]777;warp-caps;'
 const BEL = '\x07'
 const WS_PATH = '/dsh-codex/terminal/ws'
-const MARKER_PREFIXES = [BLOCK_END_PREFIX, NODE_VERSION_PREFIX] as const
+const MARKER_PREFIXES = [BLOCK_END_PREFIX, NODE_VERSION_PREFIX, CAPS_PREFIX] as const
 const CONTEXT_TIMEOUT_MS = 2500
 /** How long a detached PTY outlives its socket, waiting for a reconnect. */
 const DETACH_GRACE_MS = 10 * 60 * 1000
@@ -76,6 +77,8 @@ export interface TerminalSession {
   promptBuf: string
   history: string[] | undefined
   historySent: boolean
+  /** Shell confirmed bracketed-paste support via the warp-caps probe. */
+  bracketedPaste: boolean
 }
 
 /** Handle the main thread can dispose to tear the whole server down. */
@@ -188,6 +191,7 @@ function attachSocket(
     shell: session.shell,
     rows: session.rows,
     cols: session.cols,
+    bracketedPaste: session.bracketedPaste,
   })
   const replay = session.replay
   session.replay = []
@@ -331,6 +335,7 @@ export async function openSession(
     promptBuf: "",
     history: undefined,
     historySent: false,
+    bracketedPaste: false,
   }
 
   void loadShellHistory(shell).then((commands) => {
@@ -518,7 +523,11 @@ function deliver(session: TerminalSession, message: ServerMessage): void {
 /**
  * Shell-specific setup script. Every line executes inside the new interactive
  * shell. The prompt hook prints the block-end marker with exit code and cwd;
- * PS1 is emptied so no shell prompt is drawn.
+ * PS1 is emptied so no shell prompt is drawn. A capabilities probe reports
+ * bracketed-paste support, so the client can wrap multi-line submissions in
+ * the ?2004 markers and the line editor accepts them as ONE buffer (one
+ * block-end) instead of executing line by line — Warp's own paste pipeline
+ * (warp_tui terminal_content_element.rs) relies on the same mode.
  *
  * Like Warp, later lines are space-prefixed so hist_ignore_space / ignorespace
  * keeps bootstrap out of the user's HISTFILE.
@@ -539,11 +548,14 @@ export function setupScript(shell: string): string {
   )
   if (name === 'zsh') {
     lines.push(
+      quiet('printf \'\\e]777;warp-caps;bracketed-paste=%s\\a\' "$(zle -l bracketed-paste >/dev/null 2>&1 && echo 1 || echo 0)"'),
       quiet('dsh_block_mark() { printf \'\\e]777;warp-block-end;%s;%s\\a\' "$?" "$PWD" }'),
       quiet('precmd_functions+=dsh_block_mark'),
     )
   } else {
     lines.push(
+      quiet('bind "set enable-bracketed-paste on" 2>/dev/null'),
+      quiet('printf \'\\e]777;warp-caps;bracketed-paste=%s\\a\' "$(bind -v 2>/dev/null | grep -q "enable-bracketed-paste on" && echo 1 || echo 0)"'),
       quiet('PROMPT_COMMAND=\'printf "\\e]777;warp-block-end;%s;%s\\a" "$?" "$PWD"\'"${PROMPT_COMMAND:+;$PROMPT_COMMAND}"'),
     )
   }
@@ -557,7 +569,8 @@ export function onTerminalData(session: TerminalSession, chunk: string): void {
   for (;;) {
     const blockIndex = session.pending.indexOf(BLOCK_END_PREFIX)
     const nodeIndex = session.pending.indexOf(NODE_VERSION_PREFIX)
-    if (blockIndex === -1 && nodeIndex === -1) {
+    const capsIndex = session.pending.indexOf(CAPS_PREFIX)
+    if (blockIndex === -1 && nodeIndex === -1 && capsIndex === -1) {
       const keep = possibleMarkerSuffixLength(session.pending)
       const safeLength = session.pending.length - keep
       if (safeLength > 0) {
@@ -568,25 +581,42 @@ export function onTerminalData(session: TerminalSession, chunk: string): void {
       return
     }
 
-    const isBlockEnd = blockIndex !== -1 && (nodeIndex === -1 || blockIndex < nodeIndex)
-    const markerIndex = isBlockEnd ? blockIndex : nodeIndex
+    let markerIndex = blockIndex
+    let kind: 'block-end' | 'node-version' | 'caps' = 'block-end'
+    if (nodeIndex !== -1 && (markerIndex === -1 || nodeIndex < markerIndex)) {
+      markerIndex = nodeIndex
+      kind = 'node-version'
+    }
+    if (capsIndex !== -1 && (markerIndex === -1 || capsIndex < markerIndex)) {
+      markerIndex = capsIndex
+      kind = 'caps'
+    }
 
     emitOutput(session, session.pending.slice(0, markerIndex))
     session.pending = session.pending.slice(markerIndex)
 
-    const prefixLength = isBlockEnd ? BLOCK_END_PREFIX.length : NODE_VERSION_PREFIX.length
+    const prefixLength =
+      kind === 'block-end'
+        ? BLOCK_END_PREFIX.length
+        : kind === 'node-version'
+          ? NODE_VERSION_PREFIX.length
+          : CAPS_PREFIX.length
     const belIndex = session.pending.indexOf(BEL, prefixLength)
     if (belIndex === -1) return
 
-    if (isBlockEnd === false) {
-      const version = session.pending.slice(prefixLength, belIndex).trim()
-      session.pending = session.pending.slice(belIndex + 1)
+    const payload = session.pending.slice(prefixLength, belIndex)
+    session.pending = session.pending.slice(belIndex + 1)
+
+    if (kind === 'node-version') {
+      const version = payload.trim()
       if (version.length > 0) session.nodeVersion = version
       continue
     }
 
-    const payload = session.pending.slice(BLOCK_END_PREFIX.length, belIndex)
-    session.pending = session.pending.slice(belIndex + 1)
+    if (kind === 'caps') {
+      session.bracketedPaste = payload.includes('bracketed-paste=1')
+      continue
+    }
 
     const separator = payload.indexOf(';')
     if (separator === -1) continue
@@ -603,6 +633,7 @@ export function onTerminalData(session: TerminalSession, chunk: string): void {
         shell: session.shell,
         rows: session.rows,
         cols: session.cols,
+        bracketedPaste: session.bracketedPaste,
       })
       sendHistoryIfReady(session)
       void updateContext(session)

@@ -18,13 +18,9 @@ Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the
 
 Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop) next to the sidebar Settings button, driven by the `window.dshDesktop` Electron bridge. App updates jump to GitHub Releases; DSH runtime updates install in place. Renders nothing in a plain browser.
 
-![Desktop update](public/desktop-update.png)
-
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 
 Replaces the official Models settings page (fork of `ui-settings-models`) to add per-model dropdown multi-selects for **vision** (`input`) and **thinking strength** (`reasoningEfforts`) — the two controls the stock page punts to `settings.yaml`.
-
-![Custom Models settings](public/model-custom-ex.png)
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 

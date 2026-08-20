@@ -26,6 +26,8 @@ export type ServerMessage =
       shell: string
       rows: number
       cols: number
+      /** The shell's line editor confirmed bracketed-paste (mode ?2004) support. */
+      bracketedPaste: boolean
     }
   | { type: 'context'; context: BlockContext }
   | { type: 'output'; text: string }
