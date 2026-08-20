@@ -39,14 +39,25 @@ export async function loadChangeFiles(
 ): Promise<GitChangeFile[]> {
   await assertGitRepo(cwd)
   if (sha !== undefined) {
+    // A merge commit diffs against its FIRST parent — the branch the merge
+    // landed on. Bare `diff-tree <merge>` prints nothing at all, and
+    // `-m --first-parent` still splits the output per parent, so the first
+    // parent is resolved explicitly and the two-tree form is used. A root
+    // commit has no parent and keeps the single-commit `--root` form.
+    const firstParent = await gitText(
+      cwd,
+      ['rev-parse', '--verify', '--quiet', sha + '^1'],
+      GIT_TIMEOUT_MS,
+    ).catch(() => '')
+    const trees = firstParent === '' ? ['--root', sha] : [firstParent, sha]
     const nameStatus = await gitText(
       cwd,
-      ['diff-tree', '--no-commit-id', '--name-status', '-z', '-r', '-M', '--root', sha, '--'],
+      ['diff-tree', '--no-commit-id', '--name-status', '-z', '-r', '-M', ...trees, '--'],
       GIT_TIMEOUT_MS,
     )
     const numstat = await gitText(
       cwd,
-      ['diff-tree', '--no-commit-id', '--numstat', '-r', '-M', '--root', sha, '--'],
+      ['diff-tree', '--no-commit-id', '--numstat', '-r', '-M', ...trees, '--'],
       GIT_TIMEOUT_MS,
     ).catch(() => '')
     const counts = parseNumstat(numstat)
@@ -303,6 +314,8 @@ export async function loadFileDiff(
   if (sha !== undefined) {
     // `git show <sha>` diffs the commit against its parent — root commits
     // against the empty tree — and prints nothing for untouched paths.
+    // `--first-parent` picks the landing-side parent for merges; without it
+    // `show` falls back to a combined diff that is empty for clean merges.
     const patch = await runDiff(cwd, [
       'show',
       '--no-color',
@@ -310,6 +323,7 @@ export async function loadFileDiff(
       '--format=',
       '--unified=3',
       '--no-renames',
+      '--first-parent',
       sha,
       '--',
       safePath,
