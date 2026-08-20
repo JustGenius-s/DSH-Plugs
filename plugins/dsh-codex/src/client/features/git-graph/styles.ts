@@ -87,6 +87,8 @@ const GRAPH_CSS = `
 .dsh-git-graph-detail-row.is-dir .dsh-git-graph-detail-name{font-size:13px;line-height:18px;color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-git-changes-commit{flex:none;display:inline-flex;align-items:stretch;height:28px;border-radius:14px;background:var(--dsw-alias-state-business-primary,#4f7cff);color:var(--dsw-alias-label-on-primary,#fff)}
 .dsh-git-changes-commit-main{display:inline-flex;align-items:center;padding:0 12px;border:none;border-radius:14px 0 0 14px;background:transparent;color:inherit;font:inherit;font-size:12px;line-height:18px;cursor:pointer}
+.dsh-git-changes-commit-spinner{display:inline-flex;margin-right:4px}
+.dsh-git-changes-commit-spinner svg{animation:dsh-git-changes-spin 1s linear infinite}
 .dsh-git-changes-commit-more{display:inline-flex;align-items:center;justify-content:center;width:24px;border:none;border-left:1px solid rgba(255,255,255,.25);border-radius:0 14px 14px 0;background:transparent;color:inherit;cursor:pointer}
 .dsh-git-changes-commit-main:hover,.dsh-git-changes-commit-more:hover{background:rgba(255,255,255,.14)}
 .dsh-git-changes-commit-main:disabled,.dsh-git-changes-commit-more:disabled{opacity:.5;cursor:default}

@@ -61,7 +61,8 @@ export function GitChangesView(props: GitChangesViewProps) {
   const { cwd, t, onOpenFile, onOpenGraph } = props
   const [refreshSeq, setRefreshSeq] = useState(0)
   const [display, setDisplay] = useState<'flat' | 'tree'>('flat')
-  const [busy, setBusy] = useState(false)
+  const [busyAction, setBusyAction] = useState<GitGraphActionName | null>(null)
+  const busy = busyAction !== null
   const [commitMenuOpen, setCommitMenuOpen] = useState(false)
   const [overflowOpen, setOverflowOpen] = useState(false)
   const [message, setMessage] = useState('')
@@ -137,13 +138,13 @@ export function GitChangesView(props: GitChangesViewProps) {
       showToast(t('gitGraph.noCwd'), 'error')
       return false
     }
-    setBusy(true)
+    setBusyAction(action)
     const request: GitGraphActionRequest = { cwd, action }
     if (commitMessage !== undefined) request.message = commitMessage
     if (path !== undefined) request.path = path
     if (all === true) request.all = true
     const result = await postAction(request)
-    setBusy(false)
+    setBusyAction(null)
     if (!result.ok) {
       showToast(result.message, 'error')
       return false
@@ -170,6 +171,13 @@ export function GitChangesView(props: GitChangesViewProps) {
       if (ok) setMessage('')
     })
   }
+
+  // Progress label inside the commit button while a commit action runs.
+  const commitProgress = busyAction === 'commit' || busyAction === 'commit-amend'
+    ? t('gitGraph.committing')
+    : busyAction === 'commit-push' || busyAction === 'commit-push-amend'
+      ? t('gitGraph.pushing')
+      : undefined
 
   const generateMessage = async (): Promise<void> => {
     if (generating || cwd === undefined || cwd.length === 0) return
@@ -269,7 +277,14 @@ export function GitChangesView(props: GitChangesViewProps) {
               disabled={busy || message.trim().length === 0}
               onClick={() => submitCommit('commit')}
             >
-              {t('gitGraph.commit')}
+              {commitProgress === undefined ? t('gitGraph.commit') : (
+                <>
+                  <span className="dsh-git-changes-commit-spinner" aria-hidden="true">
+                    <IconLoadingOutline16 size={14} />
+                  </span>
+                  {commitProgress}
+                </>
+              )}
             </button>
             <button
               ref={commitMoreRef}
