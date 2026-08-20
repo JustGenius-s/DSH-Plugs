@@ -7,11 +7,21 @@ export interface DesktopUpdateInfo {
   url?: string
 }
 
+/** DSH 运行时更新渠道：npm dist-tag（latest/next）或按精确版本（custom）。 */
+export type DshChannel = 'latest' | 'next' | 'custom'
+
+export interface DesktopUpdateConfig {
+  checkApp: boolean
+  checkDsh: boolean
+  dshChannel?: DshChannel
+  dshVersion?: string
+}
+
 export interface DesktopUpdateState {
   app: DesktopUpdateInfo | null
   dsh: DesktopUpdateInfo | null
   checking: boolean
-  config: { checkApp: boolean; checkDsh: boolean }
+  config: DesktopUpdateConfig
   versions: { app: string; dsh: string | null }
 }
 
@@ -75,6 +85,7 @@ export interface DshDesktop {
     checkNow(): Promise<DesktopUpdateState>
     downloadApp(): Promise<void>
     updateDsh(): Promise<void>
+    setDshChannel(channel: DshChannel, version?: string): Promise<DesktopUpdateState>
     skipVersion(kind: DesktopUpdateKind): Promise<void>
     setGate(kind: DesktopUpdateKind, enabled: boolean): Promise<DesktopUpdateState>
     relaunch(): void

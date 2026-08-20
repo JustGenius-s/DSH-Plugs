@@ -15,8 +15,9 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-web-react'
+import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
 import { deriveKeyRef, messageOf, protocolChoices, providerUsable } from './store.ts'
 import type { ModelsSettingsState, ModelsSettingsStore, ProviderRow } from './store.ts'
@@ -28,8 +29,10 @@ import styles from './ModelsSection.module.css'
 export interface ModelsSectionInjected {
   /** The page store (loaded on mount, refreshed on pushed invalidations). */
   controller: ModelsSettingsStore
-  /** uSES subscription hook bound to the store. */
-  useSnapshot: SnapshotSelectorHook<ModelsSettingsState>
+  /** Bare snapshot source; the slot renderer binds it to `useSnapshot`. */
+  hooks: {
+    snapshot: SnapshotStore<ModelsSettingsState>
+  }
   /** Wire faces the editor writes through. */
   api: Pick<IApiClient, 'settings' | 'credentials' | 'llm'>
   /** Section copy. */
@@ -38,9 +41,10 @@ export interface ModelsSectionInjected {
 
 /**
  * Props delivered by the slot outlet: the inject face spread flat (the
- * renderer erases the share boundary at the render call).
+ * renderer erases the share boundary at the render call, and binds `hooks`
+ * into selector hooks).
  */
-export type ModelsSectionProps = Partial<ModelsSectionInjected>
+export type ModelsSectionProps = Partial<InjectFace<ModelsSectionInjected>>
 
 /** Provider identity shared by row actions and confirmation copy. */
 export interface ProviderIdentity {
@@ -174,7 +178,7 @@ export function ModelsSection(props: ModelsSectionProps): ReactNode {
   return <Loaded injected={{ controller, useSnapshot, api, t }} />
 }
 
-function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
+function Loaded({ injected }: { injected: InjectFace<ModelsSectionInjected> }): ReactNode {
   const { controller, api, t } = injected
   const state = injected.useSnapshot(snapshot => snapshot)
   const [editing, setEditing] = useState<EditorTarget | undefined>(undefined)

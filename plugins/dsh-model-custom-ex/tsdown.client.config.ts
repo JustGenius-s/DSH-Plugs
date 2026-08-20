@@ -13,7 +13,18 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
-  deps: { neverBundle: true },
+  // neverBundle leaves host seed packages as require(); schema-form is not a
+  // seed (same class as dsh-client-web-react), so it and its validator chain
+  // must be inlined or the client module table misses them at load.
+  deps: {
+    neverBundle: true,
+    alwaysBundle: [
+      '@deepseek-ai/dsh-client-schema-form',
+      '@deepseek-ai/schemastery',
+      '@deepseek-ai/cosmokit',
+      '@standard-schema/spec',
+    ],
+  },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {

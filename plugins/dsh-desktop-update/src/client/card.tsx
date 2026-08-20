@@ -10,17 +10,22 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import { Menu, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   ActionButton,
   CardFooter,
   DiscardButton,
   Field,
+  FieldHead,
+  FieldHint,
+  InlineNotice,
   PendingBadge,
   SaveButton,
   SettingsCard,
   SwitchField,
 } from '@just-genius/dsh-plugin-ui'
-import { bridge, type DesktopUpdateState } from './bridge'
+import { bridge, type DesktopUpdateState, type DshChannel } from './bridge'
 import { ensureCardStyles } from './styles'
 
 ensureCardStyles()
@@ -29,6 +34,8 @@ ensureCardStyles()
 export interface DesktopUpdateConfig {
   checkApp: boolean
   checkDsh: boolean
+  dshChannel?: DshChannel
+  dshVersion?: string
 }
 
 /** Card props: locale `t` from the slot entry, scope from the entry's inject. */
@@ -36,6 +43,12 @@ export interface UpdateCardProps {
   t: (key: string) => string
   scope: SettingsScope<DesktopUpdateConfig>
 }
+
+const CHANNEL_OPTIONS: readonly { value: DshChannel; label: string }[] = [
+  { value: 'latest', label: 'channel.latest' },
+  { value: 'next', label: 'channel.next' },
+  { value: 'custom', label: 'channel.custom' },
+]
 
 export function UpdateCard(props: UpdateCardProps) {
   const { t, scope } = props
@@ -50,6 +63,7 @@ export function UpdateCard(props: UpdateCardProps) {
 
   const [state, setState] = useState<DesktopUpdateState | null>(null)
   const [checking, setChecking] = useState(false)
+  const [channelOpen, setChannelOpen] = useState(false)
 
   useEffect(() => {
     const b = bridge()
@@ -63,15 +77,26 @@ export function UpdateCard(props: UpdateCardProps) {
   // Namespace not served by this Host: render nothing rather than a dead card.
   if (snap.status === 'unavailable') return null
 
-  const committed: DesktopUpdateConfig = snap.value ?? { checkApp: true, checkDsh: true }
+  const committed: DesktopUpdateConfig = snap.value ?? {
+    checkApp: true,
+    checkDsh: true,
+    dshChannel: 'latest',
+    dshVersion: '',
+  }
   const staged = draft ?? committed
+  const channel = staged.dshChannel ?? 'latest'
   const dirty = draft !== null
-    && (draft.checkApp !== committed.checkApp || draft.checkDsh !== committed.checkDsh)
+    && (
+      draft.checkApp !== committed.checkApp
+      || draft.checkDsh !== committed.checkDsh
+      || draft.dshChannel !== committed.dshChannel
+      || draft.dshVersion !== committed.dshVersion
+    )
   const writable = snap.status === 'ready' && snap.writable
   const disabled = !writable || saving
 
-  const edit = (field: keyof DesktopUpdateConfig, enabled: boolean): void => {
-    setDraft({ ...staged, [field]: enabled })
+  const edit = (field: keyof DesktopUpdateConfig, value: DesktopUpdateConfig[keyof DesktopUpdateConfig]): void => {
+    setDraft({ ...staged, [field]: value } as DesktopUpdateConfig)
   }
 
   const save = (): void => {
@@ -81,8 +106,20 @@ export function UpdateCard(props: UpdateCardProps) {
     void Promise.all([
       scope.set('checkApp', staged.checkApp),
       scope.set('checkDsh', staged.checkDsh),
+      scope.set('dshChannel', staged.dshChannel ?? 'latest'),
+      scope.set('dshVersion', staged.dshVersion ?? ''),
     ])
-      .then(() => { setDraft(null) })
+      .then(() => {
+        setDraft(null)
+        // 渠道变更后立即让主进程按新渠道重查一轮。
+        const b = bridge()
+        if (b !== undefined) {
+          void b.updates
+            .setDshChannel(staged.dshChannel ?? 'latest', staged.dshVersion ?? '')
+            .then((s) => setState(s))
+            .catch(() => {})
+        }
+      })
       .catch(() => { setFailed(true) })
       .finally(() => { setSaving(false) })
   }
@@ -101,6 +138,11 @@ export function UpdateCard(props: UpdateCardProps) {
 
   const versionText = (name: string, current: string, latest: string | undefined): string =>
     latest === undefined ? `${name} ${current}` : `${name} ${current} → ${latest}`
+
+  const channelItems: readonly MenuEntry[] = CHANNEL_OPTIONS.map((option) => ({
+    id: option.value,
+    label: t(option.label),
+  }))
 
   const title = t('card.title')
   return (
@@ -148,6 +190,54 @@ export function UpdateCard(props: UpdateCardProps) {
         disabled={disabled}
         onChange={(enabled) => { edit('checkDsh', enabled) }}
       />
+      <Field>
+        <div className="dsh-ui-field-head">
+          <span className="dsh-ui-label">{t('channel.dsh')}</span>
+          <Menu
+            open={channelOpen}
+            items={channelItems}
+            selectedId={channel}
+            onSelect={(value) => { edit('dshChannel', value as DshChannel) }}
+            onClose={() => { setChannelOpen(false) }}
+            align="end"
+            side="bottom"
+            portal
+            anchor={(
+              <button
+                type="button"
+                disabled={disabled}
+                data-menu-open={channelOpen || undefined}
+                onClick={() => { setChannelOpen((current) => !current) }}
+                className="dsh-du-channel-trigger"
+              >
+                <span>{t(CHANNEL_OPTIONS.find((o) => o.value === channel)?.label ?? 'channel.latest')}</span>
+                <IconChevronDownOutline14 />
+              </button>
+            )}
+          />
+        </div>
+        <FieldHint>{t('channel.dshHint')}</FieldHint>
+      </Field>
+      {channel === 'custom' && (
+        <Field>
+          <FieldHead htmlFor="plugin-config-desktop-update-dsh-version" label={t('version.custom')} />
+          <FieldHint>{t('version.customHint')}</FieldHint>
+          <input
+            id="plugin-config-desktop-update-dsh-version"
+            className="dsh-du-input"
+            type="text"
+            inputMode="text"
+            spellCheck={false}
+            placeholder="0.1.0-rc.8"
+            value={staged.dshVersion ?? ''}
+            disabled={disabled}
+            onChange={(event) => { edit('dshVersion', event.target.value.trim()) }}
+          />
+        </Field>
+      )}
+      {staged.checkDsh && (
+        <InlineNotice kind="info">{t('channel.note')}</InlineNotice>
+      )}
       <CardFooter>
         {failed ? <p className="dsh-du-failed" role="status">{t('card.saveFailed')}</p> : null}
         <DiscardButton disabled={!dirty || saving} onClick={discard}>
