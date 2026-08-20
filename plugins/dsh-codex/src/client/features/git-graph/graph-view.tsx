@@ -27,6 +27,9 @@ import { ensureGitGraphStyles } from './styles'
 ensureGitGraphStyles()
 
 const ROW_HEIGHT = 32
+/** First auto-retry delay after a failed refresh; doubles up to RETRY_MAX_MS. */
+const RETRY_BASE_MS = 3_000
+const RETRY_MAX_MS = 30_000
 const LANE_GAP = 16
 const LANE_PAD = 8
 const MIN_GUTTER = 32
@@ -74,6 +77,8 @@ export function GitGraphView(props: GitGraphViewProps) {
   const toastSeq = useRef(0)
   const panelRef = useRef<HTMLDivElement>(null)
   const loadingMore = useRef(false)
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const failures = useRef(0)
   const userScopeRef = useRef<string[] | null>(null)
   const [userScope, setUserScope] = useState<string[] | null>(null)
   const showToast = useCallback((text: string, kind: 'ok' | 'error') => {
@@ -106,17 +111,36 @@ export function GitGraphView(props: GitGraphViewProps) {
       }
     }    const response = await fetchGraph(cwd, skip, refs ?? undefined)
     if (!response.ok) {
-      setState({
-        status: 'error',
-        code: response.code,
-        message: response.message,
-        refs: [],
-        selected: [],
-        rows: [],
-        hasMore: false,
+      // A transient failure (git is often slow right after sleep-wake)
+      // keeps the current graph on screen and retries with backoff; the
+      // error view is only for when there is nothing to show.
+      setState((current) => {
+        if (current.rows.length > 0) return current
+        return {
+          status: 'error',
+          code: response.code,
+          message: response.message,
+          refs: [],
+          selected: [],
+          rows: [],
+          hasMore: false,
+        }
       })
+      if (reset) {
+        failures.current += 1
+        const wait = Math.min(
+          RETRY_BASE_MS * 2 ** (failures.current - 1),
+          RETRY_MAX_MS,
+        )
+        clearTimeout(retryTimer.current)
+        retryTimer.current = setTimeout(() => {
+          void load(true, 0, userScopeRef.current, true)
+        }, wait)
+      }
       return
     }
+    failures.current = 0
+    clearTimeout(retryTimer.current)
     setState((current) => ({
       status: 'ready',
       head: response.head,
@@ -132,6 +156,10 @@ export function GitGraphView(props: GitGraphViewProps) {
     userScopeRef.current = null
     setUserScope(null)
     void load(true, 0, null)
+    return () => {
+      failures.current = 0
+      clearTimeout(retryTimer.current)
+    }
   }, [load])
 
   // Auto-refresh on repo movement: reload the rows but keep the selection

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join, posix } from 'node:path'
+import { execGit } from './git-exec'
 import type {
   GitChangeFile,
   GitChangeStatus,
@@ -314,16 +315,12 @@ export async function loadFileDiff(
  * Returns null when the diff is empty (no change at that path).
  */
 async function runDiff(cwd: string, args: string[]): Promise<string | null> {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: MAX_BUFFER,
-    encoding: 'utf8',
-  }).catch((error: unknown) => {
-    const message = gitErrorMessage(error)
-    if (/unknown revision/i.test(message)) return { stdout: '', stderr: message }
-    throw new Error(message)
-  })
+  const { stdout } = await execGit(cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
+    .catch((error: unknown) => {
+      const message = gitErrorMessage(error)
+      if (/unknown revision/i.test(message)) return { stdout: '', stderr: message }
+      throw new Error(message)
+    })
   const patch = stdout.replace(/\n+$/, '')
   return patch.length === 0 ? null : patch
 }
@@ -477,12 +474,7 @@ async function assertGitRepo(cwd: string): Promise<void> {
 }
 
 async function gitText(cwd: string, args: string[], timeout: number): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    timeout,
-    maxBuffer: MAX_BUFFER,
-    encoding: 'utf8',
-  })
+  const { stdout } = await execGit(cwd, args, timeout, MAX_BUFFER)
   return stdout.replace(/\n+$/, '')
 }
 

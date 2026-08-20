@@ -1,5 +1,4 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { execGit } from './git-exec'
 import {
   DEFAULT_GRAPH_LIMIT,
   GIT_GRAPH_ALL_SCOPE,
@@ -10,7 +9,6 @@ import {
   type GitGraphScopeRef,
 } from '../../shared/git-graph'
 
-const execFileAsync = promisify(execFile)
 const GIT_TIMEOUT_MS = 8_000
 const SHOW_TIMEOUT_MS = 5_000
 const MAX_BUFFER = 8 * 1024 * 1024
@@ -287,12 +285,7 @@ async function gitText(
   args: string[],
   timeout: number,
 ): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    timeout,
-    maxBuffer: MAX_BUFFER,
-    encoding: 'utf8',
-  })
+  const { stdout } = await execGit(cwd, args, timeout, MAX_BUFFER)
   return stdout.replace(/\n+$/, '')
 }
 

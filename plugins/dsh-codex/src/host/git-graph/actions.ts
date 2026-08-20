@@ -5,6 +5,7 @@ import type {
   GitGraphActionRequest,
   GitResetMode,
 } from '../../shared/git-graph'
+import { execGit } from './git-exec'
 
 const execFileAsync = promisify(execFile)
 const ACTION_TIMEOUT_MS = 30_000
@@ -210,12 +211,7 @@ async function assertGitRepo(cwd: string): Promise<void> {
 
 async function gitText(cwd: string, args: string[]): Promise<string> {
   try {
-    const { stdout, stderr } = await execFileAsync('git', args, {
-      cwd,
-      timeout: ACTION_TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-      encoding: 'utf8',
-    })
+    const { stdout, stderr } = await execGit(cwd, args, ACTION_TIMEOUT_MS, MAX_BUFFER)
     return [stdout, stderr].filter((part) => part.trim().length > 0).join('\n').replace(/\n+$/, '')
   } catch (error) {
     throw new Error(gitErrorMessage(error))

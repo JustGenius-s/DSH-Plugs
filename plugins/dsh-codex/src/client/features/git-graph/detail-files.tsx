@@ -11,6 +11,10 @@ import {
 } from '../../../shared/git-graph'
 import { fileIconSvg, folderIconSvg } from '../files/file-icons'
 
+/** First auto-retry delay after a failed fetch; doubles up to RETRY_MAX_MS. */
+const RETRY_BASE_MS = 3_000
+const RETRY_MAX_MS = 30_000
+
 const STATUS_LABEL: Record<GitChangeFile['status'], string> = {
   added: 'A',
   modified: 'M',
@@ -72,15 +76,21 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
   const [files, setFiles] = useState<readonly GitChangeFile[] | null>(null)
   const [error, setError] = useState<string | undefined>()
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [retryTick, setRetryTick] = useState(0)
   // Tracks the repo identity across renders; a change means a hard reload.
   const repoKey = useRef('')
+  const filesRef = useRef<readonly GitChangeFile[] | null>(null)
+  const failures = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    let retry: ReturnType<typeof setTimeout> | undefined
     const key = cwd + '|' + (sha ?? '')
     const hard = repoKey.current !== key
     repoKey.current = key
     if (hard) {
+      failures.current = 0
+      filesRef.current = null
       setFiles(null)
       setError(undefined)
       setCollapsed(new Set())
@@ -88,14 +98,32 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
     void fetchFiles(cwd, sha).then((value) => {
       if (cancelled) return
       if (!value.ok) {
-        setError(value.message)
+        // A transient failure (git is often slow right after sleep-wake)
+        // must not blank an already-loaded list, and must not stick:
+        // keep the rows, retry with backoff, show the error only when
+        // there is nothing to display.
+        failures.current += 1
+        if (filesRef.current === null) setError(value.message)
+        const wait = Math.min(
+          RETRY_BASE_MS * 2 ** (failures.current - 1),
+          RETRY_MAX_MS,
+        )
+        retry = setTimeout(() => {
+          if (!cancelled) setRetryTick((tick) => tick + 1)
+        }, wait)
         return
       }
+      failures.current = 0
+      filesRef.current = value.files
+      setError(undefined)
       setFiles(value.files)
       onFilesChange?.(value.files)
     })
-    return () => { cancelled = true }
-  }, [cwd, sha, refreshSeq, onFilesChange])
+    return () => {
+      cancelled = true
+      clearTimeout(retry)
+    }
+  }, [cwd, sha, refreshSeq, retryTick, onFilesChange])
 
   const toggleDir = (path: string): void => {
     setCollapsed((current) => {

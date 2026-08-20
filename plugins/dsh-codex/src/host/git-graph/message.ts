@@ -1,10 +1,8 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { execGit } from './git-exec'
 
-const execFileAsync = promisify(execFile)
 const GIT_TIMEOUT_MS = 15_000
 const LLM_TIMEOUT_MS = 60_000
 const MAX_BUFFER = 8 * 1024 * 1024
@@ -105,12 +103,7 @@ async function recentSubjects(cwd: string): Promise<string[]> {
 /** Run git, returning trimmed stdout; failures yield an empty string. */
 async function gitDiff(cwd: string, args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', args, {
-      cwd,
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-      encoding: 'utf8',
-    })
+    const { stdout } = await execGit(cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
     return stdout.trim()
   } catch {
     return ''

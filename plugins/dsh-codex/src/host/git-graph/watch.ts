@@ -1,11 +1,9 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { promisify } from 'node:util'
+import { execGit } from './git-exec'
 
-const execFileAsync = promisify(execFile)
 const GIT_TIMEOUT_MS = 5_000
 const MAX_BUFFER = 32 * 1024 * 1024
 /** Burst collapse: one event per save/commit storm, not one per file. */
@@ -159,11 +157,6 @@ async function fingerprint(cwd: string): Promise<string> {
 }
 
 async function gitText(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: MAX_BUFFER,
-    encoding: 'utf8',
-  })
+  const { stdout } = await execGit(cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
   return stdout.replace(/\n+$/, '')
 }
