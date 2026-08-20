@@ -2,19 +2,17 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-commands'
-import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { z as zod } from 'zod'
 import { DEBUG_POLICY } from './policy.ts'
 import {
   DEBUG_LOG,
   LOGS_PATH,
   REPRO_PATH,
+  STATE_PATH,
   WAIT_FOR_REPRO,
   capLogs,
   mintDebugId,
@@ -28,22 +26,25 @@ import {
 import type { DebugProjection } from './types.ts'
 
 export type { DebugProjection } from './types.ts'
-export { DEBUG_LOG, LOGS_PATH, REPRO_PATH, WAIT_FOR_REPRO } from './shared.ts'
+export { DEBUG_LOG, LOGS_PATH, REPRO_PATH, STATE_PATH, WAIT_FOR_REPRO } from './shared.ts'
 
 export const name = 'dsh-debug-mode'
 export const inject = ['tools', 'systemPrompt', 'sessions', 'webServer'] as const
 
-declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    'debug/mode': { active: boolean }
-    'debug/wait': DebugReproWait
-    'debug/log': { logs: DebugLogEntry[] }
-  }
-}
-
-interface PendingIntent {
+/**
+ * Live debug collaboration state for one session.
+ * Kept in process memory only — writing `debug/*` into the durable session log
+ * would poison reload, because those types are outside KNOWN_SESSION_EVENT_TYPES
+ * and Session.append cannot mark them `ignorable`.
+ */
+interface SessionDebugState {
   active: boolean
-  narrate: boolean
+  /** Target while a turn is open, or retained until the next pre-step commit. */
+  wanted: boolean | null
+  wait: DebugReproWait | null
+  logs: DebugLogEntry[]
+  /** Last mode value narrated into the model context for this process lifetime. */
+  toldActive: boolean | undefined
 }
 
 interface LiveWait {
@@ -63,33 +64,17 @@ const WAIT_DESCRIPTION = 'Use only in debug mode. Present numbered reproduction 
   + 'Send the COMPLETE steps as markdown, starting with a # heading that names them. '
   + 'After they finish, read verdict/notes/logs in the tool result and continue from that evidence.'
 
-const debugProjectionSchema = zod.object({
-  active: zod.boolean(),
-  pending: zod.boolean(),
-  wait: zod.object({
-    id: zod.string(),
-    steps: zod.string(),
-    waiting: zod.boolean(),
-  }).nullable(),
-  logs: zod.array(zod.object({
-    id: zod.string(),
-    at: zod.number(),
-    source: zod.enum(['agent', 'user', 'ingest']),
-    text: zod.string(),
-  })),
-})
+const EMPTY_VIEW: DebugProjection = {
+  active: false,
+  pending: false,
+  wait: null,
+  logs: [],
+}
 
 export function apply(ctx: Context): void {
-  const pendingIntents = new WeakMap<Session, PendingIntent>()
+  const store = new Map<string, SessionDebugState>()
   const waits = new Map<string, LiveWait>()
   let disposed = false
-  // [dsh-debug] distinguish whether debug events are known / writable as ignorable
-  ctx.logger.warn('[dsh-debug] plugin apply known=%o appendArity=%s', {
-    mode: KNOWN_SESSION_EVENT_TYPES.has('debug/mode'),
-    wait: KNOWN_SESSION_EVENT_TYPES.has('debug/wait'),
-    log: KNOWN_SESSION_EVENT_TYPES.has('debug/log'),
-    knownSize: KNOWN_SESSION_EVENT_TYPES.size,
-  }, String(({} as Session).append?.length ?? 'n/a'))
 
   ctx.effect(() => () => {
     disposed = true
@@ -97,20 +82,19 @@ export function apply(ctx: Context): void {
       waits.delete(sessionId)
       wait.reject(new Error('debug mode was reloaded while waiting for reproduction'))
     }
+    store.clear()
   }, 'dsh-debug-mode: close lifetime')
 
   ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
     const decision = await next()
-    const pending = pendingIntents.get(agent.session)
-    if (decision.kind === 'reject' || signal.aborted || pending === undefined) return decision
-    const narration = narrationFor(agent.session, pending.active)
-    try {
-      commitPending(agent.session, pendingIntents)
-    } catch (error) {
-      ctx.logger.warn('dsh-debug-mode: failed to append selected debug mode at step start: %o', error)
-      return decision
-    }
-    return !pending.narrate || narration === undefined
+    if (decision.kind === 'reject' || signal.aborted) return decision
+    const sessionId = String(agent.session.id)
+    const state = store.get(sessionId)
+    if (state === undefined || state.wanted === null) return decision
+    const target = state.wanted
+    const narration = narrationFor(state, target)
+    commitWanted(state)
+    return narration === undefined
       ? decision
       : { ...decision, messages: [...decision.messages, narration] }
   })
@@ -120,25 +104,11 @@ export function apply(ctx: Context): void {
     order: 51,
     text: (context) => {
       if (context.agent === undefined) return ''
-      const pending = pendingIntents.get(context.agent.session)
-      return (pending?.active ?? foldDebugMode(context.agent.session.events)) ? DEBUG_POLICY : ''
+      const state = store.get(String(context.agent.session.id))
+      if (state === undefined) return ''
+      const on = state.wanted ?? state.active
+      return on ? DEBUG_POLICY : ''
     },
-  })
-
-  ctx.inject(['sessionProjections'], (projectionCtx) => {
-    projectionCtx.sessionProjections.register({
-      key: 'debug',
-      schema: debugProjectionSchema,
-      init: (): FoldState => ({ active: false, wanted: null, wait: null, logs: [] }),
-      apply: (state, event) => applyDebugEvent(state, event),
-      view: (state): DebugProjection => ({
-        active: state.active,
-        pending: state.wanted !== null && state.wanted !== state.active,
-        wait: state.wait?.waiting === true ? state.wait : null,
-        logs: state.logs,
-      }),
-      stateVersion: 1,
-    })
   })
 
   ctx.inject(['commands'], (commandCtx) => {
@@ -150,8 +120,8 @@ export function apply(ctx: Context): void {
         const message = rawInput.trim()
         if (message === 'off') {
           cancelWait(waits, String(agent.session.id), new Error('The user left debug mode.'))
-          closeOpenWait(agent.session)
-          switch (setDebugMode(agent, false, pendingIntents)) {
+          closeOpenWait(store, agent.session)
+          switch (setDebugMode(store, agent, false)) {
             case 'committed':
               return { kind: 'success', text: 'Debug mode off.' }
             case 'queued':
@@ -159,19 +129,19 @@ export function apply(ctx: Context): void {
             case 'cancelled':
               return { kind: 'success', text: 'Debug mode entry cancelled.' }
             case 'noop':
-              return foldDebugMode(agent.session.events)
+              return isActive(store, agent.session)
                 ? { kind: 'success', text: 'Leaving debug mode (applies from the next step).' }
                 : { kind: 'success', text: 'Debug mode is already inactive.' }
           }
         }
-        const outcome = setDebugMode(agent, true, pendingIntents)
+        const outcome = setDebugMode(store, agent, true)
         if (message !== '') {
           agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
         }
         return {
           kind: 'success',
           text: outcome === 'committed'
-            ? 'Debug mode on. Reproduce the bug, then use /debug off to leave.'
+            ? 'Debug mode on for this live session only (not persisted across reload). Reproduce the bug, then use /debug off to leave.'
             : 'Entering debug mode (applies from the next step). Use /debug off to leave.',
         }
       },
@@ -203,7 +173,7 @@ export function apply(ctx: Context): void {
     execute: async (args, exec) => {
       const agent = exec.agent
       if (agent === undefined) throw new Error(`${WAIT_FOR_REPRO} requires a calling agent`)
-      if (!foldDebugMode(agent.session.events)) {
+      if (!isActive(store, agent.session)) {
         throw new Error(`${WAIT_FOR_REPRO} is only available in debug mode`)
       }
       if (!/^#\s+\S/.test(args.steps.trim())) {
@@ -214,7 +184,7 @@ export function apply(ctx: Context): void {
       const sessionId = String(agent.session.id)
       cancelWait(waits, sessionId, new Error('A newer reproduction wait replaced this one.'))
       const wait: DebugReproWait = { id: mintDebugId('repro'), steps: args.steps, waiting: true }
-      agent.session.append('debug/wait', wait)
+      ensureState(store, sessionId).wait = wait
 
       return await new Promise<ReproResult>((resolve, reject) => {
         const live: LiveWait = {
@@ -232,7 +202,7 @@ export function apply(ctx: Context): void {
         waits.set(sessionId, live)
         const onAbort = () => {
           if (waits.get(sessionId) !== live) return
-          closeOpenWait(agent.session)
+          closeOpenWait(store, agent.session)
           live.reject(new Error('The reproduction wait was cancelled.'))
         }
         if (exec.signal.aborted) {
@@ -279,10 +249,10 @@ export function apply(ctx: Context): void {
     execute: async (args, exec) => {
       const agent = exec.agent
       if (agent === undefined) throw new Error(`${DEBUG_LOG} requires a calling agent`)
-      if (!foldDebugMode(agent.session.events)) {
+      if (!isActive(store, agent.session)) {
         throw new Error(`${DEBUG_LOG} is only available in debug mode`)
       }
-      appendLog(agent.session, 'agent', args.message)
+      appendLog(store, agent.session, 'agent', args.message)
       return { recorded: true as const }
     },
     presentCall: args => ({
@@ -295,63 +265,51 @@ export function apply(ctx: Context): void {
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
+    path: STATE_PATH,
+    handler: (req, res) => handleState(store, req, res),
+  }), 'dsh-debug-mode: state route')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
     path: LOGS_PATH,
-    handler: (req, res) => handleLogs(ctx, req, res),
+    handler: (req, res) => handleLogs(ctx, store, req, res),
   }), 'dsh-debug-mode: logs route')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: REPRO_PATH,
-    handler: (req, res) => handleRepro(ctx, waits, req, res),
+    handler: (req, res) => handleRepro(ctx, store, waits, req, res),
   }), 'dsh-debug-mode: repro route')
 }
 
-interface FoldState {
-  active: boolean
-  wanted: boolean | null
-  wait: DebugReproWait | null
-  logs: DebugLogEntry[]
+function ensureState(store: Map<string, SessionDebugState>, sessionId: string): SessionDebugState {
+  const existing = store.get(sessionId)
+  if (existing !== undefined) return existing
+  const fresh: SessionDebugState = {
+    active: false,
+    wanted: null,
+    wait: null,
+    logs: [],
+    toldActive: undefined,
+  }
+  store.set(sessionId, fresh)
+  return fresh
 }
 
-function applyDebugEvent(state: FoldState, event: SessionEvent): FoldState {
-  if (event.type.startsWith('debug/')) {
-    // [dsh-debug] H1/H4: inspect persisted debug envelopes during projection fold
-    console.warn('[dsh-debug] fold', event.type, 'seq=', event.seq, 'ignorable=', event.ignorable === true, 'known=', KNOWN_SESSION_EVENT_TYPES.has(event.type))
+function viewState(state: SessionDebugState | undefined): DebugProjection {
+  if (state === undefined) return EMPTY_VIEW
+  return {
+    active: state.active,
+    pending: state.wanted !== null && state.wanted !== state.active,
+    wait: state.wait?.waiting === true ? state.wait : null,
+    logs: state.logs,
   }
-  if (event.type === 'command/run' && event.data.name === 'debug') {
-    if (event.data.args === undefined) return state
-    const wanted = event.data.args.trim() !== 'off'
-    return wanted === state.wanted ? state : { ...state, wanted }
-  }
-  if (event.type === 'debug/mode') {
-    return { ...state, active: event.data.active, wanted: null }
-  }
-  if (event.type === 'debug/wait') {
-    return { ...state, wait: event.data }
-  }
-  if (event.type === 'debug/log') {
-    return { ...state, logs: event.data.logs }
-  }
-  return state
 }
 
-function foldDebugMode(events: readonly SessionEvent[], end = events.length): boolean {
-  let active = false
-  let index = 0
-  for (const event of events) {
-    if (index >= end) break
-    index++
-    if (event.type === 'debug/mode') active = event.data.active
-  }
-  return active
-}
-
-function foldLogs(events: readonly SessionEvent[]): DebugLogEntry[] {
-  let logs: DebugLogEntry[] = []
-  for (const event of events) {
-    if (event.type === 'debug/log') logs = event.data.logs
-  }
-  return logs
+function isActive(store: Map<string, SessionDebugState>, session: Session): boolean {
+  const state = store.get(String(session.id))
+  if (state === undefined) return false
+  return state.wanted ?? state.active
 }
 
 function hasOpenTurn(events: readonly SessionEvent[]): boolean {
@@ -363,58 +321,48 @@ function hasOpenTurn(events: readonly SessionEvent[]): boolean {
   return open
 }
 
-function debugModeAtLastHeader(events: readonly SessionEvent[]): boolean | undefined {
-  let lastHeader = -1
-  let index = 0
-  for (const event of events) {
-    if (event.type === 'request/header') lastHeader = index
-    index++
-  }
-  if (lastHeader < 0) return undefined
-  return foldDebugMode(events, lastHeader + 1)
-}
-
 function setDebugMode(
+  store: Map<string, SessionDebugState>,
   agent: Agent,
   active: boolean,
-  pendingIntents: WeakMap<Session, PendingIntent>,
 ): 'committed' | 'queued' | 'cancelled' | 'noop' {
   const session = agent.session
-  const pending = pendingIntents.get(session)
-  const target = pending?.active ?? foldDebugMode(session.events)
+  const state = ensureState(store, String(session.id))
+  const target = state.wanted ?? state.active
   if (active === target) return 'noop'
   if (hasOpenTurn(session.events)) {
-    pendingIntents.set(session, { active, narrate: true })
-    return foldDebugMode(session.events) === active ? 'cancelled' : 'queued'
+    state.wanted = active
+    return state.active === active ? 'cancelled' : 'queued'
   }
-  if (active === foldDebugMode(session.events)) {
-    pendingIntents.delete(session)
+  if (active === state.active) {
+    state.wanted = null
     return 'cancelled'
   }
-  const written = session.append('debug/mode', { active })
-  // [dsh-debug] H2: does append persist ignorable on out-of-repo events?
-  console.warn('[dsh-debug] append debug/mode seq=', written.seq, 'ignorable=', written.ignorable === true, 'keys=', Object.keys(written))
-  pendingIntents.delete(session)
-  const narration = narrationFor(session, active)
-  if (narration !== undefined) agent.inject(narration)
+  state.active = active
+  state.wanted = null
+  const narration = narrationFor(state, active)
+  if (narration !== undefined) {
+    state.toldActive = active
+    agent.inject(narration)
+  } else {
+    state.toldActive = active
+  }
   return 'committed'
 }
 
-function commitPending(session: Session, pendingIntents: WeakMap<Session, PendingIntent>): void {
-  const pending = pendingIntents.get(session)
-  if (pending === undefined) return
-  if (pending.active === foldDebugMode(session.events)) {
-    pendingIntents.delete(session)
+function commitWanted(state: SessionDebugState): void {
+  if (state.wanted === null) return
+  if (state.wanted === state.active) {
+    state.wanted = null
     return
   }
-  const written = session.append('debug/mode', { active: pending.active })
-  console.warn('[dsh-debug] append pending debug/mode seq=', written.seq, 'ignorable=', written.ignorable === true)
-  pendingIntents.delete(session)
+  state.active = state.wanted
+  state.wanted = null
+  state.toldActive = state.active
 }
 
-function narrationFor(session: Session, target: boolean) {
-  const told = debugModeAtLastHeader(session.events)
-  if (told === undefined || told === target) return undefined
+function narrationFor(state: SessionDebugState, target: boolean) {
+  if (state.toldActive === undefined || state.toldActive === target) return undefined
   const text = target
     ? 'The user switched this session to debug mode.'
     : 'The user switched this session back to the default mode.'
@@ -424,30 +372,27 @@ function narrationFor(session: Session, target: boolean) {
   })
 }
 
-function appendLog(session: Session, source: DebugLogSource, text: string): DebugLogEntry {
+function appendLog(
+  store: Map<string, SessionDebugState>,
+  session: Session,
+  source: DebugLogSource,
+  text: string,
+): DebugLogEntry {
+  const state = ensureState(store, String(session.id))
   const entry: DebugLogEntry = {
     id: mintDebugId('log'),
     at: Date.now(),
     source,
     text: text.trim(),
   }
-  const logs = capLogs([...foldLogs(session.events), entry])
-  session.append('debug/log', { logs })
+  state.logs = capLogs([...state.logs, entry])
   return entry
 }
 
-function closeOpenWait(session: Session): void {
-  const wait = foldWait(session.events)
-  if (wait === null || !wait.waiting) return
-  session.append('debug/wait', { ...wait, waiting: false })
-}
-
-function foldWait(events: readonly SessionEvent[]): DebugReproWait | null {
-  let wait: DebugReproWait | null = null
-  for (const event of events) {
-    if (event.type === 'debug/wait') wait = event.data
-  }
-  return wait
+function closeOpenWait(store: Map<string, SessionDebugState>, session: Session): void {
+  const state = store.get(String(session.id))
+  if (state === undefined || state.wait === null || !state.wait.waiting) return
+  state.wait = { ...state.wait, waiting: false }
 }
 
 function cancelWait(waits: Map<string, LiveWait>, sessionId: string, error: Error): void {
@@ -478,7 +423,30 @@ function formatLogs(logs: readonly DebugLogEntry[]): string {
   }).join('\n')
 }
 
-async function handleLogs(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
+function handleState(
+  store: Map<string, SessionDebugState>,
+  req: IncomingMessage,
+  res: ServerResponse,
+): void {
+  if (req.method !== 'GET') {
+    json(res, 405, { ok: false, message: 'method not allowed' })
+    return
+  }
+  const url = new URL(req.url ?? '', 'http://dsh.local')
+  const sessionId = url.searchParams.get('sessionId')?.trim() ?? ''
+  if (sessionId === '') {
+    json(res, 400, { ok: false, message: 'sessionId is required' })
+    return
+  }
+  json(res, 200, { ok: true, value: viewState(store.get(sessionId)) })
+}
+
+async function handleLogs(
+  ctx: Context,
+  store: Map<string, SessionDebugState>,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   if (req.method !== 'POST') {
     json(res, 405, { ok: false, message: 'method not allowed' })
     return
@@ -507,16 +475,17 @@ async function handleLogs(ctx: Context, req: IncomingMessage, res: ServerRespons
     json(res, 404, { ok: false, message: 'session not found' })
     return
   }
-  if (!foldDebugMode(session.events)) {
+  if (!isActive(store, session)) {
     json(res, 409, { ok: false, message: 'debug mode is not active' })
     return
   }
-  const entry = appendLog(session, source, text)
+  const entry = appendLog(store, session, source, text)
   json(res, 200, { ok: true, value: entry })
 }
 
 async function handleRepro(
   ctx: Context,
+  store: Map<string, SessionDebugState>,
   waits: Map<string, LiveWait>,
   req: IncomingMessage,
   res: ServerResponse,
@@ -554,16 +523,17 @@ async function handleRepro(
     json(res, 409, { ok: false, message: 'no live reproduction wait' })
     return
   }
-  closeOpenWait(session)
+  closeOpenWait(store, session)
   if (action === 'cancel') {
     live.reject(new Error('The user dismissed the reproduction wait to speak instead.'))
     json(res, 200, { ok: true, value: { cancelled: true } })
     return
   }
+  const state = store.get(sessionId)
   const result: ReproResult = {
     verdict: action,
     notes,
-    logs: formatLogs(foldLogs(session.events)),
+    logs: formatLogs(state?.logs ?? []),
   }
   live.resolve(result)
   json(res, 200, { ok: true, value: result })

@@ -1,7 +1,7 @@
 /**
-  * Client-safe projection types. Host and browser both import this file so
-  * `useProjection('debug')` and the host unit share one SessionProjectionMap key.
-  */
+ * Client-safe debug UI state. Host keeps this in process memory and serves it
+ * over HTTP; it is intentionally not folded from the durable session log.
+ */
 import type { DebugLogEntry, DebugReproWait } from './shared.ts'
 
 export interface DebugProjection {
@@ -9,11 +9,4 @@ export interface DebugProjection {
   pending: boolean
   wait: DebugReproWait | null
   logs: readonly DebugLogEntry[]
-}
-
-declare module '@deepseek-ai/dsh-session-projection/types' {
-  interface SessionProjectionMap {
-    /** Debug collaboration state folded from /debug, debug/mode, waits, and logs. */
-    debug: DebugProjection
-  }
 }

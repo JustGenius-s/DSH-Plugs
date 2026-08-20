@@ -26,6 +26,7 @@ export function apply(ctx: ClientContext): void {
     order: 20,
     locale: NS,
     inject: (sessionId) => ({
+      sessionId: String(sessionId),
       exitDebugMode: async () => {
         const result = await ctx.remote.commands.execute(sessionId, '/debug off')
         if (!result.ok) return `${result.error.message} (${result.error.code})`
@@ -41,6 +42,7 @@ export function apply(ctx: ClientContext): void {
     order: 5,
     locale: NS,
     inject: (sessionId) => ({
+      sessionId: String(sessionId),
       resolveRepro: (action: DebugReproAction, notes: string) => postJson(REPRO_PATH, { sessionId, action, notes }),
     }),
   }, DebugDock as never))

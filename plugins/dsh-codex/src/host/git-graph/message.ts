@@ -20,11 +20,24 @@ const SYSTEM_PROMPT = [
  * Generate a commit message for the working tree of `cwd` with the harness's
  * default model. Staged changes are summarized when present, otherwise every
  * unstaged change plus the untracked file list (VSCode's "commit all" scope).
+ *
+ * `signal` lets the HTTP handler abort when the client disconnects (panel
+ * switch / navigation) so a stuck stream does not keep the model busy.
  */
-export async function generateCommitMessage(ctx: Context, cwd: string): Promise<string> {
+export async function generateCommitMessage(
+  ctx: Context,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (signal?.aborted === true) {
+    throw new Error('aborted')
+  }
   const diff = await collectDiff(cwd)
   if (diff.length === 0) {
     throw badRequest('no changes to summarize')
+  }
+  if (signal?.aborted === true) {
+    throw new Error('aborted')
   }
   const llm = ctx.get('llm')
   const defaultModel = ctx.get('agentDefaultModel')
@@ -39,6 +52,11 @@ export async function generateCommitMessage(ctx: Context, cwd: string): Promise<
   ].filter((part) => part.length > 0).join('\n')
 
   const abort = new AbortController()
+  const onOuterAbort = (): void => abort.abort()
+  if (signal !== undefined) {
+    if (signal.aborted) abort.abort()
+    else signal.addEventListener('abort', onOuterAbort, { once: true })
+  }
   const timer = setTimeout(() => abort.abort(), LLM_TIMEOUT_MS)
   try {
     const stream = llm.stream({
@@ -55,6 +73,7 @@ export async function generateCommitMessage(ctx: Context, cwd: string): Promise<
     return await collectText(stream)
   } finally {
     clearTimeout(timer)
+    signal?.removeEventListener('abort', onOuterAbort)
   }
 }
 

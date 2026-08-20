@@ -81,12 +81,26 @@ export function GitChangesView(props: GitChangesViewProps) {
   const commitMoreRef = useRef<HTMLButtonElement>(null)
   const overflowRef = useRef<HTMLButtonElement>(null)
   const messageRef = useRef<HTMLTextAreaElement>(null)
+  /** In-flight AI generate; aborted on unmount / open-graph / supersede. */
+  const generateAbortRef = useRef<AbortController | null>(null)
+  const generatingRef = useRef(false)
+  /** Watch/focus refresh deferred until generate finishes. */
+  const pendingRefreshRef = useRef(false)
 
   const showToast = useCallback((text: string, kind: 'ok' | 'error') => {
     toastSeq.current += 1
     setToast({ seq: toastSeq.current, text, kind })
   }, [])
   const refresh = useCallback(() => setRefreshSeq((seq) => seq + 1), [])
+  const requestRefresh = useCallback((): void => {
+    // Staging mid-generate otherwise storms the host with status/diff while
+    // the LLM stream is still open — UI and follow-up actions feel frozen.
+    if (generatingRef.current) {
+      pendingRefreshRef.current = true
+      return
+    }
+    refresh()
+  }, [refresh])
 
   // Auto-refresh, VSCode-style: the host's repo watcher pushes a `change`
   // event over SSE whenever the worktree, index, or refs move. Window focus
@@ -99,11 +113,11 @@ export function GitChangesView(props: GitChangesViewProps) {
       source = new EventSource(
         `${GIT_GRAPH_WATCH_PATH}?cwd=${encodeURIComponent(cwd)}`,
       )
-      source.addEventListener('change', refresh)
+      source.addEventListener('change', requestRefresh)
     }
-    const onFocus = (): void => refresh()
+    const onFocus = (): void => requestRefresh()
     const onVisibility = (): void => {
-      if (document.visibilityState === 'visible') refresh()
+      if (document.visibilityState === 'visible') requestRefresh()
     }
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onVisibility)
@@ -112,7 +126,12 @@ export function GitChangesView(props: GitChangesViewProps) {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [cwd, refresh])
+  }, [cwd, requestRefresh])
+
+  useEffect(() => () => {
+    generateAbortRef.current?.abort()
+    generateAbortRef.current = null
+  }, [])
 
   // Auto-grow the commit box with its content, capped at MESSAGE_MAX_HEIGHT.
   useEffect(() => {
@@ -152,6 +171,8 @@ export function GitChangesView(props: GitChangesViewProps) {
       return false
     }
     // Success stays silent everywhere: the list/graph refresh is the feedback.
+    // Always refresh here (user-initiated) even during AI generate — only the
+    // watch/focus auto-refresh is deferred via requestRefresh.
     refresh()
     return true
   }, [cwd, refresh, showToast, t])
@@ -179,16 +200,38 @@ export function GitChangesView(props: GitChangesViewProps) {
       : undefined
 
   const generateMessage = async (): Promise<void> => {
-    if (generating || cwd === undefined || cwd.length === 0) return
+    if (generatingRef.current || cwd === undefined || cwd.length === 0) return
+    generateAbortRef.current?.abort()
+    const abort = new AbortController()
+    generateAbortRef.current = abort
+    generatingRef.current = true
     setGenerating(true)
-    const result = await postMessage(cwd)
-    setGenerating(false)
-    if (!result.ok) {
-      showToast(result.message, 'error')
-      return
+    try {
+      const result = await postMessage(cwd, abort.signal)
+      if (abort.signal.aborted) return
+      if (!result.ok) {
+        // Aborted fetch surfaces as a TypeError / AbortError — stay quiet.
+        if (/abort|cancel/i.test(result.message)) return
+        showToast(result.message, 'error')
+        return
+      }
+      setMessage(result.message)
+      messageRef.current?.focus()
+    } finally {
+      if (generateAbortRef.current === abort) generateAbortRef.current = null
+      generatingRef.current = false
+      setGenerating(false)
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false
+        refresh()
+      }
     }
-    setMessage(result.message)
-    messageRef.current?.focus()
+  }
+
+  const openGraph = (): void => {
+    // Free the model stream before mounting the graph (another watch + log).
+    generateAbortRef.current?.abort()
+    onOpenGraph?.()
   }
 
   const onSelectCommitVariant = (id: string): void => {
@@ -264,7 +307,7 @@ export function GitChangesView(props: GitChangesViewProps) {
             className="dsh-git-changes-icon"
             aria-label={t('view.gitGraphGraph')}
             title={t('view.gitGraphGraph')}
-            onClick={onOpenGraph}
+            onClick={openGraph}
           >
             <PanelIconGraph size={16} />
           </button>
@@ -533,12 +576,16 @@ function modKey(): string {
   return 'Ctrl+'
 }
 
-async function postMessage(cwd: string): Promise<GitGraphMessageResponse> {
+async function postMessage(
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<GitGraphMessageResponse> {
   try {
     const response = await fetch(GIT_GRAPH_MESSAGE_PATH, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ cwd }),
+      signal,
     })
     const value = await response.json() as GitGraphMessageResponse
     if (typeof value.ok !== 'boolean') {

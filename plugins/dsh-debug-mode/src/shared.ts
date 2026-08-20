@@ -10,7 +10,10 @@ export const LOGS_PATH = '/dsh-debug-mode/logs'
 /** HTTP path for resolving a pending reproduction wait. */
 export const REPRO_PATH = '/dsh-debug-mode/repro'
 
-/** Keep the projection small enough to ride every history tail page. */
+/** HTTP path for polling the live (non-persisted) debug projection. */
+export const STATE_PATH = '/dsh-debug-mode/state'
+
+/** Keep the projection small enough for frequent polls. */
 export const MAX_DEBUG_LOGS = 200
 
 export type DebugLogSource = 'agent' | 'user' | 'ingest'

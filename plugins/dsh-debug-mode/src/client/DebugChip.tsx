@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { DebugProjection } from '../types.ts'
+import { useDebugState } from './useDebugState.ts'
 import styles from './DebugChip.module.css'
 
 export interface DebugChipInjected {
+  sessionId: string
   exitDebugMode: () => Promise<string | null>
 }
 
@@ -12,8 +13,8 @@ export type DebugChipProps = PropsRuntime<'conversation.input.left'>
   & DebugChipInjected
   & PropsLocale<'debug'>
 
-export function DebugChip({ useProjection, exitDebugMode, t }: DebugChipProps) {
-  const debug = useProjection('debug') as DebugProjection | undefined
+export function DebugChip({ sessionId, exitDebugMode, t }: DebugChipProps) {
+  const debug = useDebugState(sessionId)
   const [leaving, setLeaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const aliveRef = useRef(true)
@@ -25,7 +26,6 @@ export function DebugChip({ useProjection, exitDebugMode, t }: DebugChipProps) {
     }
   }, [])
 
-  if (debug === undefined) return null
   if (!(debug.pending ? !debug.active : debug.active)) return null
 
   const off = () => {

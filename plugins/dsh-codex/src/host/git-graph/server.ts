@@ -333,12 +333,27 @@ async function handleMessage(ctx: Context, req: IncomingMessage, res: ServerResp
     json(res, 400, fail('no-cwd', 'workspace directory is missing'))
     return
   }
+  // Drop the model stream as soon as the browser aborts (panel switch,
+  // navigation, or a superseded generate). Otherwise a 60s LLM call keeps
+  // running and makes follow-up git actions feel frozen.
+  const abort = new AbortController()
+  const onClose = (): void => abort.abort()
+  req.on('close', onClose)
   try {
-    const message = await generateCommitMessage(ctx, cwd)
+    const message = await generateCommitMessage(ctx, cwd, abort.signal)
+    if (abort.signal.aborted || res.writableEnded) return
     const value: GitGraphMessageResponse = { ok: true, message }
     json(res, 200, value)
   } catch (error) {
+    if (abort.signal.aborted || res.writableEnded) return
+    const text = errorMessage(error)
+    if (/aborted|abort/i.test(text)) {
+      json(res, 499, fail('git', 'generation cancelled'))
+      return
+    }
     writeGitError(res, error)
+  } finally {
+    req.off('close', onClose)
   }
 }
 

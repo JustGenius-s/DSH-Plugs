@@ -78,8 +78,8 @@ export const DSH_PLUGS_PLUGINS: readonly DshPlugsPluginDef[] = [
     packageName: '@just-genius/dsh-debug-mode',
     category: 'session',
     description: {
-      en: 'Cursor-style debug mode: /debug, a reproduction card, and a Debug Logs dock. First slice — no automatic instrumentation yet.',
-      zh: 'Cursor 风格 Debug 模式：/debug、复现步骤卡和 Debug Logs 面板。第一版还没有自动埋点。',
+      en: 'Cursor-style debug mode: /debug, a reproduction card, and a Debug Logs dock. Live-session only (not persisted). No automatic instrumentation yet.',
+      zh: 'Cursor 风格 Debug 模式：/debug、复现步骤卡和 Debug Logs 面板。仅当前进程会话生效（不写进持久化日志）。尚无自动埋点。',
     },
   },
 ]

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DebugKey } from './locales.ts'
+import { useDebugState } from './useDebugState.ts'
 import type { DebugLogEntry, DebugReproAction } from '../shared.ts'
-import type { DebugProjection } from '../types.ts'
 import styles from './DebugDock.module.css'
 
 export interface DebugDockInjected {
+  sessionId: string
   resolveRepro: (action: DebugReproAction, notes: string) => Promise<string | null>
 }
 
@@ -14,9 +15,8 @@ export type DebugDockProps = PropsRuntime<'conversation.input.dock'>
   & DebugDockInjected
   & PropsLocale<'debug'>
 
-export function DebugDock({ useProjection, useInput, inputActions, resolveRepro, t }: DebugDockProps) {
-  const debug = useProjection('debug') as DebugProjection | undefined
-  if (debug === undefined) return null
+export function DebugDock({ sessionId, useInput, inputActions, resolveRepro, t }: DebugDockProps) {
+  const debug = useDebugState(sessionId)
   const on = debug.pending ? !debug.active : debug.active
   if (!on) return null
 

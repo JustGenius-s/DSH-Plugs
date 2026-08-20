@@ -12,7 +12,7 @@ The consolidated Codex shell: Codex-style message navigation, Cursor-style per-t
 
 ### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
 
-Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with **Proceed** / **Mark as fixed**.
+Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with **Proceed** / **Mark as fixed**. Mode/wait/logs stay in process memory for the live session only (not written to the durable session log).
 
 ### [@just-genius/dsh-desktop-update](plugins/dsh-desktop-update)
 
