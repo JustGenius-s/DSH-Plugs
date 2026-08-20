@@ -71,7 +71,7 @@ function mountOverlay(): () => void {
     contributor: CONTRIBUTOR,
     id: OVERLAY_ID,
     url: OVERLAY_PATH,
-    bounds: { width: 160, height: 180 },
+    bounds: { width: 290, height: 220 },
     chrome: {
       transparent: true,
       frame: false,

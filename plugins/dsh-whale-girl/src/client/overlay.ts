@@ -8,10 +8,11 @@ import {
   STATE_PATH,
 } from '../shared/routes.ts'
 import { JOY_MS, TRANSIENT_MS, WAKE_MS, getCharacter, nextBlinkAt, nextFacingAt, nextWorkingRhythm, pickState, stateOf, wakeFromInteraction, type Character, type StateAnim } from '../shared/logic.ts'
+import { titleDef, titleDescription, titleIcon, titleName, xpFillAsset, xpProgress } from '../shared/pet-state.ts'
 import { bridge } from './bridge.ts'
 
 interface Snapshot {
-  pet?: { level?: number; stats?: { tasksDone?: number }; titles?: string[] }
+  pet?: { level?: number; xp?: number; stats?: { tasksDone?: number }; titles?: string[] }
   activity?: { name: string; until: number; sessionThink?: boolean; sessionWait?: boolean; turnCompletedUntil?: number }
   configRevision?: number
 }
@@ -41,10 +42,85 @@ function rand(min: number, max: number): number {
 
 const canvas = document.getElementById('pet') as HTMLCanvasElement
 const bubble = document.getElementById('bubble') as HTMLElement
-const badge = document.getElementById('badge') as HTMLElement
+const xpRoot = document.getElementById('xp') as HTMLElement
+const xpLv = document.getElementById('xp-lv') as HTMLElement
+const xpTrack = document.getElementById('xp-track') as HTMLElement
+const xpFill = document.getElementById('xp-fill') as HTMLElement
+const xpVal = document.getElementById('xp-val') as HTMLElement
+const xpNote = document.getElementById('xp-note') as HTMLElement
+const xpBadges = document.getElementById('xp-badges') as HTMLElement
+const xpTip = document.getElementById('xp-tip') as HTMLElement
 const maybeCtx = canvas.getContext('2d')
 if (maybeCtx === null) throw new Error('no canvas')
 const ctx: CanvasRenderingContext2D = maybeCtx
+
+let renderedTitleKey = ''
+let badgeTipHideTimer: ReturnType<typeof setTimeout> | null = null
+
+function showBadgeTip(id: string, anchor: HTMLElement): void {
+  if (badgeTipHideTimer !== null) {
+    clearTimeout(badgeTipHideTimer)
+    badgeTipHideTimer = null
+  }
+  const def = titleDef(id)
+  const name = def?.name ?? titleName(id)
+  const desc = def?.description ?? titleDescription(id)
+  xpTip.innerHTML = desc
+    ? `<span>${name}</span><span class="xp-tip-desc">${desc}</span>`
+    : `<span>${name}</span>`
+  xpTip.classList.add('show')
+  const r = anchor.getBoundingClientRect()
+  const tipW = xpTip.offsetWidth || 160
+  const tipH = xpTip.offsetHeight || 56
+  let left = r.left + r.width / 2 - tipW / 2
+  let top = r.top - tipH - 8
+  if (top < 8) top = r.bottom + 8
+  left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8))
+  xpTip.style.left = `${Math.round(left)}px`
+  xpTip.style.top = `${Math.round(top)}px`
+}
+
+function hideBadgeTip(): void {
+  if (badgeTipHideTimer !== null) clearTimeout(badgeTipHideTimer)
+  badgeTipHideTimer = setTimeout(() => {
+    xpTip.classList.remove('show')
+    xpTip.textContent = ''
+    badgeTipHideTimer = null
+  }, 80)
+}
+
+function renderTitleBadges(ids: string[] | undefined): void {
+  const list = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string' && titleDef(id)) : []
+  const key = list.join(',')
+  if (key === renderedTitleKey) return
+  renderedTitleKey = key
+  xpBadges.replaceChildren()
+  hideBadgeTip()
+  xpTip.classList.remove('show')
+  if (list.length === 0) {
+    xpBadges.classList.remove('show')
+    return
+  }
+  xpBadges.classList.add('show')
+  for (const id of list) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'xp-badge'
+    const name = titleName(id)
+    const desc = titleDescription(id)
+    btn.setAttribute('aria-label', desc ? `${name} · ${desc}` : name)
+    const img = document.createElement('img')
+    img.src = `${ASSETS_PATH}/hud/${titleIcon(id)}`
+    img.alt = ''
+    img.draggable = false
+    btn.appendChild(img)
+    btn.addEventListener('mouseenter', () => showBadgeTip(id, btn))
+    btn.addEventListener('mouseleave', hideBadgeTip)
+    btn.addEventListener('focus', () => showBadgeTip(id, btn))
+    btn.addEventListener('blur', hideBadgeTip)
+    xpBadges.appendChild(btn)
+  }
+}
 
 let manifest: unknown = null
 let character: Character | null = null
@@ -282,12 +358,20 @@ function showBubble(text: string): void {
 }
 
 function renderBadge(): void {
-  if (!snapshot) { badge.classList.remove('show'); return }
+  if (!snapshot) { xpRoot.classList.remove('show'); return }
   const p = snapshot.pet
-  const titles = p?.titles?.length ?? 0
-  badge.textContent = `Lv.${p?.level ?? 1} · ${p?.stats?.tasksDone ?? 0} 任务` + (titles ? ` · ${titles} 称号` : '')
-  if (snapshot.activity?.sessionThink) badge.textContent += ' · 思考中'
-  badge.classList.add('show')
+  const prog = xpProgress(p?.xp ?? 0)
+  xpLv.textContent = prog.maxed ? `Lv.${prog.level} MAX` : `Lv.${prog.level}`
+  const usable = Math.max(0, (xpTrack.clientWidth || 80) - 4)
+  xpFill.style.width = `${Math.round(usable * prog.ratio)}px`
+  xpFill.style.backgroundImage = `url(${ASSETS_PATH}/hud/${xpFillAsset(prog.ratio)})`
+  xpVal.textContent = prog.maxed ? 'MAX' : `${prog.into} / ${prog.need}`
+  const tasks = p?.stats?.tasksDone ?? 0
+  const bits: string[] = [`${tasks} 任务`]
+  if (snapshot.activity?.sessionThink) bits.push('思考中')
+  xpNote.textContent = bits.join(' · ')
+  renderTitleBadges(p?.titles)
+  xpRoot.classList.add('show')
 }
 
 function stepScheduler(now: number): void {

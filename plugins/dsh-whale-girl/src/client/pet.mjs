@@ -14,6 +14,7 @@ import { TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, pickState, nextWorki
 import { parseCharacters, getCharacter, stateOf, listCharacters } from './character.mjs'
 // 路由端点单一来源（src/routes.mjs，verify-routes-sync 门禁守护）：esbuild 内联进 bundle。
 import { STATE_PATH, INTERACT_PATH, CONFIG_PATH, ASSETS_PATH, EVENTS_PATH } from './routes.mjs'
+import { xpProgress, xpFillAsset, hudUrl, titleDef, titleIcon, titleName, titleDescription } from './xp.mjs'
 
 const ASSETS_URL = ASSETS_PATH
 const MANIFEST_URL = `${ASSETS_URL}/manifest.json`
@@ -75,6 +76,31 @@ const CSS = `
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 [data-whale-girl] .pet-note { color: #E8EBF2; font-size: 11px; line-height: 15px;
   text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+[data-whale-girl] .pet-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 0; }
+[data-whale-girl] .pet-badge {
+  width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px;
+  background: rgba(255,255,255,.06); cursor: help; display: grid; place-items: center;
+  image-rendering: pixelated; flex: 0 0 auto;
+}
+[data-whale-girl] .pet-badge img { width: 28px; height: 28px; object-fit: contain; pointer-events: none; display: block; }
+[data-whale-girl] .pet-badge:hover, [data-whale-girl] .pet-badge:focus-visible {
+  background: rgba(255,255,255,.16); outline: none;
+}
+/* 悬浮 tooltip：不占状态卡布局，贴徽章附近浮层显示 */
+[data-whale-girl] .pet-badge-tip {
+  position: fixed; z-index: 2147483646; display: none; pointer-events: none;
+  min-width: 120px; max-width: 200px; padding: 10px 12px 12px;
+  color: #FFE7A0; font-size: 11px; line-height: 1.4; font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0,0,0,.85);
+  white-space: normal; word-break: break-word;
+  background-size: 100% 100%; background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+[data-whale-girl] .pet-badge-tip.show { display: block; }
+[data-whale-girl] .pet-badge-tip .pet-badge-tip-desc {
+  display: block; margin-top: 4px; color: #E8EBF2; font-size: 10px; font-weight: 400;
+  opacity: .92;
+}
 [data-whale-girl] .pet-status::after { /* 连接尾：命中区覆盖宠物↔卡片间隙，hover 连续不闪断（main 定位由 JS 内联） */
   content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px;
   transform: translateX(-50%) rotate(45deg); background: rgba(24,28,38,.94);
@@ -122,12 +148,41 @@ const CSS = `
 [data-whale-girl][data-whale-girl-inert] { opacity: .25; pointer-events: none; }
 [data-whale-girl][data-whale-girl-hidden] { display: none; }
 [data-whale-girl] .pet-stage:focus-visible { outline: 2px solid rgba(255,255,255,.6); outline-offset: 2px; border-radius: 8px; }
+/* 右侧经验条：等级在上，E7 横向条在下；温度刻度换色由 JS 换 fill 图 */
+[data-whale-girl] .pet-xp {
+  position: absolute; left: calc(100% + 6px); top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  pointer-events: none; z-index: 2; image-rendering: pixelated;
+}
+[data-whale-girl] .pet-xp-lv {
+  color: #FFE7A0; font-size: 11px; font-weight: 700; line-height: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,.85), 0 0 6px rgba(0,0,0,.45);
+  letter-spacing: 0.02em; white-space: nowrap;
+}
+[data-whale-girl] .pet-xp-track {
+  position: relative; width: 72px; height: 10px;
+  background-image: url(${ASSETS_PATH}/hud/game_hud_bar_anger.png);
+  background-size: 100% 100%; background-repeat: no-repeat;
+  overflow: hidden;
+}
+[data-whale-girl] .pet-xp-fill {
+  position: absolute; left: 2px; top: 2px; bottom: 2px; width: 0%;
+  background-size: 100% 100%; background-repeat: no-repeat;
+  transition: width .35s cubic-bezier(.16,1,.3,1), background-image .2s ease;
+  image-rendering: pixelated;
+}
+[data-whale-girl] .pet-xp-val {
+  color: rgba(232,235,242,.78); font-size: 9px; line-height: 1;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,.8);
+}
 @media (prefers-reduced-motion: reduce) {
   [data-whale-girl] .pet-stage { animation: none !important; }
   [data-whale-girl] .pet-sprite { animation: none !important; }
   [data-whale-girl] .pet-heart { animation: none; opacity: 0; }
   [data-whale-girl] .pet-bubble { animation: none; }
   [data-whale-girl] .pet-status { transition: none !important; }
+  [data-whale-girl] .pet-xp-fill { transition: none !important; }
 }
 `
 
@@ -229,14 +284,91 @@ export function apply(ctx = {}) {
       <span class="pet-lv" style="background:rgba(86,134,254,.16); color:#B7C8FE; border-radius:5px; padding:2px 6px; font-size:10px; font-weight:600; line-height:16px; white-space:nowrap;">Lv.1</span>
       <span class="pet-stats" style="color:#E8EBF2; font-size:11px; line-height:16px; font-variant-numeric:tabular-nums; white-space:nowrap;">0 任务</span>
     </div>
+    <div class="pet-badges" style="display:flex; flex-wrap:wrap; align-items:center; gap:4px;"></div>
     <div class="pet-note" style="color:#E8EBF2; font-size:11px; line-height:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;">…</div>`
   const metaLv = status.querySelector('.pet-lv')
   const metaStats = status.querySelector('.pet-stats')
   const metaNote = status.querySelector('.pet-note')
+  const metaBadges = status.querySelector('.pet-badges')
+  // 悬浮 tooltip：挂到 body，不挤占状态卡高度。
+  const metaBadgeTip = document.createElement('div')
+  metaBadgeTip.className = 'pet-badge-tip'
+  metaBadgeTip.setAttribute('role', 'tooltip')
+  document.body.appendChild(metaBadgeTip)
   // 渲染时徽章样式保持内联（宿主 CSS 可能覆盖 class——内联优先级最高，徽章背景/分隔不被清）。
   metaLv.style.cssText = 'background:rgba(86,134,254,.16); color:#B7C8FE; border-radius:5px; padding:2px 6px; font-size:10px; font-weight:600; line-height:16px; white-space:nowrap;'
   metaStats.style.cssText = 'color:#E8EBF2; font-size:11px; line-height:16px; font-variant-numeric:tabular-nums; white-space:nowrap;'
   metaNote.style.cssText = 'color:#E8EBF2; font-size:11px; line-height:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px;'
+  metaBadges.style.cssText = 'display:flex; flex-wrap:wrap; align-items:center; gap:4px;'
+  metaBadgeTip.style.cssText = `display:none; position:fixed; z-index:2147483646; pointer-events:none; min-width:120px; max-width:200px; padding:10px 12px 12px; color:#FFE7A0; font-size:11px; line-height:1.4; font-weight:600; text-shadow:0 1px 2px rgba(0,0,0,.85); white-space:normal; word-break:break-word; background-image:url(${hudUrl('cm_tooltipbox.png')}); background-size:100% 100%; background-repeat:no-repeat; image-rendering:pixelated;`
+  let badgeTipHideTimer = null
+  const placeBadgeTip = (anchor) => {
+    const r = anchor.getBoundingClientRect()
+    const tipW = metaBadgeTip.offsetWidth || 160
+    const tipH = metaBadgeTip.offsetHeight || 56
+    let left = r.left + r.width / 2 - tipW / 2
+    let top = r.top - tipH - 8
+    if (top < 8) top = r.bottom + 8
+    left = Math.max(8, Math.min(left, window.innerWidth - tipW - 8))
+    metaBadgeTip.style.left = `${Math.round(left)}px`
+    metaBadgeTip.style.top = `${Math.round(top)}px`
+  }
+  const showBadgeTip = (id, anchor) => {
+    if (badgeTipHideTimer !== null) { clearTimeout(badgeTipHideTimer); badgeTipHideTimer = null }
+    const def = titleDef(id)
+    const name = def?.name ?? titleName(id)
+    const desc = def?.description ?? titleDescription(id)
+    metaBadgeTip.innerHTML = `<span>${name}</span>${desc ? `<span class="pet-badge-tip-desc" style="display:block;margin-top:4px;color:#E8EBF2;font-size:10px;font-weight:400;opacity:.92;">${desc}</span>` : ''}`
+    metaBadgeTip.style.display = 'block'
+    metaBadgeTip.classList.add('show')
+    placeBadgeTip(anchor)
+  }
+  const hideBadgeTip = () => {
+    if (badgeTipHideTimer !== null) clearTimeout(badgeTipHideTimer)
+    badgeTipHideTimer = setTimeout(() => {
+      metaBadgeTip.style.display = 'none'
+      metaBadgeTip.classList.remove('show')
+      metaBadgeTip.textContent = ''
+      badgeTipHideTimer = null
+    }, 80)
+  }
+  const BADGE_BTN = 'width:32px;height:32px;padding:0;border:0;border-radius:6px;background:rgba(255,255,255,.06);cursor:help;display:grid;place-items:center;image-rendering:pixelated;flex:0 0 auto;'
+  let renderedTitleKey = ''
+  const renderBadges = (ids) => {
+    const list = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string' && titleDef(id)) : []
+    const key = list.join(',')
+    if (key === renderedTitleKey) return
+    renderedTitleKey = key
+    metaBadges.replaceChildren()
+    hideBadgeTip()
+    metaBadgeTip.style.display = 'none'
+    if (list.length === 0) {
+      metaBadges.style.display = 'none'
+      return
+    }
+    metaBadges.style.display = 'flex'
+    for (const id of list) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'pet-badge'
+      btn.style.cssText = BADGE_BTN
+      btn.dataset.titleId = id
+      const name = titleName(id)
+      const desc = titleDescription(id)
+      btn.setAttribute('aria-label', desc ? `${name} · ${desc}` : name)
+      const img = document.createElement('img')
+      img.src = hudUrl(titleIcon(id))
+      img.alt = ''
+      img.draggable = false
+      img.style.cssText = 'width:28px;height:28px;object-fit:contain;pointer-events:none;display:block;'
+      btn.appendChild(img)
+      btn.addEventListener('mouseenter', () => showBadgeTip(id, btn))
+      btn.addEventListener('mouseleave', hideBadgeTip)
+      btn.addEventListener('focus', () => showBadgeTip(id, btn))
+      btn.addEventListener('blur', hideBadgeTip)
+      metaBadges.appendChild(btn)
+    }
+  }
 
   // 菜单（plain 面板：纯背景；按钮子元素，toggle 显示）。
   const menu = createPanel({ anchor: 'below', variant: 'plain', offsetY: 12, zIndex: '4', display: 'none' }).el
@@ -274,7 +406,28 @@ export function apply(ctx = {}) {
   // 状态卡放入 effects 层：effects 与 stage 同尺寸同位置（host 内 0,0,110,110），
   // 状态卡 top:calc(100%+18px) 相对 effects = 角色下方 18px，与角色视觉对齐（不遮挡）。
   effects.appendChild(status)
-  host.append(effects, stage, hitarea, menu)
+  // 右侧经验条：等级在上、横向条在下（E7 HUD 素材）；不挡交互。
+  const xpHud = document.createElement('div')
+  xpHud.className = 'pet-xp'
+  xpHud.setAttribute('aria-hidden', 'true')
+  xpHud.style.cssText = 'position:absolute; left:calc(100% + 6px); top:50%; transform:translateY(-50%); display:flex; flex-direction:column; align-items:flex-start; gap:3px; pointer-events:none; z-index:2; image-rendering:pixelated;'
+  const xpLv = document.createElement('div')
+  xpLv.className = 'pet-xp-lv'
+  xpLv.style.cssText = 'color:#FFE7A0; font-size:11px; font-weight:700; line-height:1; text-shadow:0 1px 2px rgba(0,0,0,.85),0 0 6px rgba(0,0,0,.45); letter-spacing:.02em; white-space:nowrap;'
+  xpLv.textContent = 'Lv.1'
+  const xpTrack = document.createElement('div')
+  xpTrack.className = 'pet-xp-track'
+  xpTrack.style.cssText = `position:relative; width:72px; height:10px; background-image:url(${hudUrl('game_hud_bar_anger.png')}); background-size:100% 100%; background-repeat:no-repeat; overflow:hidden;`
+  const xpFill = document.createElement('div')
+  xpFill.className = 'pet-xp-fill'
+  xpFill.style.cssText = `position:absolute; left:2px; top:2px; bottom:2px; width:0%; background-image:url(${hudUrl(xpFillAsset(0))}); background-size:100% 100%; background-repeat:no-repeat; transition:width .35s cubic-bezier(.16,1,.3,1); image-rendering:pixelated;`
+  xpTrack.appendChild(xpFill)
+  const xpVal = document.createElement('div')
+  xpVal.className = 'pet-xp-val'
+  xpVal.style.cssText = 'color:rgba(232,235,242,.78); font-size:9px; line-height:1; font-variant-numeric:tabular-nums; white-space:nowrap; text-shadow:0 1px 2px rgba(0,0,0,.8);'
+  xpVal.textContent = '0 / 50'
+  xpHud.append(xpLv, xpTrack, xpVal)
+  host.append(effects, stage, hitarea, menu, xpHud)
 
   // ---- 状态卡布局（视口感知：左右对齐，hover 显示时调用）----
   // status 绝对定位锚定宠物下方（始终不覆盖角色）；宠物贴左右缘 → 边缘对齐防横向溢出。
@@ -423,7 +576,33 @@ export function apply(ctx = {}) {
         ? `${pet.stats.tasksDone} 任务 · ${pet.stats.failures} 失败`
         : `${pet.stats.tasksDone} 任务`
       const last = pet.memory[pet.memory.length - 1]
-      metaNote.textContent = last ?? (pet.titles.length > 0 ? `称号「${pet.titles.join('」「')}」` : '…')
+      metaNote.textContent = last ?? '…'
+      renderBadges(pet.titles)
+      // 右侧经验条：等级在上，本级进度条按温度刻度换色。
+      const prog = xpProgress(pet.xp ?? 0)
+      xpLv.textContent = prog.maxed ? `Lv.${prog.level} MAX` : `Lv.${prog.level}`
+      const usable = Math.max(0, (xpTrack.clientWidth || 72) - 4)
+      xpFill.style.width = `${Math.round(usable * prog.ratio)}px`
+      xpFill.style.backgroundImage = `url(${hudUrl(xpFillAsset(prog.ratio))})`
+      xpVal.textContent = prog.maxed ? 'MAX' : `${prog.into} / ${prog.need}`
+      xpHud.setAttribute(
+        'aria-label',
+        prog.maxed
+          ? `等级 ${prog.level}（满级）`
+          : `等级 ${prog.level}，经验 ${prog.into} / ${prog.need}`,
+      )
+      // 贴右缘时经验条翻到角色左侧，避免出屏。
+      const hostRect = host.getBoundingClientRect()
+      const needW = (xpTrack.offsetWidth || 72) + 10
+      if (hostRect.right + needW > window.innerWidth - 8) {
+        xpHud.style.left = 'auto'
+        xpHud.style.right = 'calc(100% + 6px)'
+        xpHud.style.alignItems = 'flex-end'
+      } else {
+        xpHud.style.left = 'calc(100% + 6px)'
+        xpHud.style.right = 'auto'
+        xpHud.style.alignItems = 'flex-start'
+      }
     }
   }
 
@@ -1365,6 +1544,8 @@ export function apply(ctx = {}) {
     for (const t of bubbleTimers) clearTimeout(t) // 气泡残留计时器一并清
     bubbleTimers.clear()
     clearBubble() // 活动气泡引用清空（DOM 随 host.remove() 移除）
+    if (badgeTipHideTimer !== null) clearTimeout(badgeTipHideTimer)
+    metaBadgeTip.remove()
     dialogObserver.disconnect()
     document.removeEventListener('pointerdown', onDocPointerDown)
     document.removeEventListener('keydown', onKeyDown)
