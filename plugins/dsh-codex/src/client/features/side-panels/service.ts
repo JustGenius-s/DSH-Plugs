@@ -140,6 +140,23 @@ export interface SidePanelsService {
    * left behind.
    */
   closeInstance(key: string): void
+  /** Close every instance except `key`, and activate it. */
+  closeOthers(key: string): void
+  /**
+   * Close every instance to the right of `key`. When the active instance is
+   * among them, activation falls back to `key`.
+   */
+  closeToRight(key: string): void
+  /** Close all instances and the sidebar itself. */
+  closeAll(): void
+  /**
+   * Override one instance's tab caption (stored on its nav state, so the
+   * name persists with the tab). An empty title clears the override and
+   * restores the default caption.
+   */
+  renameInstance(key: string, title: string): void
+  /** Move one instance to `toIndex` in the tab strip (clamped). */
+  moveInstance(key: string, toIndex: number): void
   /** Current snapshot. */
   getSnapshot(): SidePanelsSnapshot
   /** Subscribe to store changes. Returns the unsubscriber. */
@@ -418,6 +435,56 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
         ? (instances[Math.min(index, instances.length - 1)]?.key ?? null)
         : snapshot.activeKey
       setSnapshot({ instances, activeKey })
+      saveTabs()
+    },
+    closeOthers(key) {
+      const instance = snapshot.instances.find(i => i.key === key)
+      if (instance === undefined || snapshot.instances.length < 2) return
+      setSnapshot({ instances: [instance], activeKey: key })
+      saveTabs()
+    },
+    closeToRight(key) {
+      const index = snapshot.instances.findIndex(i => i.key === key)
+      if (index === -1 || index === snapshot.instances.length - 1) return
+      const instances = snapshot.instances.slice(0, index + 1)
+      const activeKey = instances.some(i => i.key === snapshot.activeKey)
+        ? snapshot.activeKey
+        : key
+      setSnapshot({ instances, activeKey })
+      saveTabs()
+    },
+    closeAll() {
+      if (snapshot.instances.length === 0) return
+      // Same contract as closing the last tab: no empty shell left behind.
+      setSnapshot({ open: false, instances: [], activeKey: null })
+      writeStorage(OPEN_KEY, '0')
+      saveTabs()
+    },
+    renameInstance(key, title) {
+      const trimmed = title.trim()
+      let found = false
+      const instances = snapshot.instances.map(i => {
+        if (i.key !== key) return i
+        found = true
+        const state = { ...i.state }
+        if (trimmed === '') delete state.title
+        else state.title = trimmed
+        return { ...i, state }
+      })
+      if (!found) return
+      setSnapshot({ instances })
+      saveTabs()
+    },
+    moveInstance(key, toIndex) {
+      const from = snapshot.instances.findIndex(i => i.key === key)
+      if (from === -1) return
+      const to = Math.max(0, Math.min(snapshot.instances.length - 1, toIndex))
+      if (to === from) return
+      const instances = [...snapshot.instances]
+      const moved = instances.splice(from, 1)[0]
+      if (moved === undefined) return
+      instances.splice(to, 0, moved)
+      setSnapshot({ instances })
       saveTabs()
     },
     getSnapshot() {

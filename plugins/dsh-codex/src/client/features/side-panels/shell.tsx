@@ -11,12 +11,13 @@
  * against the drag-start width, and an 8px hit strip with no visible pill.
  */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   IconChevronRightOutline14,
-  IconCloseFill14, IconCloseOutline16, IconPlusOutline16, Tooltip,
+  IconCloseFill14, IconCloseOutline16, IconPlusOutline16, Menu, Tooltip,
+  type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   clampPanelLauncherWidth,
@@ -278,6 +279,120 @@ export function SidePanelsShell(props: ShellProps) {
     return () => { document.removeEventListener('pointerdown', onDown) }
   }, [adding])
 
+  // Tab context menu (VSCode editor-tab style: rename, close, close others,
+  // close to the right, close all) and the inline-rename target it opens.
+  const [tabMenu, setTabMenu] = useState<{ key: string; x: number; y: number } | null>(null)
+  const [renamingKey, setRenamingKey] = useState<string | null>(null)
+
+  const tabMenuItems = useMemo<readonly MenuEntry[]>(() => {
+    if (tabMenu === null) return []
+    const index = live.findIndex(i => i.key === tabMenu.key)
+    return [
+      { id: 'rename', label: t('tabs.rename') },
+      { type: 'separator', id: 'sep-rename' },
+      { id: 'close', label: t('tabs.close') },
+      { id: 'close-others', label: t('tabs.closeOthers'), disabled: live.length < 2 },
+      {
+        id: 'close-right',
+        label: t('tabs.closeToRight'),
+        disabled: index === -1 || index === live.length - 1,
+      },
+      { type: 'separator', id: 'sep-close' },
+      { id: 'close-all', label: t('tabs.closeAll') },
+    ]
+  }, [tabMenu, live, t])
+
+  const onTabMenuSelect = useCallback((id: string): void => {
+    const menu = tabMenu
+    setTabMenu(null)
+    if (menu === null) return
+    if (id === 'rename') setRenamingKey(menu.key)
+    else if (id === 'close') store.closeInstance(menu.key)
+    else if (id === 'close-others') store.closeOthers(menu.key)
+    else if (id === 'close-right') store.closeToRight(menu.key)
+    else if (id === 'close-all') store.closeAll()
+  }, [store, tabMenu])
+
+  const commitRename = useCallback((key: string, value: string): void => {
+    store.renameInstance(key, value)
+    setRenamingKey(null)
+  }, [store])
+
+  // Tab drag-reorder, modeled on VSCode's tab drag: a press that moves past
+  // a 4px threshold becomes a drag (pointer capture on the tab, so a short
+  // press still activates it); an insertion line marks the drop slot and the
+  // strip auto-scrolls near its edges; the reorder commits on release.
+  const tabDrag = useRef<{
+    key: string
+    pointerId: number
+    startX: number
+    active: boolean
+  } | null>(null)
+  const [dragKey, setDragKey] = useState<string | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+
+  const onTabPointerDown = useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    key: string,
+  ): void => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('.dsh-side-panels-tab-close') !== null) return
+    if (target.closest('.dsh-side-panels-tab-rename') !== null) return
+    tabDrag.current = { key, pointerId: event.pointerId, startX: event.clientX, active: false }
+  }, [])
+
+  const onTabPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    const drag = tabDrag.current
+    if (drag === null || drag.pointerId !== event.pointerId) return
+    if (!drag.active) {
+      if (Math.abs(event.clientX - drag.startX) < 4) return
+      drag.active = true
+      event.currentTarget.setPointerCapture(drag.pointerId)
+      setDragKey(drag.key)
+    }
+    const strip = tabsRef.current
+    if (strip === null) return
+    // Edge auto-scroll so a drag can reach tabs scrolled out of view.
+    const stripRect = strip.getBoundingClientRect()
+    if (event.clientX < stripRect.left + 24) strip.scrollLeft -= 12
+    else if (event.clientX > stripRect.right - 24) strip.scrollLeft += 12
+    // The drop slot, counted in the strip WITHOUT the dragged tab: how many
+    // of the other tabs' midpoints lie left of the pointer.
+    let index = 0
+    for (const el of strip.querySelectorAll<HTMLElement>('[data-tab-key]')) {
+      if (el.dataset['tabKey'] === drag.key) continue
+      const rect = el.getBoundingClientRect()
+      if (event.clientX > rect.left + rect.width / 2) index += 1
+    }
+    setDropIndex(index)
+  }, [])
+
+  const onTabPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    const drag = tabDrag.current
+    if (drag === null || drag.pointerId !== event.pointerId) return
+    tabDrag.current = null
+    if (drag.active) {
+      if (event.currentTarget.hasPointerCapture(drag.pointerId)) {
+        event.currentTarget.releasePointerCapture(drag.pointerId)
+      }
+      if (dropIndex !== null) store.moveInstance(drag.key, dropIndex)
+    }
+    setDragKey(null)
+    setDropIndex(null)
+  }, [dropIndex, store])
+
+  // Where the insertion line goes: before this tab, or after the last one.
+  let dropBeforeKey: string | null = null
+  let dropAfterKey: string | null = null
+  if (dragKey !== null && dropIndex !== null) {
+    const others = live.filter(i => i.key !== dragKey)
+    if (others.length > 0) {
+      if (dropIndex >= others.length) dropAfterKey = others[others.length - 1]?.key ?? null
+      else dropBeforeKey = others[dropIndex]?.key ?? null
+    }
+  }
+
   // The tab strip scrolls horizontally when instances overflow (stylesheet:
   // tabs are flex:none inside an overflow-x scrollport). Wheel handling is a
   // reduced port of VSCode's tabs scrollbar (multiEditorTabsControl.ts uses a
@@ -514,29 +629,62 @@ export function SidePanelsShell(props: ShellProps) {
             const info = panelById.get(instance.panelId)
             const isActive = instance.key === activeKey
             const siblings = live.filter(i => i.panelId === instance.panelId)
+            const caption = instanceCaption(instance, siblings, info?.label ?? instance.panelId)
             return (
               <div
                 key={instance.key}
                 data-tab-key={instance.key}
+                data-dragging={dragKey === instance.key || undefined}
                 className={[
                   'dsh-side-panels-tab',
                   isActive ? 'dsh-side-panels-tab-active' : '',
                 ].filter(Boolean).join(' ')}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  setTabMenu({ key: instance.key, x: event.clientX, y: event.clientY })
+                }}
+                onPointerDown={(event) => onTabPointerDown(event, instance.key)}
+                onPointerMove={onTabPointerMove}
+                onPointerUp={onTabPointerUp}
+                onPointerCancel={onTabPointerUp}
               >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={isActive}
-                  className="dsh-side-panels-tab-button"
-                  onClick={() => store.activateInstance(instance.key)}
-                >
-                  <span className="dsh-side-panels-tab-icon" aria-hidden>
-                    {resolvePanelIcon(store.descriptor(instance.panelId)?.icon)}
-                  </span>
-                  <span className="dsh-side-panels-tab-label">
-                    {instanceCaption(instance, siblings, info?.label ?? instance.panelId)}
-                  </span>
-                </button>
+                {dropBeforeKey === instance.key ? (
+                  <span className="dsh-side-panels-tab-drop" aria-hidden />
+                ) : null}
+                {dropAfterKey === instance.key ? (
+                  <span className="dsh-side-panels-tab-drop is-after" aria-hidden />
+                ) : null}
+                {renamingKey === instance.key ? (
+                  <input
+                    className="dsh-side-panels-tab-rename"
+                    defaultValue={caption}
+                    autoFocus
+                    onFocus={(event) => event.currentTarget.select()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        commitRename(instance.key, event.currentTarget.value)
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault()
+                        setRenamingKey(null)
+                      }
+                    }}
+                    onBlur={(event) => commitRename(instance.key, event.currentTarget.value)}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className="dsh-side-panels-tab-button"
+                    onClick={() => store.activateInstance(instance.key)}
+                  >
+                    <span className="dsh-side-panels-tab-icon" aria-hidden>
+                      {resolvePanelIcon(store.descriptor(instance.panelId)?.icon)}
+                    </span>
+                    <span className="dsh-side-panels-tab-label">{caption}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="dsh-side-panels-tab-close"
@@ -603,6 +751,18 @@ export function SidePanelsShell(props: ShellProps) {
         {renderPanes()}
       </div>
       </div>
+      <Menu
+        open={tabMenu !== null}
+        portal
+        dense
+        side="bottom"
+        align="start"
+        anchor={<span className="dsh-side-panels-menu-anchor" aria-hidden="true" />}
+        getAnchorRect={() => tabMenu === null ? null : new DOMRect(tabMenu.x, tabMenu.y, 1, 1)}
+        items={tabMenuItems}
+        onSelect={onTabMenuSelect}
+        onClose={() => setTabMenu(null)}
+      />
     </>
   )
 }

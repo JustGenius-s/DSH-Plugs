@@ -106,6 +106,22 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 .dsh-side-panels-tab:hover .dsh-side-panels-tab-close{opacity:1}
 .dsh-side-panels-tab-close:hover{color:var(--dsw-alias-label-primary)}
 
+/* Tab drag-reorder: touch-action none so pointer capture sees the move; the
+   dragged tab dims and a 2px insertion line marks the drop slot, centered in
+   the strip's 16px gap (before the tab, or after it for the end slot). */
+.dsh-side-panels-tab{touch-action:none}
+.dsh-side-panels-tab[data-dragging]{opacity:.4;cursor:grabbing}
+.dsh-side-panels-tab-drop{position:absolute;left:-9px;top:2px;bottom:2px;width:2px;border-radius:2px;background:var(--dsw-alias-state-business-primary);pointer-events:none}
+.dsh-side-panels-tab-drop.is-after{left:auto;right:-9px}
+
+/* Inline rename: the input keeps the tab's own typography so the strip does
+   not reflow when a caption turns editable. */
+.dsh-side-panels-tab-rename{min-width:0;width:120px;border:1px solid var(--dsw-alias-state-business-primary);border-radius:4px;background:var(--dsw-alias-bg-base);padding:1px 4px;font-family:inherit;font-size:13px;line-height:16px;font-weight:500;color:var(--dsw-alias-label-primary);outline:none}
+
+/* The tab context menu is positioned from getAnchorRect; its in-place anchor
+   is only a formality. */
+.dsh-side-panels-menu-anchor{position:fixed;width:1px;height:1px;pointer-events:none}
+
 /* Header icon buttons (new-instance, close sidebar): the 28px round control
    from ui-conversation's DetailsPanel .close. */
 .dsh-side-panels-icon-button{display:grid;flex:none;place-items:center;width:28px;height:28px;border:none;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}
