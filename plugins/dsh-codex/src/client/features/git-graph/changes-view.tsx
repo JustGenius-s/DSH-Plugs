@@ -32,6 +32,8 @@ export interface GitChangesViewProps {
   t: (key: string) => string
   /** Open the `files` panel on a file's working-tree diff. */
   onOpenFile?: (file: string, sha?: string) => void
+  /** Open the `files` panel on the file itself (preview, not its diff). */
+  onOpenPreview?: (file: string, sha?: string) => void
   /** Open the commit-graph tab. */
   onOpenGraph?: () => void
 }
@@ -58,7 +60,7 @@ const MESSAGE_MAX_HEIGHT = 110
  * git operations, then the staged/changes file groups.
  */
 export function GitChangesView(props: GitChangesViewProps) {
-  const { cwd, t, onOpenFile, onOpenGraph } = props
+  const { cwd, t, onOpenFile, onOpenPreview, onOpenGraph } = props
   const [refreshSeq, setRefreshSeq] = useState(0)
   const [display, setDisplay] = useState<'flat' | 'tree'>('flat')
   const [busyAction, setBusyAction] = useState<GitGraphActionName | null>(null)
@@ -318,6 +320,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         display={display}
         refreshSeq={refreshSeq}
         onOpenFile={(file, sha) => onOpenFile?.(file, sha)}
+        onOpenPreview={(file, sha) => onOpenPreview?.(file, sha)}
         onStageChange={(file, stage) => void run(stage ? 'stage' : 'unstage', undefined, file.path)}
         onStageAll={() => void run('stage-all')}
         onUnstageAll={() => void run('unstage-all')}

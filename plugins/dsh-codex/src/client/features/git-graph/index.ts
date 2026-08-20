@@ -32,6 +32,9 @@ export function createGitGraphFeature(
       const openFile = (file: string, sha?: string): void => {
         ctx.sidePanels.open('files', { mode: 'diff', file, sha })
       }
+      const openPreview = (file: string, sha?: string): void => {
+        ctx.sidePanels.open('files', { mode: 'preview', file, sha })
+      }
       const openGraph = (): void => {
         const existing = store.getSnapshot().instances.find(
           (item) => item.panelId === PANEL_ID && item.state?.view === 'graph',
@@ -82,12 +85,14 @@ export function createGitGraphFeature(
                   cwd: props.cwd,
                   t: props.t,
                   onOpenFile: openFile,
+                  onOpenPreview: openPreview,
                 })
               }
               return createElement(GitChangesView, {
                 cwd: props.cwd,
                 t: props.t,
                 onOpenFile: openFile,
+                onOpenPreview: openPreview,
                 onOpenGraph: openGraph,
               })
             } as never,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, UIEvent } from 'react'
 import {
   IconCheckOutline16,
@@ -20,7 +20,7 @@ import {
   toggleScope,
 } from './branch-filter'
 import { CommitContextMenu, openCommitMenu, type CommitMenuState } from './commit-menu'
-import { GitGraphDetail } from './detail-files'
+import { GitGraphDetail, refBadgeLabel } from './detail-files'
 import { layoutGraph, type GraphEdge, type LaidOutNode } from './layout'
 import { ensureGitGraphStyles } from './styles'
 
@@ -45,6 +45,8 @@ export interface GitGraphViewProps {
   t: (key: string) => string
   /** Open the `files` panel on a file; sha undefined = working tree. */
   onOpenFile?: (file: string, sha?: string) => void
+  /** Open the `files` panel on the file itself (preview, not its diff). */
+  onOpenPreview?: (file: string, sha?: string) => void
 }
 
 interface GraphState {
@@ -68,10 +70,14 @@ const EMPTY: GraphState = {
 }
 
 export function GitGraphView(props: GitGraphViewProps) {
-  const { cwd, t, onOpenFile } = props
+  const { cwd, t, onOpenFile, onOpenPreview } = props
   const [state, setState] = useState<GraphState>(EMPTY)
   const [selected, setSelected] = useState<string | undefined>()
-  const [detail, setDetail] = useState<{ sha?: string; title: string } | undefined>()
+  const [detail, setDetail] = useState<{
+    sha?: string
+    title: string
+    refs?: GitGraphRow['refs']
+  } | undefined>()
   const [menu, setMenu] = useState<CommitMenuState | null>(null)
   const [toast, setToast] = useState<{ seq: number; text: string; kind: 'ok' | 'error' } | null>(null)
   const toastSeq = useRef(0)
@@ -195,7 +201,7 @@ export function GitGraphView(props: GitGraphViewProps) {
       setDetail({ title: t('gitGraph.workdir') })
       return
     }
-    setDetail({ sha: row.sha, title: row.subject })
+    setDetail({ sha: row.sha, title: row.subject, refs: row.refs })
   }, [selected, state.rows, t])
 
   const layout = useMemo(() => layoutGraph(state.rows), [state.rows])
@@ -248,9 +254,12 @@ export function GitGraphView(props: GitGraphViewProps) {
           cwd={cwd}
           sha={detail.sha}
           title={detail.title}
+          refs={detail.refs}
+          onClose={() => setSelected(undefined)}
           t={t}
           refreshSeq={detailSeq}
           onOpenFile={(file, sha) => onOpenFile?.(file, sha)}
+          onOpenPreview={(file, sha) => onOpenPreview?.(file, sha)}
         />
       ) : null}
       {toast !== null ? (
@@ -318,16 +327,7 @@ function GraphBody(props: {
           >
             <span className="dsh-git-graph-gutter" />
             <span className="dsh-git-graph-meta">
-              <span className="dsh-git-graph-badges">
-                {node.row.refs.slice(0, 3).map((ref) => (
-                  <span
-                    key={ref.type + ':' + ref.name}
-                    className={'dsh-git-graph-badge is-' + ref.type}
-                  >
-                    {badgeLabel(ref)}
-                  </span>
-                ))}
-              </span>
+              <RowBadges refs={node.row.refs} />
               <span className="dsh-git-graph-subject">{node.row.subject}</span>
             </span>
             <span className="dsh-git-graph-sha">{node.row.shortSha}</span>
@@ -380,6 +380,74 @@ function GraphBody(props: {
   )
 }
 
+/** Gap between row badges; mirrored in the stylesheet's `gap`. */
+const BADGE_GAP = 4
+/** Share of the meta cell the badge strip may occupy at most. */
+const BADGES_MAX_RATIO = 0.46
+
+/** Overflow badges are taken out of the flow but stay measurable. */
+const HIDDEN_BADGE_STYLE = {
+  position: 'absolute',
+  visibility: 'hidden',
+} as const
+
+/**
+ * A row's ref badges: as many WHOLE badges as fit are shown, the rest hide
+ * outright — a half-clipped badge reads as a rendering bug. CSS alone can't
+ * clip a flex row at item boundaries (the wrap-and-clip trick sizes the box
+ * as if nothing wrapped, leaving dead space), so the fit is measured: every
+ * badge renders, widths are summed against the strip's cap, and the tail is
+ * pulled out of the flow. The cap is set inline from the same ratio so the
+ * measurement and the layout never disagree.
+ */
+function RowBadges(props: { refs: readonly GitGraphRef[] }) {
+  const { refs } = props
+  const ref = useRef<HTMLSpanElement>(null)
+  const [visible, setVisible] = useState(refs.length)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    const parent = el?.parentElement
+    if (el === null || parent === null || parent === undefined) return
+    const measure = (): void => {
+      const budget = Math.floor(parent.clientWidth * BADGES_MAX_RATIO)
+      el.style.maxWidth = String(budget) + 'px'
+      let used = 0
+      let count = 0
+      for (const child of Array.from(el.children)) {
+        const width = (child as HTMLElement).offsetWidth
+        const next = used + (count === 0 ? 0 : BADGE_GAP) + width
+        if (next > budget) break
+        used = next
+        count += 1
+      }
+      setVisible(count)
+    }
+    measure()
+    // The strip's width is content-driven once badges hide, so the meta
+    // cell (not the strip) is observed — it tracks panel resizes.
+    const observer = new ResizeObserver(measure)
+    observer.observe(parent)
+    return () => observer.disconnect()
+  }, [refs])
+
+  if (refs.length === 0) return null
+  return (
+    <span className="dsh-git-graph-badges" ref={ref}>
+      {refs.map((badgeRef, index) => (
+        <span
+          key={badgeRef.type + ':' + badgeRef.name}
+          className={'dsh-git-graph-badge is-' + badgeRef.type}
+          title={refBadgeLabel(badgeRef)}
+          style={index < visible ? undefined : HIDDEN_BADGE_STYLE}
+        >
+          {refBadgeLabel(badgeRef)}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 function EdgePath(props: { edge: GraphEdge }) {
   const { edge } = props
   const x1 = laneX(edge.fromCol)
@@ -413,11 +481,6 @@ function rowClass(row: GitGraphRow, selected: string | undefined): string {
 
 function laneX(column: number): number {
   return LANE_PAD + column * LANE_GAP
-}
-
-function badgeLabel(ref: GitGraphRef): string {
-  if (ref.type === 'head' && ref.current === true) return 'HEAD'
-  return ref.name
 }
 
 function pad2(value: number): string {

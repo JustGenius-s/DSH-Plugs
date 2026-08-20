@@ -26,9 +26,6 @@ const FILES_CSS = `
 .dsh-files-status-badge.is-renamed,.dsh-files-status-badge.is-copied{background:rgba(9,105,218,.14);color:#0550ae}
 .dsh-files-status-badge.is-untracked{background:rgba(31,122,55,.14);color:#116329}
 .dsh-files-status-badge.is-conflicted{background:rgba(130,80,223,.14);color:#8250df}
-.dsh-files-tree-diff{flex:none;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b90);cursor:pointer;opacity:0}
-.dsh-files-tree-row:hover .dsh-files-tree-diff{opacity:1}
-.dsh-files-tree-diff:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 .dsh-files-preview,.dsh-files-diff{flex:1;min-height:0;overflow:auto}
 .dsh-files-image{flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:16px}
 .dsh-files-image img{max-width:100%;height:auto;border-radius:6px;background:repeating-conic-gradient(rgba(128,128,128,.18) 0% 25%,transparent 0% 50%) 0 0/16px 16px}
@@ -72,10 +69,11 @@ const FILES_CSS = `
 .dsh-files-expand{display:block;width:100%;min-height:28px;padding:0 12px;border:none;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b90);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
 .dsh-files-expand:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 
-/* Shiki dual-theme flip: highlighted tokens carry color:var(--shiki-light)
+/* Shiki dual-theme flip: highlighted tokens carry the light literal color
    inline plus a --shiki-dark custom property (see highlight.ts); under the
-   app's dark marker the dark value wins. !important beats the inline style. */
-body[data-ds-dark-theme] .dsh-files-code-text span{color:var(--shiki-dark)!important}
+   app's dark marker the dark value wins. !important beats the inline style.
+   Covers both the file preview and the diff view. */
+body[data-ds-dark-theme] .dsh-files-code-text span,body[data-ds-dark-theme] .dsh-files-diff-text span{color:var(--shiki-dark)!important}
 
 /* Dark restatement of the status/diff palette (One Dark values). */
 body[data-ds-dark-theme] .dsh-files-status.is-error{color:#f87171}

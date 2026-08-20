@@ -8,10 +8,11 @@
  * file-open (markdown links, produced-files chips) without forking the
  * conversation package.
  *
- * Only paths inside the current session's working directory are rerouted;
- * everything else — the workspace folder itself (`.`), absolute paths
- * outside the workspace, relative paths with no known cwd — falls through
- * to the original system opener.
+ * Absolute paths are rerouted whether they sit inside the session's working
+ * directory or not — the host's worktree read is plain file IO and happily
+ * previews outside files. What still falls through to the original system
+ * opener: the workspace folder itself (`.`), and relative paths with no
+ * known cwd.
  */
 
 import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
@@ -78,17 +79,21 @@ export function createFileLinksFeature(
 }
 
 /**
- * The panel-relative target for `path`, or undefined when the link should
- * keep the system opener. `path` arrives already resolved against the
- * session cwd by the conversation's `openFile` inject, so it is absolute
- * whenever a cwd was known.
+ * The panel target for `path`, or undefined when the link should keep the
+ * system opener. `path` arrives already resolved against the session cwd by
+ * the conversation's `openFile` inject, so it is absolute whenever a cwd was
+ * known. Paths inside the workspace stay repo-relative (so a chat link reuses
+ * a tree-opened tab of the same file); paths outside go to the panel as
+ * absolute — the host's worktree read is not confined to the cwd.
  */
 function panelTarget(
   ctx: ClientContext,
   path: string,
 ): { sessionId: string; file: string } | undefined {
   const normalized = path.replace(/\\/g, '/')
-  if (!normalized.startsWith('/')) return undefined
+  if (!normalized.startsWith('/') && !/^[A-Za-z]:\//.test(normalized)) {
+    return undefined
+  }
   const sessions = ctx.sessions as unknown as ClientSessionsLike
   const state = sessions.list.getSnapshot()
   const sessionId = state.current
@@ -100,11 +105,15 @@ function panelTarget(
   // The workspace folder itself (the produced-files `.` link) keeps the
   // system opener — previewing a directory is the tree's job.
   if (trimmed === cwd) return undefined
-  if (!normalized.startsWith(root)) return undefined
-  const relative = normalized.slice(root.length)
-  // The host endpoint rejects `..`; never hand it one.
-  if (relative === '' || relative.split('/').includes('..')) return undefined
-  return { sessionId, file: relative }
+  if (normalized.startsWith(root)) {
+    const relative = normalized.slice(root.length)
+    // The host endpoint rejects `..`; never hand it one.
+    if (relative === '' || relative.split('/').includes('..')) return undefined
+    return { sessionId, file: relative }
+  }
+  // Outside the workspace: pass the absolute path through. The host rejects
+  // NUL bytes; everything else is a read-only preview.
+  return { sessionId, file: normalized }
 }
 
 /**

@@ -386,9 +386,14 @@ export interface HighlightSpan {
  * Dual-theme mode: each token's `color` is `var(--shiki-light)` (the default
  * color) and both theme values ride the `--shiki-light`/`--shiki-dark`
  * custom properties in `htmlStyle`; the panel CSS swaps to the dark value
- * under `body[data-ds-dark-theme]`. Font styles are dropped on purpose —
- * VSCode's default themes italicize nothing here, so plain colors match the
- * editor.
+ * under `body[data-ds-dark-theme]`.
+ *
+ * Font styles matter for markup languages: VSCode's default themes bold
+ * headings/strong and italicize emphasis in markdown, and shiki reports them
+ * as `--shiki-{light,dark}-font-weight/-font-style/-text-decoration` custom
+ * properties — which nothing consumes unless mapped back onto real style
+ * properties. Both themes share the same seven fontStyle rules, so the light
+ * value (dark as fallback) is applied directly.
  */
 export function highlightLines(
   code: string,
@@ -399,16 +404,21 @@ export function highlightLines(
       ? undefined
       : LANG_ALIASES.get(lang.toLowerCase())
   if (resolved === undefined) return undefined
-  const { tokens } = highlighter().codeToTokens(code, {
+  // Shiki's tokenize loop skips empty lines WITHOUT advancing the grammar
+  // stack, so rules whose `while`/`end` is keyed on a blank line (markdown's
+  // HTML block ends on one) never see it and swallow the rest of the file.
+  // Tokenize a copy with blank lines massaged to a single space — invisible
+  // in the rendered output, but the grammar's blank-line checks fire.
+  const massaged = code.replace(/^[^\S\n]*$/gm, ' ')
+  const { tokens } = highlighter().codeToTokens(massaged, {
     lang: resolved,
     themes: { light: 'light-plus', dark: 'dark-plus' },
     cssVariablePrefix: '--shiki-',
   })
-  const last = tokens[tokens.length - 1]
+  // The phantom line after a trailing newline now tokenizes to a real
+  // (space) row, so drop it based on the source, not on row emptiness.
   const rows =
-    tokens.length > 1 && last !== undefined && last.length === 0
-      ? tokens.slice(0, -1)
-      : tokens
+    tokens.length > 1 && code.endsWith('\n') ? tokens.slice(0, -1) : tokens
   return rows.map((line) =>
     line.map((token) => {
       const style: CSSProperties = {}
@@ -416,6 +426,12 @@ export function highlightLines(
       const extra = token.htmlStyle
       if (extra !== undefined && typeof extra !== 'string') {
         Object.assign(style, extra)
+        const fontWeight = extra['--shiki-light-font-weight'] ?? extra['--shiki-dark-font-weight']
+        if (fontWeight !== undefined) style.fontWeight = fontWeight
+        const fontStyle = extra['--shiki-light-font-style'] ?? extra['--shiki-dark-font-style']
+        if (fontStyle !== undefined) style.fontStyle = fontStyle
+        const textDecoration = extra['--shiki-light-text-decoration'] ?? extra['--shiki-dark-text-decoration']
+        if (textDecoration !== undefined) style.textDecoration = textDecoration
       }
       return { text: token.content, style }
     }),

@@ -8,7 +8,7 @@
  * keeps the files panel visually consistent with the rest of the sidebar.
  */
 import { useMemo, useState } from 'react'
-import { highlightLines } from './highlight'
+import { highlightLines, type HighlightSpan } from './highlight'
 
 /** Lines shown before a long file collapses behind an expand row. */
 const MAX_PREVIEW_LINES = 400
@@ -83,9 +83,15 @@ interface DiffRow {
 }
 
 /** One file's unified patch with dual line-number gutters. */
-export function FileDiffView(props: { patch: string; labels: ViewLabels }) {
-  const { patch, labels } = props
+export function FileDiffView(props: {
+  patch: string
+  /** File-extension language hint; unknown ids render plain. */
+  lang?: string
+  labels: ViewLabels
+}) {
+  const { patch, lang, labels } = props
   const rows = useMemo(() => parsePatch(patch), [patch])
+  const highlighted = useMemo(() => highlightDiffRows(rows, lang), [rows, lang])
   const [expanded, setExpanded] = useState(false)
   const capped = !expanded && rows.length > MAX_DIFF_ROWS
   const visible = capped ? rows.slice(0, MAX_DIFF_ROWS) : rows
@@ -117,7 +123,13 @@ export function FileDiffView(props: { patch: string; labels: ViewLabels }) {
               <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
             </span>
             <span className="dsh-files-diff-text">
-              {row.text.length === 0 ? ' ' : row.text}
+              {row.text.length === 0
+                ? ' '
+                : (highlighted[index]?.map((span, spanIndex) => (
+                    <span key={spanIndex} style={span.style}>
+                      {span.text}
+                    </span>
+                  )) ?? row.text)}
             </span>
           </div>
         ))}
@@ -203,4 +215,56 @@ function signFor(kind: DiffRowKind): string {
   if (kind === 'add') return '+'
   if (kind === 'del') return '−'
   return ''
+}
+
+/**
+ * Syntax-highlight diff content lines, aligned with `rows` (undefined entry =
+ * render plain). Each hunk is rebuilt into its old-side (ctx+del) and new-side
+ * (ctx+add) fragments and tokenized separately, so multi-line constructs
+ * inside one hunk highlight correctly; constructs spanning a hunk gap (block
+ * comments, template literals) are approximate, same as GitHub. Context rows
+ * prefer the new-side tokenization.
+ */
+function highlightDiffRows(
+  rows: DiffRow[],
+  lang: string | undefined,
+): (HighlightSpan[] | undefined)[] {
+  const out: (HighlightSpan[] | undefined)[] = rows.map(() => undefined)
+  if (lang === undefined) return out
+  let index = 0
+  while (index < rows.length) {
+    const kind = rows[index]?.kind
+    if (kind === 'hunk' || kind === 'note' || kind === undefined) {
+      index += 1
+      continue
+    }
+    const start = index
+    while (index < rows.length) {
+      const k = rows[index]?.kind
+      if (k === 'hunk' || k === 'note' || k === undefined) break
+      index += 1
+    }
+    const newSide: number[] = []
+    const oldSide: number[] = []
+    for (let i = start; i < index; i += 1) {
+      const k = rows[i]?.kind
+      if (k === 'ctx' || k === 'add') newSide.push(i)
+      if (k === 'ctx' || k === 'del') oldSide.push(i)
+    }
+    const newHl = highlightLines(
+      newSide.map((i) => rows[i]?.text ?? '').join('\n'),
+      lang,
+    )
+    const oldHl = highlightLines(
+      oldSide.map((i) => rows[i]?.text ?? '').join('\n'),
+      lang,
+    )
+    newSide.forEach((rowIndex, line) => {
+      out[rowIndex] = newHl?.[line]
+    })
+    oldSide.forEach((rowIndex, line) => {
+      if (out[rowIndex] === undefined) out[rowIndex] = oldHl?.[line]
+    })
+  }
+  return out
 }

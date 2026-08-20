@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import { join, posix } from 'node:path'
+import { join, posix, resolve } from 'node:path'
 import { execGit } from './git-exec'
 import type {
   GitChangeFile,
@@ -170,31 +170,40 @@ export interface LoadedFile {
  * render them inline; other binary files are flagged `binary` with empty
  * content. Returns `exists: false` when the path is not present at the
  * given revision.
+ *
+ * Worktree reads accept absolute paths too — a chat link can point anywhere
+ * on disk, and previewing it is read-only file IO. Commit reads (sha set)
+ * stay repo-relative: `posixSafe` keeps git path arguments inside the tree.
  */
 export async function loadFile(
   cwd: string,
   path: string,
   sha?: string,
 ): Promise<LoadedFile> {
-  // Working-tree reads are plain file IO — no repository needed, so chat
-  // file links preview in any workspace, git-tracked or not.
   if (sha !== undefined) await assertGitRepo(cwd)
-  const safePath = posixSafe(path)
-  if (safePath.length === 0) {
+  const worktree = sha === undefined ? resolveWorktreePath(cwd, path) : undefined
+  if (worktree === null) {
     throw badRequest('invalid file path')
   }
-  if (sha === undefined) {
-    const info = await stat(join(cwd, ...safePath.split('/'))).catch(() => null)
+  const safePath = worktree === undefined ? posixSafe(path) : undefined
+  if (safePath !== undefined && safePath.length === 0) {
+    throw badRequest('invalid file path')
+  }
+  if (worktree !== undefined) {
+    const info = await stat(worktree).catch(() => null)
     if (info === null) return { content: '', encoding: 'utf8', exists: false }
     if (info.isDirectory()) {
       return { content: '', encoding: 'utf8', directory: true, exists: true }
     }
   }
-  const bytes = await readFileBytes(cwd, safePath, sha)
+  const bytes =
+    worktree !== undefined
+      ? await readWorktreeBytes(worktree)
+      : await readCommitBytes(cwd, safePath as string, sha as string)
   if (bytes === null) {
     return { content: '', encoding: 'utf8', exists: false }
   }
-  const mime = IMAGE_MIME[extensionOf(safePath)]
+  const mime = IMAGE_MIME[extensionOf(worktree ?? (safePath as string))]
   if (mime !== undefined) {
     return { content: bytes.toString('base64'), encoding: 'base64', mime, exists: true }
   }
@@ -205,35 +214,50 @@ export async function loadFile(
 }
 
 /**
- * Raw bytes of a worktree file (`cat`) or a committed blob
- * (`git show <sha>:<path>`); null when the path is absent.
+ * Absolute filesystem path for a worktree read, or null when the path is
+ * unusable (empty, or carrying a NUL byte). Relative input resolves against
+ * `cwd` and must survive `posixSafe`; absolute input (POSIX or a Windows
+ * drive path) is normalized and used as-is — it may point anywhere on disk.
  */
-async function readFileBytes(
+function resolveWorktreePath(cwd: string, path: string): string | null {
+  const trimmed = path.trim()
+  if (trimmed.length === 0 || trimmed.includes('\0')) return null
+  if (trimmed.startsWith('/') || /^[A-Za-z]:[\\/]/.test(trimmed)) {
+    return resolve(trimmed)
+  }
+  return join(cwd, ...posixSafe(trimmed).split('/'))
+}
+
+/** Raw bytes of a worktree file (`cat`); null when the path is absent. */
+async function readWorktreeBytes(abs: string): Promise<Buffer | null> {
+  try {
+    const { stdout } = (await execFileAsync('cat', [abs], {
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      encoding: 'buffer',
+    })) as unknown as { stdout: Buffer }
+    return stdout
+  } catch (error) {
+    const message = errorMessage(error)
+    if (/no such file/i.test(message)) return null
+    throw new Error(message)
+  }
+}
+
+/**
+ * Raw bytes of a committed blob (`git show <sha>:<path>`); null when the
+ * path is absent at that revision.
+ */
+async function readCommitBytes(
   cwd: string,
   path: string,
-  sha?: string,
+  sha: string,
 ): Promise<Buffer | null> {
-  const options = {
-    timeout: GIT_TIMEOUT_MS,
-    maxBuffer: MAX_BUFFER,
-    encoding: 'buffer',
-  } as const
-  if (sha === undefined) {
-    const abs = join(cwd, ...path.split('/'))
-    try {
-      const { stdout } = (await execFileAsync('cat', [abs], options)) as unknown as {
-        stdout: Buffer
-      }
-      return stdout
-    } catch (error) {
-      const message = errorMessage(error)
-      if (/no such file/i.test(message)) return null
-      throw new Error(message)
-    }
-  }
   try {
     const { stdout } = (await execFileAsync('git', ['show', sha + ':' + path], {
-      ...options,
+      timeout: GIT_TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      encoding: 'buffer',
       cwd,
     })) as unknown as { stdout: Buffer }
     return stdout

@@ -297,13 +297,6 @@ function FileRow(props: {
           </span>
         ) : null}
       </button>
-      <button
-        type="button"
-        className="dsh-files-tree-diff"
-        onClick={() => onOpen({ mode: 'diff', file: entry.path })}
-      >
-        {diffGlyph}
-      </button>
     </div>
   )
 }
@@ -433,13 +426,6 @@ function DiffLoader(props: {
   return <>{render(diff, busy, error)}</>
 }
 
-const diffGlyph = (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-    <path fillRule="evenodd" clipRule="evenodd" d="M2.4 1.5h11.2A.9.9 0 0 1 14.5 2.4v11.2a.9.9 0 0 1-.9.9H2.4a.9.9 0 0 1-.9-.9V2.4a.9.9 0 0 1 .9-.9Z" fill="currentColor" fillOpacity=".14" />
-    <path fillRule="evenodd" clipRule="evenodd" d="M5.1 4.5h5.8v1.2H5.1V4.5ZM5.1 7.4h5.8v1.2H5.1V7.4ZM5.1 10.3h3.6v1.2H5.1v-1.2Z" fill="currentColor" />
-  </svg>
-)
-
 /**
  * File-type icon for the tree, from the bundled vscode-icons set
  * (see file-icons-data.ts). Unknown extensions fall back to the generic
@@ -550,7 +536,11 @@ function FilesDiffView(props: {
   }
   return (
     <div className="dsh-files-diff">
-      <FileDiffView patch={diff.patch} labels={viewLabels(t)} />
+      <FileDiffView
+        patch={diff.patch}
+        lang={langHintOf(props.file)}
+        labels={viewLabels(t)}
+      />
     </div>
   )
 }

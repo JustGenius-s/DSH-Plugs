@@ -2,12 +2,14 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconChevronDownOutline14,
   IconChevronRightOutline14,
+  IconCloseOutline16,
   IconPlusOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   GIT_GRAPH_FILES_PATH,
   type GitChangeFile,
   type GitGraphFilesResponse,
+  type GitGraphRef,
 } from '../../../shared/git-graph'
 import { fileIconSvg, folderIconSvg } from '../files/file-icons'
 
@@ -31,8 +33,18 @@ export interface GitGraphDetailProps {
   sha?: string
   /** Short label shown in the detail header; omitted = no header row. */
   title?: string
+  /** Refs (branches/tags/HEAD) pointing at the commit, shown under the title. */
+  refs?: readonly GitGraphRef[]
+  /** Header close button; omitted = no button (embedded lists). */
+  onClose?: () => void
   t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
+  /**
+   * Row hover action: open the file itself (not its diff) in the `files`
+   * panel — at `sha` for commit lists, the worktree otherwise. Omitting it
+   * hides the button.
+   */
+  onOpenPreview?: (file: string, sha?: string) => void
   /** List layout: flat rows (default) or a collapsible directory tree. */
   display?: 'flat' | 'tree'
   /**
@@ -71,8 +83,14 @@ export interface GitGraphDetailProps {
  * on that file's diff. Working-tree lists arrive flagged per index/worktree
  * side and render as two VSCode-style groups: staged on top, changes below.
  */
+/** Badge caption for one ref; the current HEAD reads "HEAD". */
+export function refBadgeLabel(ref: GitGraphRef): string {
+  if (ref.type === 'head' && ref.current === true) return 'HEAD'
+  return ref.name
+}
+
 export function GitGraphDetail(props: GitGraphDetailProps) {
-  const { cwd, sha, title, t, onOpenFile, display = 'flat', onStageChange, onStageAll, onUnstageAll, onDiscard, onStageDirChange, onDiscardDir, onFilesChange, refreshSeq = 0 } = props
+  const { cwd, sha, title, refs, onClose, t, onOpenFile, onOpenPreview, display = 'flat', onStageChange, onStageAll, onUnstageAll, onDiscard, onStageDirChange, onDiscardDir, onFilesChange, refreshSeq = 0 } = props
   const [files, setFiles] = useState<readonly GitChangeFile[] | null>(null)
   const [error, setError] = useState<string | undefined>()
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
@@ -145,12 +163,40 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
     [files, grouped],
   )
 
-  const listProps = { display, collapsed, onToggleDir: toggleDir, sha, t, onOpenFile, onStageChange, onDiscard, onStageDirChange, onDiscardDir }
+  const listProps = { display, collapsed, onToggleDir: toggleDir, sha, t, onOpenFile, onOpenPreview, onStageChange, onDiscard, onStageDirChange, onDiscardDir }
 
   return (
     <div className="dsh-git-graph-detail">
-      {title === undefined ? null : (
-        <div className="dsh-git-graph-detail-title">{title}</div>
+      {title === undefined && onClose === undefined ? null : (
+        <div className="dsh-git-graph-detail-head">
+          <span className="dsh-git-graph-detail-title" title={title}>
+            {title}
+          </span>
+          {onClose === undefined ? null : (
+            <button
+              type="button"
+              className="dsh-git-graph-detail-close"
+              aria-label={t('gitGraph.close')}
+              title={t('gitGraph.close')}
+              onClick={onClose}
+            >
+              <IconCloseOutline16 size={14} />
+            </button>
+          )}
+        </div>
+      )}
+      {refs === undefined || refs.length === 0 ? null : (
+        <div className="dsh-git-graph-detail-refs">
+          {refs.map((ref) => (
+            <span
+              key={ref.type + ':' + ref.name}
+              className={'dsh-git-graph-badge is-' + ref.type}
+              title={refBadgeLabel(ref)}
+            >
+              {refBadgeLabel(ref)}
+            </span>
+          ))}
+        </div>
       )}
       {error !== undefined ? (
         <div className="dsh-git-graph-detail-status is-error">{error}</div>
@@ -191,6 +237,7 @@ function ChangeSection(props: {
   sha?: string
   t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
+  onOpenPreview?: (file: string, sha?: string) => void
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
   onDiscard?: (file: GitChangeFile) => void
   onStageDirChange?: (path: string, stage: boolean) => void
@@ -232,18 +279,19 @@ function FileList(props: {
   sha?: string
   t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
+  onOpenPreview?: (file: string, sha?: string) => void
   stageAction?: 'stage' | 'unstage'
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
   onDiscard?: (file: GitChangeFile) => void
   onStageDirChange?: (path: string, stage: boolean) => void
   onDiscardDir?: (path: string) => void
 }) {
-  const { files, display, collapsed, onToggleDir, sha, t, onOpenFile, stageAction, onStageChange, onDiscard, onStageDirChange, onDiscardDir } = props
+  const { files, display, collapsed, onToggleDir, sha, t, onOpenFile, onOpenPreview, stageAction, onStageChange, onDiscard, onStageDirChange, onDiscardDir } = props
   const tree = useMemo(
     () => (display !== 'tree' ? undefined : buildTree(files)),
     [files, display],
   )
-  const rowProps = { sha, t, onOpenFile, stageAction, onStageChange, onDiscard }
+  const rowProps = { sha, t, onOpenFile, onOpenPreview, stageAction, onStageChange, onDiscard }
   const treeProps = { ...rowProps, onStageDirChange, onDiscardDir }
   return (
     <div className="dsh-git-graph-detail-list">
@@ -279,16 +327,21 @@ function FileRow(props: {
   sha?: string
   t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
+  /** Hover action: open the file itself instead of its diff. */
+  onOpenPreview?: (file: string, sha?: string) => void
   /** Hover action this row offers; undefined = read-only row. */
   stageAction?: 'stage' | 'unstage'
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
   /** Discard hover action, only meaningful on the unstaged (Changes) side. */
   onDiscard?: (file: GitChangeFile) => void
 }) {
-  const { file, sha, t, stageAction, onStageChange, onDiscard } = props
+  const { file, sha, t, onOpenPreview, stageAction, onStageChange, onDiscard } = props
   // Tree rows skip the caret a directory row carries, so file icons line up
   // with directory icons at the same level (caret 12px + row gap 6px).
   const indent = 4 + props.depth * 14 + (props.showDir ? 0 : 18)
+  const hasActions = onOpenPreview !== undefined
+    || (stageAction === 'stage' && onDiscard !== undefined)
+    || (stageAction !== undefined && onStageChange !== undefined)
   return (
     <button
       type="button"
@@ -303,51 +356,103 @@ function FileRow(props: {
         dangerouslySetInnerHTML={{ __html: fileIconSvg(fileName(file.path)) }}
       />
       <span className="dsh-git-graph-detail-name">
-        {fileName(file.path)}
+        <span className="dsh-git-graph-detail-basename">{fileName(file.path)}</span>
         {!props.showDir || fileDir(file.path) === '' ? null : (
           <span className="dsh-git-graph-detail-dir">{fileDir(file.path)}</span>
         )}
       </span>
-      {stageAction === 'stage' && onDiscard !== undefined ? (
-        <span
-          role="button"
-          tabIndex={-1}
-          className="dsh-git-graph-detail-action"
-          aria-label={t('gitGraph.discard')}
-          title={t('gitGraph.discard')}
-          onClick={(event) => {
-            event.stopPropagation()
-            onDiscard(file)
-          }}
-        >
-          <IconUndo size={16} />
+      <span className="dsh-git-graph-detail-tail">
+        {!hasActions ? null : (
+          // Hover actions overlay the filename area just left of the
+          // counts/badge (absolute against the tail), so they reserve no
+          // layout space and never squeeze the name.
+          <span className="dsh-git-graph-detail-actions">
+            {onOpenPreview === undefined ? null : (
+              <span
+                role="button"
+                tabIndex={-1}
+                className="dsh-git-graph-detail-action"
+                aria-label={t('gitGraph.openFile')}
+                title={t('gitGraph.openFile')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onOpenPreview(file.path, sha)
+                }}
+              >
+                <IconFileCode size={16} />
+              </span>
+            )}
+            {stageAction === 'stage' && onDiscard !== undefined ? (
+              <span
+                role="button"
+                tabIndex={-1}
+                className="dsh-git-graph-detail-action"
+                aria-label={t('gitGraph.discard')}
+                title={t('gitGraph.discard')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onDiscard(file)
+                }}
+              >
+                <IconUndo size={16} />
+              </span>
+            ) : null}
+            {stageAction === undefined || onStageChange === undefined ? null : (
+              <span
+                role="button"
+                tabIndex={-1}
+                className="dsh-git-graph-detail-action"
+                aria-label={t(stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
+                title={t(stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onStageChange(file, stageAction === 'stage')
+                }}
+              >
+                {stageAction === 'stage' ? <IconPlusOutline16 size={16} /> : <IconMinus size={16} />}
+              </span>
+            )}
+          </span>
+        )}
+        {file.added !== undefined || file.removed !== undefined ? (
+          <span className="dsh-git-graph-detail-count">
+            <span className="is-add">+{String(file.added ?? 0)}</span>
+            <span className="is-del">−{String(file.removed ?? 0)}</span>
+          </span>
+        ) : null}
+        <span className={'dsh-git-graph-detail-status is-' + file.status}>
+          {STATUS_LABEL[file.status]}
         </span>
-      ) : null}
-      {stageAction === undefined || onStageChange === undefined ? null : (
-        <span
-          role="button"
-          tabIndex={-1}
-          className="dsh-git-graph-detail-action"
-          aria-label={t(stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
-          title={t(stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
-          onClick={(event) => {
-            event.stopPropagation()
-            onStageChange(file, stageAction === 'stage')
-          }}
-        >
-          {stageAction === 'stage' ? <IconPlusOutline16 size={16} /> : <IconMinus size={16} />}
-        </span>
-      )}
-      {file.added !== undefined || file.removed !== undefined ? (
-        <span className="dsh-git-graph-detail-count">
-          <span className="is-add">+{String(file.added ?? 0)}</span>
-          <span className="is-del">−{String(file.removed ?? 0)}</span>
-        </span>
-      ) : null}
-      <span className={'dsh-git-graph-detail-status is-' + file.status}>
-        {STATUS_LABEL[file.status]}
       </span>
     </button>
+  )
+}
+
+/**
+ * Lucide `file-code` glyph (document with a `</>` pair) for the
+ * open-file-not-diff row action. Drawn on a 24px grid at stroke-width 2, so
+ * rendered at 16px the stroke lands on ~1.33px — matching the 1.3px weight
+ * of the neighboring DSH glyphs.
+ */
+function IconFileCode(props: { size?: number }) {
+  const size = props.size ?? 16
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+      <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+      <path d="M10 12.5 8 15l2 2.5" />
+      <path d="m14 12.5 2 2.5-2 2.5" />
+    </svg>
   )
 }
 
@@ -431,6 +536,7 @@ function TreeRows(props: {
   sha?: string
   t: (key: string) => string
   onOpenFile: (file: string, sha?: string) => void
+  onOpenPreview?: (file: string, sha?: string) => void
   stageAction?: 'stage' | 'unstage'
   onStageChange?: (file: GitChangeFile, stage: boolean) => void
   onDiscard?: (file: GitChangeFile) => void
@@ -463,37 +569,44 @@ function TreeRows(props: {
                 aria-hidden="true"
                 dangerouslySetInnerHTML={{ __html: folderIconSvg(dir.name, open) }}
               />
-              <span className="dsh-git-graph-detail-name">{dir.name}</span>
-              {props.stageAction === 'stage' && props.onDiscardDir !== undefined ? (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  className="dsh-git-graph-detail-action"
-                  aria-label={props.t('gitGraph.discard')}
-                  title={props.t('gitGraph.discard')}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    props.onDiscardDir?.(dir.path)
-                  }}
-                >
-                  <IconUndo size={16} />
-                </span>
-              ) : null}
-              {props.stageAction === undefined || props.onStageDirChange === undefined ? null : (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  className="dsh-git-graph-detail-action"
-                  aria-label={props.t(props.stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
-                  title={props.t(props.stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    props.onStageDirChange?.(dir.path, props.stageAction === 'stage')
-                  }}
-                >
-                  {props.stageAction === 'stage' ? <IconPlusOutline16 size={16} /> : <IconMinus size={16} />}
-                </span>
-              )}
+              <span className="dsh-git-graph-detail-name">
+                <span className="dsh-git-graph-detail-basename">{dir.name}</span>
+              </span>
+              {(props.stageAction === 'stage' && props.onDiscardDir !== undefined)
+                || (props.stageAction !== undefined && props.onStageDirChange !== undefined) ? (
+                  <span className="dsh-git-graph-detail-actions">
+                    {props.stageAction === 'stage' && props.onDiscardDir !== undefined ? (
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        className="dsh-git-graph-detail-action"
+                        aria-label={props.t('gitGraph.discard')}
+                        title={props.t('gitGraph.discard')}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          props.onDiscardDir?.(dir.path)
+                        }}
+                      >
+                        <IconUndo size={16} />
+                      </span>
+                    ) : null}
+                    {props.stageAction === undefined || props.onStageDirChange === undefined ? null : (
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        className="dsh-git-graph-detail-action"
+                        aria-label={props.t(props.stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
+                        title={props.t(props.stageAction === 'stage' ? 'gitGraph.stage' : 'gitGraph.unstage')}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          props.onStageDirChange?.(dir.path, props.stageAction === 'stage')
+                        }}
+                      >
+                        {props.stageAction === 'stage' ? <IconPlusOutline16 size={16} /> : <IconMinus size={16} />}
+                      </span>
+                    )}
+                  </span>
+                ) : null}
             </button>
             {open ? (
               <TreeRows
@@ -504,6 +617,7 @@ function TreeRows(props: {
                 sha={props.sha}
                 t={props.t}
                 onOpenFile={props.onOpenFile}
+                onOpenPreview={props.onOpenPreview}
                 stageAction={props.stageAction}
                 onStageChange={props.onStageChange}
                 onDiscard={props.onDiscard}
@@ -523,6 +637,7 @@ function TreeRows(props: {
           sha={props.sha}
           t={props.t}
           onOpenFile={props.onOpenFile}
+          onOpenPreview={props.onOpenPreview}
           stageAction={props.stageAction}
           onStageChange={props.onStageChange}
           onDiscard={props.onDiscard}
