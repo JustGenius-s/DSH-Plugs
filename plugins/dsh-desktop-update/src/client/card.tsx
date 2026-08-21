@@ -64,6 +64,9 @@ export function UpdateCard(props: UpdateCardProps) {
   const [state, setState] = useState<DesktopUpdateState | null>(null)
   const [checking, setChecking] = useState(false)
   const [channelOpen, setChannelOpen] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<'ok' | 'suppressed' | 'failed' | null>(null)
+  const [updating, setUpdating] = useState(false)
 
   useEffect(() => {
     const b = bridge()
@@ -73,6 +76,12 @@ export function UpdateCard(props: UpdateCardProps) {
     const off = b.updates.onState((s) => { if (alive) setState(s) })
     return () => { alive = false; off() }
   }, [])
+
+  // 主进程广播的 updatingDsh 为准；本地 updating 兜底防连点。
+  const busyUpdating = Boolean(state?.updatingDsh) || updating
+  const needsRelaunch = Boolean(state?.needsRelaunch)
+  const updateMessage = state?.updateMessage ?? null
+  const canUpdateDsh = state?.dsh != null && !busyUpdating
 
   // Namespace not served by this Host: render nothing rather than a dead card.
   if (snap.status === 'unavailable') return null
@@ -136,6 +145,37 @@ export function UpdateCard(props: UpdateCardProps) {
       .finally(() => setChecking(false))
   }
 
+  const testNotify = (): void => {
+    const b = bridge()
+    if (b === undefined) return
+    setTesting(true)
+    setTestResult(null)
+    void b.notify.show({
+      contributor: 'desktop-update',
+      id: 'test-notify',
+      title: t('card.title'),
+      body: t('action.testNotifyBody'),
+    })
+      .then((result) => {
+        setTestResult(result?.shown === false ? 'suppressed' : 'ok')
+      })
+      .catch(() => { setTestResult('failed') })
+      .finally(() => { setTesting(false) })
+  }
+
+  const updateDshNow = (): void => {
+    const b = bridge()
+    if (b === undefined || !canUpdateDsh) return
+    setUpdating(true)
+    void b.updates.updateDsh()
+      .catch(() => {})
+      .finally(() => { setUpdating(false) })
+  }
+
+  const relaunchNow = (): void => {
+    bridge()?.updates.relaunch()
+  }
+
   const versionText = (name: string, current: string, latest: string | undefined): string =>
     latest === undefined ? `${name} ${current}` : `${name} ${current} → ${latest}`
 
@@ -168,12 +208,56 @@ export function UpdateCard(props: UpdateCardProps) {
                   : '',
               ].filter((s) => s !== '').join(' · ')}
             </span>
-            <ActionButton disabled={checking} onClick={checkNow}>
+            <ActionButton disabled={checking || busyUpdating} onClick={checkNow}>
               {checking ? t('action.checking') : t('action.check')}
             </ActionButton>
           </div>
+          {(canUpdateDsh || busyUpdating || needsRelaunch || updateMessage !== null) && (
+            <div className="dsh-du-update-row">
+              <p
+                className={
+                  updateMessage !== null && updateMessage.startsWith('更新失败')
+                    ? 'dsh-du-status dsh-du-status-error'
+                    : 'dsh-du-status'
+                }
+                role="status"
+              >
+                {updateMessage
+                  ?? (busyUpdating
+                    ? t('status.updating')
+                    : needsRelaunch
+                      ? t('status.needsRelaunch')
+                      : state.dsh
+                        ? t('action.updateDsh') + ` → ${state.dsh.latest}`
+                        : '')}
+              </p>
+              {needsRelaunch ? (
+                <ActionButton onClick={relaunchNow}>{t('action.relaunch')}</ActionButton>
+              ) : canUpdateDsh || busyUpdating ? (
+                <ActionButton disabled={!canUpdateDsh} onClick={updateDshNow}>
+                  {busyUpdating ? t('action.updatingDsh') : t('action.updateDsh')}
+                </ActionButton>
+              ) : null}
+            </div>
+          )}
         </Field>
       )}
+      <Field>
+        <div className="dsh-du-versions">
+          <span>
+            {testResult === 'ok'
+              ? t('action.testNotifyDone')
+              : testResult === 'suppressed'
+                ? t('action.testNotifySuppressed')
+                : testResult === 'failed'
+                  ? t('action.testNotifyFailed')
+                  : t('action.testNotifyBody')}
+          </span>
+          <ActionButton disabled={testing || busyUpdating} onClick={testNotify}>
+            {testing ? t('action.checking') : t('action.testNotify')}
+          </ActionButton>
+        </div>
+      </Field>
       <SwitchField
         id="plugin-config-desktop-update-check-app"
         label={t('gate.app')}

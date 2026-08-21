@@ -19,9 +19,13 @@ function labels() {
         downloadTo: (v: string) => `下载桌面版 ${v}…`,
         updateDsh: '更新 DSH 运行时',
         updateDshTo: (v: string) => `更新 DSH 到 ${v}`,
+        updatingDsh: '正在更新 DSH…',
         relaunch: '重启 DSH-Desktop',
+        relaunchNow: '立即重启以应用更新',
         tooltip: 'DSH-Desktop',
         tooltipUpdate: 'DSH-Desktop — 有可用更新',
+        tooltipUpdating: 'DSH-Desktop — 正在更新运行时',
+        tooltipRelaunch: 'DSH-Desktop — 需重启以应用更新',
       }
     : {
         check: 'Check for Updates…',
@@ -29,9 +33,13 @@ function labels() {
         downloadTo: (v: string) => `Download App ${v}…`,
         updateDsh: 'Update DSH Runtime',
         updateDshTo: (v: string) => `Update DSH to ${v}`,
+        updatingDsh: 'Updating DSH…',
         relaunch: 'Restart DSH-Desktop',
+        relaunchNow: 'Restart Now to Apply Update',
         tooltip: 'DSH-Desktop',
         tooltipUpdate: 'DSH-Desktop — update available',
+        tooltipUpdating: 'DSH-Desktop — updating runtime',
+        tooltipRelaunch: 'DSH-Desktop — restart required',
       }
 }
 
@@ -39,21 +47,30 @@ function menuItems(state: DesktopUpdateState | null): DesktopMenuItemSpec[] {
   const t = labels()
   const hasApp = state?.app !== null && state?.app !== undefined
   const hasDsh = state?.dsh !== null && state?.dsh !== undefined
+  const busy = Boolean(state?.updatingDsh)
+  const needsRelaunch = Boolean(state?.needsRelaunch)
   return [
-    { id: 'check-now', label: t.check, accelerator: 'CmdOrCtrl+Shift+U' },
+    { id: 'check-now', label: t.check, accelerator: 'CmdOrCtrl+Shift+U', enabled: !busy },
     { type: 'separator' },
     {
       id: 'download-app',
       label: hasApp && state?.app ? t.downloadTo(state.app.latest) : t.download,
-      enabled: hasApp,
+      enabled: hasApp && !busy,
     },
     {
       id: 'update-dsh',
-      label: hasDsh && state?.dsh ? t.updateDshTo(state.dsh.latest) : t.updateDsh,
-      enabled: hasDsh,
+      label: busy
+        ? t.updatingDsh
+        : hasDsh && state?.dsh
+          ? t.updateDshTo(state.dsh.latest)
+          : t.updateDsh,
+      enabled: hasDsh && !busy,
     },
     { type: 'separator' },
-    { id: 'relaunch', label: t.relaunch },
+    {
+      id: 'relaunch',
+      label: needsRelaunch ? t.relaunchNow : t.relaunch,
+    },
   ]
 }
 
@@ -62,7 +79,16 @@ async function push(state: DesktopUpdateState | null): Promise<void> {
   if (seats === undefined) return
   const t = labels()
   const hasUpdate = Boolean(state?.app || state?.dsh)
+  const busy = Boolean(state?.updatingDsh)
+  const needsRelaunch = Boolean(state?.needsRelaunch)
   const items = menuItems(state)
+  const tooltip = busy
+    ? t.tooltipUpdating
+    : needsRelaunch
+      ? t.tooltipRelaunch
+      : hasUpdate
+        ? t.tooltipUpdate
+        : t.tooltip
   try {
     await seats.contribute({
       seat: 'applicationMenu',
@@ -83,7 +109,7 @@ async function push(state: DesktopUpdateState | null): Promise<void> {
       seat: 'tray',
       contributor: CONTRIBUTOR,
       order: 10,
-      tooltip: hasUpdate ? t.tooltipUpdate : t.tooltip,
+      tooltip,
       items,
     })
   } catch (err) {
@@ -97,9 +123,21 @@ function syncNotify(state: DesktopUpdateState | null): void {
   const notify = bridge()?.notify
   if (notify === undefined) return
   const t = labels()
+  // 更新进行中：关掉「有更新」通知，避免和进度抢注意力。
+  if (state?.updatingDsh) {
+    if (lastNotifyKey !== '') {
+      lastNotifyKey = ''
+      void notify.close(CONTRIBUTOR, NOTIFY_ID)
+    }
+    return
+  }
   const lines: string[] = []
-  if (state?.app) lines.push(t.downloadTo(state.app.latest))
-  if (state?.dsh) lines.push(t.updateDshTo(state.dsh.latest))
+  if (state?.needsRelaunch) {
+    lines.push(t.relaunchNow)
+  } else {
+    if (state?.app) lines.push(t.downloadTo(state.app.latest))
+    if (state?.dsh) lines.push(t.updateDshTo(state.dsh.latest))
+  }
   const key = lines.join('\n')
   if (key === lastNotifyKey) return
   lastNotifyKey = key
@@ -110,8 +148,20 @@ function syncNotify(state: DesktopUpdateState | null): void {
   void notify.show({
     contributor: CONTRIBUTOR,
     id: NOTIFY_ID,
-    title: t.tooltipUpdate,
+    title: state?.needsRelaunch ? t.tooltipRelaunch : t.tooltipUpdate,
     body: key,
+  }).then((result) => {
+    // DSH-Desktop's main process resolves { shown: false } (does not throw) when
+    // the OS notification cannot be displayed — permission denied, unsupported,
+    // rate-limited, or cap reached. Surface it so a suppressed notification is
+    // not mistaken for "no update detected".
+    if (result?.shown === false) {
+      console.warn('[desktop-update] notify.show suppressed (shown=false)', {
+        contributor: CONTRIBUTOR,
+        id: NOTIFY_ID,
+        body: key,
+      })
+    }
   }).catch((err) => {
     console.warn('[desktop-update] notify.show failed', err)
   })
@@ -120,22 +170,27 @@ function syncNotify(state: DesktopUpdateState | null): void {
 /** Register native seats + update notifications; return a disposer for ctx.effect. */
 export function installDesktopSeats(): () => void {
   const b = bridge()
-  if (b?.seats === undefined || b.updates === undefined) {
-    console.warn('[desktop-update] window.dshDesktop.seats/updates missing; native menu not installed')
+  if (b === undefined || b.updates === undefined) {
+    console.warn('[desktop-update] window.dshDesktop.updates missing; native update wiring not installed')
     return () => {}
   }
 
   let alive = true
-  const unsubSeat = b.seats.onAction((action) => {
+  const unsubSeat = b.seats?.onAction((action) => {
     if (!alive || action.contributor !== CONTRIBUTOR) return
     if (action.id === 'check-now') void b.updates.checkNow()
     else if (action.id === 'download-app') void b.updates.downloadApp()
     else if (action.id === 'update-dsh') void b.updates.updateDsh()
     else if (action.id === 'relaunch') b.updates.relaunch()
-  })
+  }) ?? (() => {})
   const unsubNotify = b.notify?.onAction((action) => {
     if (!alive || action.contributor !== CONTRIBUTOR) return
-    if (action.id === NOTIFY_ID) void b.updates.checkNow()
+    if (action.id !== NOTIFY_ID) return
+    // 需重启时点通知直接 relaunch；否则打开检查结果。
+    void b.updates.getState().then((s) => {
+      if (s?.needsRelaunch) b.updates.relaunch()
+      else void b.updates.checkNow()
+    }).catch(() => { void b.updates.checkNow() })
   }) ?? (() => {})
   const apply = (state: DesktopUpdateState | null) => {
     void push(state)

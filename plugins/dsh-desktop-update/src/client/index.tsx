@@ -54,6 +54,16 @@ const zh = {
   'version.dsh': 'DSH 运行时',
   'action.check': '检查更新',
   'action.checking': '检查中…',
+  'action.testNotify': '测试通知',
+  'action.testNotifyBody': '这是一条来自 DSH-Desktop 的测试通知。',
+  'action.testNotifyDone': '已发送测试通知 ✓',
+  'action.testNotifySuppressed': '通知被系统拦截（shown=false），请检查系统通知权限。',
+  'action.testNotifyFailed': '发送测试通知失败。',
+  'action.updateDsh': '更新运行时',
+  'action.updatingDsh': '更新中…',
+  'action.relaunch': '立即重启',
+  'status.updating': '正在更新 DSH 运行时…',
+  'status.needsRelaunch': '新运行时已安装，重启后生效。',
 }
 
 const en: Record<keyof typeof zh, string> = {
@@ -83,6 +93,16 @@ const en: Record<keyof typeof zh, string> = {
   'version.dsh': 'DSH runtime',
   'action.check': 'Check now',
   'action.checking': 'Checking…',
+  'action.testNotify': 'Test notification',
+  'action.testNotifyBody': 'This is a test notification from DSH-Desktop.',
+  'action.testNotifyDone': 'Test notification sent ✓',
+  'action.testNotifySuppressed': 'Notification was suppressed (shown=false). Check notification permission.',
+  'action.testNotifyFailed': 'Failed to send test notification.',
+  'action.updateDsh': 'Update runtime',
+  'action.updatingDsh': 'Updating…',
+  'action.relaunch': 'Restart now',
+  'status.updating': 'Updating DSH runtime…',
+  'status.needsRelaunch': 'New runtime installed. Restart to apply.',
 }
 
 export function apply(ctx: ClientContext): void {

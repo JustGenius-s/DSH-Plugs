@@ -21,6 +21,12 @@ export interface DesktopUpdateState {
   app: DesktopUpdateInfo | null
   dsh: DesktopUpdateInfo | null
   checking: boolean
+  /** 正在执行运行时升级（pnpm add）。旧壳可能缺此字段，按 false 处理。 */
+  updatingDsh?: boolean
+  /** 更新进度/结果文案；空闲时为 null。 */
+  updateMessage?: string | null
+  /** 新运行时已装好，需 relaunch 才生效。 */
+  needsRelaunch?: boolean
   config: DesktopUpdateConfig
   versions: { app: string; dsh: string | null }
 }
