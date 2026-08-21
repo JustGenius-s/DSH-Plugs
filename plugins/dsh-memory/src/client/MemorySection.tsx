@@ -1,7 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Button,
+  IconPlusOutline16,
+  IconSearchOutline16,
+  Input,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import { SettingsSection, StatusText, Switch, Tag } from '@just-genius/dsh-plugin-ui'
+import {
+  AddButton,
+  ExpandableRow,
+  FailureRow,
+  InlineNotice,
+  RowList,
+  SettingsSection,
+  StatusText,
+  Switch,
+  Tag,
+} from '@just-genius/dsh-plugin-ui'
 import {
   ENTRY_PATH,
   LIST_PATH,
@@ -36,6 +51,7 @@ export function MemorySection({ t }: MemorySectionProps) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorMode>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const [draftContent, setDraftContent] = useState('')
@@ -75,6 +91,7 @@ export function MemorySection({ t }: MemorySectionProps) {
     setDraftContent('')
     setConfirmId(null)
     setError(null)
+    setExpanded(null)
   }
 
   const openEdit = (entry: MemoryEntry) => {
@@ -83,6 +100,13 @@ export function MemorySection({ t }: MemorySectionProps) {
     setDraftContent(entry.content)
     setConfirmId(null)
     setError(null)
+    setExpanded(entry.id)
+  }
+
+  const closeEditor = () => {
+    setEditor(null)
+    setDraftTitle('')
+    setDraftContent('')
   }
 
   const saveEditor = async () => {
@@ -96,8 +120,9 @@ export function MemorySection({ t }: MemorySectionProps) {
       const action: MemoryEntryAction = editor.kind === 'create'
         ? { action: 'create', title, content, enabled: true }
         : { action: 'update', id: editor.id, title, content }
-      await postJson<MemoryEntry>(ENTRY_PATH, action)
-      setEditor(null)
+      const saved = await postJson<MemoryEntry>(ENTRY_PATH, action)
+      closeEditor()
+      setExpanded(saved.id)
       await reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : translate('saveFailed'))
@@ -125,7 +150,8 @@ export function MemorySection({ t }: MemorySectionProps) {
     try {
       await postJson<{ deleted: true; id: string }>(ENTRY_PATH, { action: 'delete', id })
       setConfirmId(null)
-      if (editor?.kind === 'edit' && editor.id === id) setEditor(null)
+      if (editor?.kind === 'edit' && editor.id === id) closeEditor()
+      if (expanded === id) setExpanded(null)
       await reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : translate('saveFailed'))
@@ -136,121 +162,244 @@ export function MemorySection({ t }: MemorySectionProps) {
 
   return (
     <SettingsSection busy={status === 'loading' || busy}>
-      <div className={styles.page}>
-        <StatusText>{translate('hint')}</StatusText>
-        {root !== '' && (
-          <p className={styles.root}>
-            {translate('root')}: <code>{root}</code>
-          </p>
-        )}
+      {status === 'loading' ? <StatusText>{translate('loading')}</StatusText> : null}
+      {status === 'error' ? (
+        <FailureRow>
+          <p role="alert">{error ?? translate('loadFailed')}</p>
+          <Button size="sm" variant="outline" onClick={() => void reload()}>
+            {translate('retry')}
+          </Button>
+        </FailureRow>
+      ) : null}
+      {status === 'ready' ? (
+        <>
+          <StatusText>{translate('hint')}</StatusText>
+          {root !== '' ? (
+            <p className={styles.root}>
+              {translate('root')}: <code>{root}</code>
+            </p>
+          ) : null}
 
-        <div className={styles.toolbar}>
-          <input
-            className={styles.search}
+          <Input
+            type="search"
+            icon={<IconSearchOutline16 aria-hidden="true" />}
             value={query}
             placeholder={translate('search')}
-            onChange={(event) => setQuery(event.target.value)}
+            aria-label={translate('search')}
+            onChange={(event) => setQuery(event.currentTarget.value)}
           />
-          <Button variant="primary" size="sm" disabled={busy || editor !== null} onClick={openCreate}>
-            {translate('add')}
-          </Button>
-        </div>
 
-        {status === 'loading' && <StatusText>{translate('loading')}</StatusText>}
-        {status === 'error' && error !== null && <p className={styles.feedback}>{error}</p>}
-        {status === 'ready' && entries.length === 0 && editor === null && (
-          <StatusText>{translate('empty')}</StatusText>
-        )}
-        {status === 'ready' && entries.length > 0 && filtered.length === 0 && (
-          <StatusText>{translate('emptySearch')}</StatusText>
-        )}
+          {editor?.kind === 'create' ? (
+            <MemoryEditor
+              titleId="dsh-memory-create-title"
+              contentId="dsh-memory-create-content"
+              draftTitle={draftTitle}
+              draftContent={draftContent}
+              busy={busy}
+              error={error}
+              translate={translate}
+              onTitleChange={setDraftTitle}
+              onContentChange={setDraftContent}
+              onCancel={closeEditor}
+              onSave={() => void saveEditor()}
+            />
+          ) : (
+            <AddButton
+              disabled={busy}
+              icon={<IconPlusOutline16 aria-hidden="true" />}
+              onClick={openCreate}
+            >
+              {translate('add')}
+            </AddButton>
+          )}
 
-        {editor !== null && (
-          <section className={styles.editor}>
-            <div className={styles.fields}>
-              <label className={styles.label} htmlFor="dsh-memory-title">{translate('title')}</label>
-              <input
-                id="dsh-memory-title"
-                className={styles.input}
-                value={draftTitle}
-                disabled={busy}
-                onChange={(event) => setDraftTitle(event.target.value)}
-              />
-              <label className={styles.label} htmlFor="dsh-memory-content">{translate('content')}</label>
-              <textarea
-                id="dsh-memory-content"
-                className={styles.textarea}
-                value={draftContent}
-                disabled={busy}
-                onChange={(event) => setDraftContent(event.target.value)}
-              />
-            </div>
-            <div className={styles.editorFooter}>
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => setEditor(null)}>
-                {translate('cancel')}
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={busy || draftTitle.trim() === '' || draftContent.trim() === ''}
-                onClick={() => void saveEditor()}
-              >
-                {busy ? translate('saving') : translate('save')}
-              </Button>
-            </div>
-            {error !== null && <p className={styles.feedback}>{error}</p>}
-          </section>
-        )}
+          {entries.length === 0 && editor === null ? (
+            <StatusText>{translate('empty')}</StatusText>
+          ) : null}
+          {entries.length > 0 && filtered.length === 0 ? (
+            <StatusText>{translate('emptySearch')}</StatusText>
+          ) : null}
 
-        <div className={styles.list}>
-          {filtered.map((entry) => (
-            <article key={entry.id} className={styles.row}>
-              <div className={styles.rowHead}>
-                <div>
-                  <div className={styles.rowTitle}>{entry.title}</div>
-                  <div className={styles.rowMeta}>
-                    <Tag variant="text" tone={entry.enabled ? 'strong' : undefined}>
-                      {entry.enabled ? translate('enabled') : translate('disabled')}
-                    </Tag>
-                    <Tag variant="text">
-                      {entry.source === 'ai' ? translate('source.ai') : translate('source.manual')}
-                    </Tag>
-                    <span>{new Date(entry.updatedAt).toLocaleString()}</span>
-                  </div>
-                </div>
-                <Switch
-                  label={translate('enabled')}
-                  checked={entry.enabled}
-                  disabled={busy}
-                  onChange={(next) => void toggleEnabled(entry.id, next)}
-                />
-              </div>
-              <div className={styles.preview}>{summarize(entry.content, 180)}</div>
-              <div className={styles.rowActions}>
-                <Button variant="outline" size="sm" disabled={busy || editor !== null} onClick={() => openEdit(entry)}>
-                  {translate('edit')}
-                </Button>
-                {confirmId === entry.id ? (
-                  <>
-                    <span className={styles.feedback}>{translate('confirmDelete')}</span>
-                    <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirmId(null)}>
-                      {translate('cancel')}
-                    </Button>
-                    <Button variant="primary" size="sm" disabled={busy} onClick={() => void remove(entry.id)}>
-                      {translate('delete')}
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => setConfirmId(entry.id)}>
-                    {translate('delete')}
-                  </Button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
+          {error !== null && editor === null ? (
+            <InlineNotice kind="error" role="alert">{error}</InlineNotice>
+          ) : null}
+
+          {filtered.length > 0 ? (
+            <RowList>
+              {filtered.map((entry) => {
+                const open = expanded === entry.id
+                const editing = editor?.kind === 'edit' && editor.id === entry.id
+                return (
+                  <ExpandableRow
+                    key={entry.id}
+                    open={open}
+                    onToggle={() => {
+                      setExpanded((current) => current === entry.id ? null : entry.id)
+                      setConfirmId(null)
+                      if (editor?.kind === 'edit' && editor.id === entry.id) closeEditor()
+                    }}
+                    toggleLabel={`${open ? translate('collapse') : translate('expand')}: ${entry.title}`}
+                    name={entry.title}
+                    nameTitle={entry.title}
+                    summary={summarize(entry.content, 120)}
+                    summaryLines={2}
+                    meta={(
+                      <>
+                        <Tag variant="text">
+                          {entry.source === 'ai' ? translate('source.ai') : translate('source.manual')}
+                        </Tag>
+                        <Switch
+                          label={translate('enabled')}
+                          checked={entry.enabled}
+                          disabled={busy}
+                          onChange={(next) => void toggleEnabled(entry.id, next)}
+                        />
+                      </>
+                    )}
+                  >
+                    {editing ? (
+                      <MemoryEditor
+                        titleId={`dsh-memory-edit-title-${entry.id}`}
+                        contentId={`dsh-memory-edit-content-${entry.id}`}
+                        draftTitle={draftTitle}
+                        draftContent={draftContent}
+                        busy={busy}
+                        error={error}
+                        translate={translate}
+                        onTitleChange={setDraftTitle}
+                        onContentChange={setDraftContent}
+                        onCancel={closeEditor}
+                        onSave={() => void saveEditor()}
+                      />
+                    ) : (
+                      <>
+                        <pre className={styles.body}>{entry.content.trim()}</pre>
+                        <dl className={styles.details}>
+                          <dt>{translate('updated')}</dt>
+                          <dd>{new Date(entry.updatedAt).toLocaleString()}</dd>
+                          <dt>{translate('source')}</dt>
+                          <dd>
+                            {entry.source === 'ai'
+                              ? translate('source.ai')
+                              : translate('source.manual')}
+                          </dd>
+                        </dl>
+                        <div className={styles.actions}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => openEdit(entry)}
+                          >
+                            {translate('edit')}
+                          </Button>
+                          {confirmId === entry.id ? (
+                            <>
+                              <span className={styles.confirm}>{translate('confirmDelete')}</span>
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                disabled={busy}
+                                onClick={() => void remove(entry.id)}
+                              >
+                                {translate('delete')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => setConfirmId(null)}
+                              >
+                                {translate('cancel')}
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => setConfirmId(entry.id)}
+                            >
+                              {translate('delete')}
+                            </Button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </ExpandableRow>
+                )
+              })}
+            </RowList>
+          ) : null}
+        </>
+      ) : null}
     </SettingsSection>
+  )
+}
+
+function MemoryEditor(props: {
+  titleId: string
+  contentId: string
+  draftTitle: string
+  draftContent: string
+  busy: boolean
+  error: string | null
+  translate: (key: MemoryKey) => string
+  onTitleChange: (value: string) => void
+  onContentChange: (value: string) => void
+  onCancel: () => void
+  onSave: () => void
+}) {
+  const {
+    titleId,
+    contentId,
+    draftTitle,
+    draftContent,
+    busy,
+    error,
+    translate,
+    onTitleChange,
+    onContentChange,
+    onCancel,
+    onSave,
+  } = props
+
+  return (
+    <section className={styles.editor} aria-label={translate('add')}>
+      <div className={styles.field}>
+        <label className={styles.fieldLabel} htmlFor={titleId}>{translate('title')}</label>
+        <Input
+          id={titleId}
+          value={draftTitle}
+          disabled={busy}
+          onChange={(event) => onTitleChange(event.currentTarget.value)}
+        />
+      </div>
+      <div className={styles.field}>
+        <label className={styles.fieldLabel} htmlFor={contentId}>{translate('content')}</label>
+        <textarea
+          id={contentId}
+          className={styles.textarea}
+          value={draftContent}
+          disabled={busy}
+          onChange={(event) => onContentChange(event.currentTarget.value)}
+        />
+      </div>
+      <div className={styles.actions}>
+        <Button variant="outline" size="sm" disabled={busy} onClick={onCancel}>
+          {translate('cancel')}
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busy || draftTitle.trim() === '' || draftContent.trim() === ''}
+          onClick={onSave}
+        >
+          {busy ? translate('saving') : translate('save')}
+        </Button>
+      </div>
+      {error !== null ? <InlineNotice kind="error" role="alert">{error}</InlineNotice> : null}
+    </section>
   )
 }
 

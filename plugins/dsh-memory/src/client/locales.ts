@@ -11,12 +11,17 @@ export type MemoryKey =
   | 'save'
   | 'cancel'
   | 'saving'
+  | 'retry'
+  | 'expand'
+  | 'collapse'
   | 'title'
   | 'content'
   | 'enabled'
   | 'disabled'
+  | 'source'
   | 'source.manual'
   | 'source.ai'
+  | 'updated'
   | 'root'
   | 'loadFailed'
   | 'saveFailed'
@@ -39,12 +44,17 @@ export const zh: Record<MemoryKey, string> = {
   save: '保存',
   cancel: '取消',
   saving: '保存中…',
+  retry: '重试',
+  expand: '展开',
+  collapse: '收起',
   title: '标题',
   content: '内容（Markdown）',
   enabled: '启用',
   disabled: '停用',
+  source: '来源',
   'source.manual': '手动',
   'source.ai': 'AI',
+  updated: '更新时间',
   root: '存储目录',
   loadFailed: '读取失败',
   saveFailed: '保存失败',
@@ -68,12 +78,17 @@ export const en: Record<MemoryKey, string> = {
   save: 'Save',
   cancel: 'Cancel',
   saving: 'Saving…',
+  retry: 'Retry',
+  expand: 'Expand',
+  collapse: 'Collapse',
   title: 'Title',
   content: 'Content (Markdown)',
   enabled: 'Enabled',
   disabled: 'Off',
+  source: 'Source',
   'source.manual': 'Manual',
   'source.ai': 'AI',
+  updated: 'Updated',
   root: 'Storage folder',
   loadFailed: 'Failed to load',
   saveFailed: 'Failed to save',

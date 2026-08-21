@@ -1,149 +1,108 @@
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.search {
-  flex: 1 1 220px;
-  min-width: 160px;
-  border-radius: 10px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-specific-input-major, transparent);
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  padding: 8px 12px;
-  outline: none;
-}
+/* Memory settings: only page-specific rules. Section chrome, search Input,
+ * expandable rows, tags, notices come from @just-genius/dsh-plugin-ui and
+ * @deepseek-ai/dsh-client-ui-primitives. */
 
 .root {
+  margin: 0;
   font-size: 12px;
-  color: var(--dsw-alias-label-caption);
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
   word-break: break-all;
 }
 
 .root code {
-  font-size: 11px;
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.row {
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 14px;
-  background: var(--dsw-specific-input-major, transparent);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.rowHead {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.rowTitle {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 20px;
-  color: var(--dsw-alias-label-primary);
-}
-
-.rowMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-top: 4px;
   font-size: 12px;
-  color: var(--dsw-alias-label-caption);
-}
-
-.rowActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.preview {
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 4.5em;
-  overflow: hidden;
 }
 
 .editor {
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 14px;
-  background: var(--dsw-specific-input-major, transparent);
-  padding: 14px;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-module-platform);
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
-.fields {
+.field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.label {
+.fieldLabel {
   font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
   color: var(--dsw-alias-label-secondary);
 }
 
-.input,
 .textarea {
+  box-sizing: border-box;
   width: 100%;
-  border-radius: 10px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-primary, transparent);
-  color: var(--dsw-alias-label-primary);
+  min-height: 160px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
   font: inherit;
   font-size: 13px;
   line-height: 20px;
-  padding: 8px 10px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.textarea {
-  min-height: 180px;
-  resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  outline: none;
 }
 
-.editorFooter {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
+.textarea:focus {
+  border-color: var(--dsw-alias-brand-primary);
 }
 
-.feedback {
-  color: var(--dsw-alias-state-error-primary);
+.textarea:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.details dt {
+  color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
-  line-height: 16px;
+  line-height: 18px;
+}
+
+.details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.confirm {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
 }
