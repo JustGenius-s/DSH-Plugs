@@ -1,24 +1,24 @@
 # @just-genius/dsh-plugin-config
 
-Replaces the official read-only **Plugin list** tab in **Settings → Plugins** with a manageable inventory: grouped, labeled, and actionable.
+**Settings → 插件管理** as one tab: manage what is installed, then browse and install from [awesome-dsh-plugin](https://awesome-dsh-plugin.com/).
 
 ## Features
 
-- **Grouping** — plugins are grouped by **origin** (DSH built-in / marketplace / external) and **mount plane** (global host vs session / agent-preset).
-- **Actions** — **Disable** / **Enable** (writes `~/.dsh/profiles/web/cordis.patch.yml`) and **Uninstall** (`dsh plugin --profile web remove`) for profile-owned plugins.
-- **Collision flags** — short-name collisions between external/marketplace plugins and `@deepseek-ai/*` built-ins are called out.
-- **Safety rails** — core web-surface rows stay locked; session-plane tools parked for agent presets cannot be flipped back on from the host.
+- **Installed (collapsible, open by default)** — group by origin (built-in / marketplace / external) with the same funnel filter + tree hierarchy as the marketplace; **Disable** / **Enable** / **Uninstall** for profile-owned plugins.
+- **Marketplace** — awesome-dsh-plugin catalog only (no hardcoded DSH-Plugs source). Search, category filters, copy install command, one-click install.
+- **Shared top search** — filters both the installed list and the marketplace list.
+- **Safety rails** — core web-surface rows stay locked; session-plane preset tools are not toggled from the host.
 
 ## Design
 
 | Source | Role |
 | --- | --- |
-| `src/index.ts` | Host entry: serves the inventory and mutation endpoints |
-| `src/inventory.ts`, `src/classify.ts` | Loader-row inventory and origin/plane classification |
-| `src/actions.ts`, `src/profile.ts` | Disable/enable/uninstall mutations against the profile |
-| `src/client/index.ts`, `src/client/ManageTab.tsx` | The replacement tab UI (CSS Modules for styling) |
+| `src/index.ts` | Host: inventory / action / catalog / install routes |
+| `src/inventory.ts`, `src/classify.ts`, `src/actions.ts`, `src/profile.ts` | Installed inventory + profile mutations |
+| `src/market/*` | Awesome catalog fetch, install validation |
+| `src/client/PluginsTab.tsx` | Single tab UI (search + installed + market) |
 
-The stock tab dumps every Loader row into one searchable grid; this plugin keeps the same tab slot but layers classification and mutations on top, replacing `ui-settings-plugin-inventory` via cordis patch.
+Replaces `ui-settings-plugin-inventory` via cordis patch.
 
 ## Develop
 
@@ -34,7 +34,7 @@ pnpm build
 dsh plugin --profile web add ./plugins/dsh-plugin-config
 ```
 
-Restart DSH web, then open **Settings → Plugins → Plugin list**.
+Restart DSH web, then open **Settings → 插件管理**.
 
 ## Uninstall
 

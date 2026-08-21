@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { Catalog, CatalogPlugin } from './catalog.ts'
+import type { Catalog, CatalogPlugin } from './types.ts'
 
 interface ProfilePackageJson {
   dependencies?: Record<string, string>
@@ -64,6 +64,10 @@ export function pluginTokens(plugin: CatalogPlugin): string[] {
     plugin.spec,
   ]
   if (plugin.packageName) tokens.push(plugin.packageName)
+  for (const method of plugin.methods) {
+    tokens.push(method.spec)
+    if (method.kind === 'local') tokens.push(`link:${method.spec}`)
+  }
   return tokens.map((value) => value.toLowerCase()).filter((value) => value !== '')
 }
 

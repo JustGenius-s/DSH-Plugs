@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-plugin-config",
-  "description": "Settings → Plugins manager: group by mount plane and origin, then disable or uninstall mounted plugins",
+  "description": "Settings → Plugins: installed inventory, npm updates, and the awesome-dsh-plugin marketplace in one tab",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public"
@@ -24,6 +24,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
@@ -46,6 +47,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
@@ -57,6 +59,7 @@
   "devDependencies": {
     "@just-genius/dsh-plugin-ui": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-remotes": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",

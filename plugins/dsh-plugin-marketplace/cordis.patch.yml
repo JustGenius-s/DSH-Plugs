@@ -1,9 +1,0 @@
-# Bundle patch for @just-genius/dsh-plugin-marketplace.
-#
-# Inserts the plugin's loader row. The host half registers same-origin
-# catalog/install routes; the browser half contributes a tab to the
-# official Plugins settings section.
-
-- insert:
-    - id: dsh-plugin-marketplace
-      name: '@just-genius/dsh-plugin-marketplace'

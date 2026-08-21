@@ -1,6 +1,8 @@
 /** Same-origin routes registered by the host half. */
 export const INVENTORY_PATH = '/dsh-plugin-config/inventory'
 export const ACTION_PATH = '/dsh-plugin-config/action'
+export const OUTDATED_PATH = '/dsh-plugin-config/outdated'
+export const UPDATE_PATH = '/dsh-plugin-config/update'
 
 export const SELF_ID = 'dsh-plugin-config'
 export const SELF_PACKAGE = '@just-genius/dsh-plugin-config'
@@ -35,6 +37,28 @@ export interface ManagedPlugin {
 
 export interface InventorySnapshot {
   plugins: ManagedPlugin[]
+}
+
+/** One npm-registry profile dependency that can be bumped. */
+export interface PluginUpdate {
+  packageName: string
+  shortName: string
+  current: string
+  wanted: string
+  latest: string
+}
+
+export interface OutdatedSnapshot {
+  updates: PluginUpdate[]
+  checkedAt: string
+}
+
+export interface UpdateOutcome {
+  ok: boolean
+  packageName?: string
+  needsRestart?: boolean
+  error?: string
+  detail?: string
 }
 
 export interface ActionRequest {

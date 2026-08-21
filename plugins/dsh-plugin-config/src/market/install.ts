@@ -2,19 +2,11 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { catalogEntry, GITHUB_SPEC } from './catalog.ts'
-import type { ProfilePatch } from './dsh-plugs.ts'
-import { loadMergedCatalog } from './host-catalog.ts'
+import { catalogEntry, classifyInstallSpec } from './catalog.ts'
+import type { InstallOutcome, ProfilePatch } from './types.ts'
+import { loadMarketplaceCatalog } from './host-catalog.ts'
 
 const INSTALL_MS = 180_000
-
-export interface InstallResult {
-  ok: boolean
-  spec?: string
-  needsRestart?: boolean
-  error?: string
-  detail?: string
-}
 
 export function resolveDshBin(): string {
   if (process.env.DSH_BIN) return process.env.DSH_BIN
@@ -30,33 +22,50 @@ export function resolveDshBin(): string {
   return 'dsh'
 }
 
-export async function installCatalogSpec(spec: string): Promise<InstallResult> {
+export async function installCatalogSpec(spec: string): Promise<InstallOutcome> {
+  const trimmed = spec.trim()
+  if (trimmed === '') {
+    return { ok: false, error: 'Missing install spec.' }
+  }
+
   let catalog
   try {
-    catalog = await loadMergedCatalog()
+    catalog = await loadMarketplaceCatalog(true)
   } catch (error) {
-    return { ok: false, error: 'Could not refresh the catalog to verify this plugin.', detail: String(error) }
+    return {
+      ok: false,
+      error: 'Could not refresh the catalog to verify this plugin.',
+      detail: String(error),
+    }
   }
-  const entry = catalogEntry(catalog, spec)
+  const entry = catalogEntry(catalog, trimmed)
   if (entry === undefined) {
     return { ok: false, error: 'That plugin is not in the current marketplace catalog.' }
   }
-  if (spec.startsWith('/')) {
-    if (!existsSync(join(spec, 'package.json'))) {
-      return { ok: false, spec, error: 'Local plugin folder is missing package.json.' }
+
+  const kind = classifyInstallSpec(trimmed)
+  if (kind === null) {
+    return {
+      ok: false,
+      error: 'Unsupported install spec. Use npm package, github:, local path, or https tarball URL.',
     }
-  } else if (!GITHUB_SPEC.test(spec)) {
-    return { ok: false, error: 'Only catalog github: or local-path specs can be installed.' }
+  }
+  if (kind === 'local' && !existsSync(join(trimmed, 'package.json'))) {
+    return { ok: false, spec: trimmed, error: 'Local plugin folder is missing package.json.' }
   }
 
   const bin = resolveDshBin()
   try {
-    const { code, stdout, stderr } = await run(bin, ['plugin', '--profile', 'web', 'add', spec], INSTALL_MS)
+    const { code, stdout, stderr } = await run(
+      bin,
+      ['plugin', '--profile', 'web', 'add', trimmed],
+      INSTALL_MS,
+    )
     const detail = [stdout, stderr].filter(Boolean).join('\n').trim()
     if (code !== 0) {
       return {
         ok: false,
-        spec,
+        spec: trimmed,
         error: `dsh plugin add exited ${code}.`,
         detail: detail.slice(0, 4000),
       }
@@ -64,9 +73,9 @@ export async function installCatalogSpec(spec: string): Promise<InstallResult> {
     if (entry.profilePatches && entry.profilePatches.length > 0) {
       applyProfilePatches(entry.profilePatches)
     }
-    return { ok: true, spec, needsRestart: true, detail: detail.slice(0, 4000) }
+    return { ok: true, spec: trimmed, needsRestart: true, detail: detail.slice(0, 4000) }
   } catch (error) {
-    return { ok: false, spec, error: 'Failed to run dsh plugin add.', detail: String(error) }
+    return { ok: false, spec: trimmed, error: 'Failed to run dsh plugin add.', detail: String(error) }
   }
 }
 

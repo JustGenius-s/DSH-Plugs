@@ -1,0 +1,296 @@
+/* Unified Plugins tab: installed + marketplace. Shared chrome comes from
+ * @just-genius/dsh-plugin-ui; only plugin-specific rules remain here. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.market {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.iconMenu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  line-height: 0;
+  flex: none;
+}
+
+.category {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.repo {
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  line-height: 18px;
+  text-decoration: none;
+  width: fit-content;
+}
+
+.repo:hover {
+  text-decoration: underline;
+}
+
+.protect,
+.conflict {
+  margin: 0;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.details dt {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.details code {
+  font-size: 12px;
+}
+
+.rowMeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Keep Menu out of row-meta's flex gap so single/multi share the same right edge. */
+.installSplitWrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  line-height: 0;
+}
+
+/* Match Button variant=primary size=sm (--dsw-alias-button-primary-*). */
+.installSplit {
+  flex: none;
+  display: inline-flex;
+  align-items: stretch;
+  height: 28px;
+  min-width: 72px;
+  border-radius: 14px;
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.installSplitMain {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: none;
+  border-radius: 14px 0 0 14px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.installSplitMore {
+  box-sizing: border-box;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-left: 1px solid color-mix(in srgb, var(--dsw-alias-label-primary-foreground) 25%, transparent);
+  border-radius: 0 14px 14px 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 0;
+  appearance: none;
+}
+
+button.installSplitMore:not(:disabled) {
+  cursor: pointer;
+}
+
+button.installSplitMore:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.installSplitIcon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  line-height: 0;
+}
+
+/* Multi-method: default shows method icon; hover / open swaps to chevron. */
+.installSplitMethodIcon,
+.installSplitChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.installSplitChevron {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+
+button.installSplitMore:hover:not(:disabled) .installSplitMethodIcon,
+button.installSplitMore:focus-visible:not(:disabled) .installSplitMethodIcon,
+button.installSplitMore[data-menu-open='true'] .installSplitMethodIcon {
+  opacity: 0;
+}
+
+button.installSplitMore:hover:not(:disabled) .installSplitChevron,
+button.installSplitMore:focus-visible:not(:disabled) .installSplitChevron,
+button.installSplitMore[data-menu-open='true'] .installSplitChevron {
+  opacity: 1;
+}
+
+.installSplitMain:hover:not(:disabled),
+button.installSplitMore:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.installSplitMain:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Whole control installing: dim the icon half too. */
+.installSplit:has(.installSplitMain:disabled) .installSplitMore {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.installSplitMain:focus-visible,
+button.installSplitMore:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.installMenuRoot {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.installMenuAnchor {
+  display: none;
+}
+
+.methodStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Dense text danger control matching ModelsSection provider-row delete. */
+.dangerButton {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+.dangerButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.dangerButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-error-primary);
+  outline-offset: 1px;
+}
+
+.deleteDialog {
+  width: min(480px, 100%);
+}
+
+.deleteConfirm:not(:disabled) {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.deleteConfirm:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+.conflict {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.protect {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}

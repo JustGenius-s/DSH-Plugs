@@ -1,4 +1,4 @@
-import type { CatalogPlugin } from '../catalog.ts'
+import type { CatalogPlugin, InstallMethod } from '../market/types.ts'
 
 export interface InventoryEntry {
   entryId: string
@@ -6,8 +6,18 @@ export interface InventoryEntry {
   enabled: boolean
 }
 
+export function methodsOf(plugin: CatalogPlugin): InstallMethod[] {
+  if (plugin.methods.length > 0) return plugin.methods
+  if (plugin.spec === '') return []
+  return [{
+    kind: 'npm',
+    spec: plugin.spec,
+    command: plugin.install || `dsh plugin --profile web add ${plugin.spec}`,
+  }]
+}
+
 export function specOf(plugin: CatalogPlugin): string {
-  return plugin.spec
+  return methodsOf(plugin)[0]?.spec ?? plugin.spec
 }
 
 export function isInstalled(plugin: CatalogPlugin, entries: readonly InventoryEntry[]): boolean {
@@ -28,7 +38,10 @@ function pluginNeedles(plugin: CatalogPlugin): Set<string> {
   add(needles, plugin.spec)
   add(needles, `${plugin.owner}/${plugin.name}`)
   add(needles, `github:${plugin.owner}/${plugin.name}`)
-  if (plugin.spec.startsWith('/')) add(needles, `link:${plugin.spec}`)
+  for (const method of methodsOf(plugin)) {
+    add(needles, method.spec)
+    if (method.kind === 'local') add(needles, `link:${method.spec}`)
+  }
   return needles
 }
 

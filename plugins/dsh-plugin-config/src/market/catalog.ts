@@ -1,25 +1,21 @@
 import {
   AWESOME_SOURCE,
-  DSH_PLUGS_PLUGINS,
-  DSH_PLUGS_SOURCE,
-  DSH_PLUGS_URL,
-  githubPathSpec,
-  pluginUrl,
+  CATALOG_URL,
+  GITHUB_SPEC,
+  NPM_SPEC,
+  TARBALL_SPEC,
+  type Catalog,
+  type CatalogPlugin,
+  type InstallMethod,
+  type InstallMethodKind,
+  type LocalizedText,
   type ProfilePatch,
-} from './dsh-plugs.ts'
-
-/** Public registry published by https://awesome-dsh-plugin.com */
-export const CATALOG_URL = 'https://awesome-dsh-plugin.com/plugins.json'
-
-/** Same-origin routes registered by the host half. */
-export const CATALOG_PATH = '/dsh-plugin-marketplace/catalog'
-export const INSTALL_PATH = '/dsh-plugin-marketplace/install'
-
-/** `dsh plugin add github:owner/repo` or a monorepo `#path:` spec. */
-export const GITHUB_SPEC = /^github:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#[A-Za-z0-9._/&=:-]+)?$/
+} from './types.ts'
 
 const CACHE_MS = 10 * 60 * 1000
 const FETCH_MS = 15_000
+
+const METHOD_PRIORITY: InstallMethodKind[] = ['npm', 'github', 'tarball', 'local']
 
 export const CATEGORY_LABELS: Record<string, LocalizedText> = {
   ui: { en: 'UI Enhancements', zh: 'UI 增强' },
@@ -32,76 +28,101 @@ export const CATEGORY_LABELS: Record<string, LocalizedText> = {
 }
 
 export const SOURCE_LABELS: Record<string, LocalizedText> = {
-  [DSH_PLUGS_SOURCE]: { en: 'DSH-Plugs', zh: 'DSH-Plugs' },
   [AWESOME_SOURCE]: { en: 'awesome-dsh-plugin', zh: 'awesome-dsh-plugin' },
-}
-
-export interface LocalizedText {
-  en: string
-  zh: string
-}
-
-export interface CatalogPlugin {
-  name: string
-  packageName?: string
-  owner: string
-  url: string
-  category: string
-  description: LocalizedText
-  install: string
-  spec: string
-  source: string
-  added: string
-  installed?: boolean
-  profilePatches?: ProfilePatch[]
-}
-
-export interface Catalog {
-  name: string
-  url: string
-  source: string
-  updated: string
-  count: number
-  categories: Record<string, LocalizedText>
-  sources: Record<string, LocalizedText>
-  plugins: CatalogPlugin[]
 }
 
 let remoteCache: { at: number; catalog: Catalog } | null = null
 
+/** Pull the argument after `dsh plugin … add` from an install command. */
+export function addArgFromInstall(install: string): string | null {
+  const match = /\badd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*$/i.exec(install.trim())
+  if (!match) return null
+  return (match[1] ?? match[2] ?? match[3] ?? '').trim() || null
+}
+
+export function classifyInstallSpec(spec: string): InstallMethodKind | null {
+  const trimmed = spec.trim()
+  if (trimmed === '') return null
+  if (GITHUB_SPEC.test(trimmed)) return 'github'
+  if (trimmed.startsWith('/')) return 'local'
+  if (/^https?:\/\//i.test(trimmed)) return TARBALL_SPEC.test(trimmed) ? 'tarball' : null
+  if (NPM_SPEC.test(trimmed)) return 'npm'
+  return null
+}
+
+export function commandForSpec(spec: string): string {
+  const quoted = /[\s"]/.test(spec) ? `"${spec.replace(/"/g, '\\"')}"` : spec
+  return `dsh plugin --profile web add ${quoted}`
+}
+
+/**
+ * Collect every install target for one catalog row.
+ * Priority for the default: npm → github → tarball → local.
+ */
+export function collectInstallMethods(row: {
+  install: string
+  npm?: string
+  tarball?: string
+  spec?: string
+  owner?: string
+  name?: string
+  url?: string
+}): InstallMethod[] {
+  const bySpec = new Map<string, InstallMethod>()
+
+  const push = (raw: string | undefined | null) => {
+    if (raw === undefined || raw === null) return
+    const spec = raw.trim()
+    if (spec === '' || bySpec.has(spec)) return
+    const kind = classifyInstallSpec(spec)
+    if (kind === null) return
+    bySpec.set(spec, { kind, spec, command: commandForSpec(spec) })
+  }
+
+  push(row.npm)
+  push(row.spec)
+  push(addArgFromInstall(row.install))
+  push(row.tarball)
+
+  // Offer github:owner/repo when the catalog points at a GitHub repo page,
+  // even if the preferred install command is an npm package name.
+  const githubFromUrl = githubSpecFromUrl(row.url)
+  if (githubFromUrl) push(githubFromUrl)
+  else if (row.owner && row.name) push(`github:${row.owner}/${row.name}`)
+
+  const methods = [...bySpec.values()]
+  methods.sort((left, right) => (
+    METHOD_PRIORITY.indexOf(left.kind) - METHOD_PRIORITY.indexOf(right.kind)
+  ))
+  return methods
+}
+
+function githubSpecFromUrl(url: string | undefined): string | null {
+  if (url === undefined || url === '') return null
+  const match = /^https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:\/|$)/i
+    .exec(url.trim())
+  if (!match) return null
+  return `github:${match[1]}/${match[2]}`
+}
+
+/** @deprecated Prefer {@link collectInstallMethods}; kept for call sites that only need one. */
 export function specFromInstall(install: string): string | null {
-  const github = /github:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#[^\s]+)?/.exec(install)
-  if (github) return github[0]
-  const absolute = /(?:^|\s)(\/[^\s]+)$/.exec(install)
-  return absolute?.[1] ?? null
+  return addArgFromInstall(install)
 }
 
 export function catalogHasSpec(catalog: Catalog, spec: string): boolean {
-  return catalog.plugins.some((plugin) => plugin.spec === spec)
+  return catalog.plugins.some((plugin) => pluginMethods(plugin).some((method) => method.spec === spec))
 }
 
 export function catalogEntry(catalog: Catalog, spec: string): CatalogPlugin | undefined {
-  return catalog.plugins.find((plugin) => plugin.spec === spec)
+  return catalog.plugins.find((plugin) => pluginMethods(plugin).some((method) => method.spec === spec))
 }
 
-/** GitHub `#path:` entries for this monorepo — used when the Host scan is unavailable. */
-export function dshPlugsRemotePlugins(): CatalogPlugin[] {
-  return DSH_PLUGS_PLUGINS.map((def) => {
-    const spec = githubPathSpec(def.folder)
-    return {
-      name: def.folder,
-      packageName: def.packageName,
-      owner: 'Rory-X',
-      url: pluginUrl(def.folder),
-      category: def.category,
-      description: def.description,
-      install: `dsh plugin --profile web add ${spec}`,
-      spec,
-      source: DSH_PLUGS_SOURCE,
-      added: '',
-      profilePatches: def.profilePatches,
-    }
-  })
+function pluginMethods(plugin: CatalogPlugin): InstallMethod[] {
+  if (plugin.methods.length > 0) return plugin.methods
+  if (plugin.spec === '') return []
+  const kind = classifyInstallSpec(plugin.spec) ?? 'npm'
+  return [{ kind, spec: plugin.spec, command: plugin.install || commandForSpec(plugin.spec) }]
 }
 
 function sourcesFromPlugins(
@@ -131,19 +152,42 @@ export function parseCatalog(value: unknown): Catalog {
     if (typeof row.name !== 'string' || typeof row.owner !== 'string') continue
     if (typeof row.url !== 'string' || typeof row.install !== 'string') continue
     if (typeof desc.en !== 'string' || typeof desc.zh !== 'string') continue
-    const spec = typeof row.spec === 'string' && row.spec !== ''
-      ? row.spec
-      : specFromInstall(row.install) ?? ''
-    if (spec === '') continue
+
+    const methods = collectInstallMethods({
+      install: row.install,
+      npm: typeof row.npm === 'string' ? row.npm : undefined,
+      tarball: typeof row.tarball === 'string' ? row.tarball : undefined,
+      spec: typeof row.spec === 'string' ? row.spec : undefined,
+      owner: row.owner,
+      name: row.name,
+      url: row.url,
+    })
+    if (methods.length === 0) continue
+
+    // Prefer the install command's own target when it is one of the methods;
+    // otherwise fall back to priority order (npm → github → tarball → local).
+    const installArg = addArgFromInstall(row.install)
+    const preferred = (installArg !== null
+      ? methods.find((method) => method.spec === installArg)
+      : undefined) ?? methods[0]!
+    const packageName = typeof row.packageName === 'string'
+      ? row.packageName
+      : typeof row.npm === 'string'
+        ? row.npm
+        : preferred.kind === 'npm'
+          ? preferred.spec
+          : undefined
+
     plugins.push({
       name: row.name,
-      packageName: typeof row.packageName === 'string' ? row.packageName : undefined,
+      packageName,
       owner: row.owner,
       url: row.url,
       category: typeof row.category === 'string' ? row.category : 'tools',
       description: { en: desc.en, zh: desc.zh },
-      install: row.install,
-      spec,
+      install: preferred.command,
+      spec: preferred.spec,
+      methods,
       source: typeof row.source === 'string' ? row.source : AWESOME_SOURCE,
       added: typeof row.added === 'string' ? row.added : '',
       installed: row.installed === true,
@@ -165,9 +209,11 @@ export function parseCatalog(value: unknown): Catalog {
     }
   }
   return {
-    name: typeof raw.name === 'string' ? raw.name : 'dsh-plugin-marketplace',
+    name: typeof raw.name === 'string' ? raw.name : 'awesome-dsh-plugin',
     url: typeof raw.url === 'string' ? raw.url : 'https://awesome-dsh-plugin.com',
-    source: typeof raw.source === 'string' ? raw.source : DSH_PLUGS_URL,
+    source: typeof raw.source === 'string'
+      ? raw.source
+      : 'https://github.com/awesome-dsh-plugin/awesome-dsh-plugin',
     updated: typeof raw.updated === 'string' ? raw.updated : '',
     count: plugins.length,
     categories,
@@ -176,13 +222,7 @@ export function parseCatalog(value: unknown): Catalog {
   }
 }
 
-/** Host-local entries win; otherwise attach this repo's GitHub `#path:` specs. */
-export function ensureDshPlugs(catalog: Catalog): Catalog {
-  if (catalog.plugins.some((plugin) => plugin.source === DSH_PLUGS_SOURCE)) return catalog
-  return mergeCatalogs(dshPlugsRemotePlugins(), catalog)
-}
-
-export function emptyRemoteCatalog(): Catalog {
+export function emptyCatalog(): Catalog {
   return {
     name: 'awesome-dsh-plugin',
     url: 'https://awesome-dsh-plugin.com',
@@ -195,32 +235,6 @@ export function emptyRemoteCatalog(): Catalog {
   }
 }
 
-export function mergeCatalogs(local: CatalogPlugin[], remote: Catalog): Catalog {
-  const seen = new Set<string>()
-  const plugins: CatalogPlugin[] = []
-  for (const plugin of [...local, ...remote.plugins]) {
-    const key = (plugin.packageName ?? plugin.name).toLowerCase()
-    if (seen.has(key)) continue
-    seen.add(key)
-    plugins.push(plugin)
-  }
-  const sources: Record<string, LocalizedText> = {}
-  for (const plugin of plugins) {
-    const label = SOURCE_LABELS[plugin.source] ?? { en: plugin.source, zh: plugin.source }
-    sources[plugin.source] = label
-  }
-  return {
-    name: 'dsh-plugin-marketplace',
-    url: remote.url,
-    source: DSH_PLUGS_URL,
-    updated: remote.updated,
-    count: plugins.length,
-    categories: { ...CATEGORY_LABELS, ...remote.categories },
-    sources,
-    plugins,
-  }
-}
-
 export async function loadRemoteCatalog(force = false): Promise<Catalog> {
   const now = Date.now()
   if (!force && remoteCache && now - remoteCache.at < CACHE_MS) return remoteCache.catalog
@@ -230,6 +244,19 @@ export async function loadRemoteCatalog(force = false): Promise<Catalog> {
   }
   remoteCache = { at: now, catalog }
   return catalog
+}
+
+/** Package names from the remote catalog — used to classify inventory origin. */
+export function catalogPackageNames(catalog: Catalog): Set<string> {
+  const names = new Set<string>()
+  for (const plugin of catalog.plugins) {
+    if (plugin.packageName) names.add(plugin.packageName.toLowerCase())
+    names.add(plugin.name.toLowerCase())
+    for (const method of plugin.methods) {
+      if (method.kind === 'npm') names.add(method.spec.toLowerCase())
+    }
+  }
+  return names
 }
 
 function asLocalized(value: unknown): LocalizedText | null {

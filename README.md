@@ -32,11 +32,7 @@ Replaces the official Models settings page (fork of `ui-settings-models`) to add
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
-Replaces the official read-only **Plugin list** tab. Plugins are grouped by origin (built-in / marketplace / external) and mount plane (global vs session), and profile plugins can be disabled or uninstalled from the UI.
-
-### [@just-genius/dsh-plugin-marketplace](plugins/dsh-plugin-marketplace)
-
-Adds a **Marketplace** tab to **Settings → Plugins**. Browses this repo plus the [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) catalog, marks already-installed plugins, and can copy or run the catalog install command (restart required).
+**Settings → 插件管理** in one tab: collapsible installed inventory (group by origin / mount plane, enable·disable·uninstall) plus the [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) marketplace. Shared top search. Replaces the official read-only Plugin list.
 
 ### [@just-genius/dsh-wechat-chat](plugins/dsh-wechat-chat)
 
