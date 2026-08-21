@@ -1,0 +1,8 @@
+# Bundle patch for @just-genius/dsh-sync.
+#
+# Host half owns GitHub Device Flow auth, secret Gist read/write, and
+# /dsh-sync/* HTTP routes. Browser half mounts Settings → Sync.
+
+- insert:
+    - id: dsh-sync
+      name: '@just-genius/dsh-sync'
