@@ -192,12 +192,18 @@ export function GitChangesView(props: GitChangesViewProps) {
     })
   }
 
-  // Progress label inside the commit button while a commit action runs.
+  // Loading label inside the commit button while a commit/push/pull action
+  // runs. Share the button between the commit variants and the standalone
+  // remote actions that live in the overflow menu: the button is the only
+  // always-visible action surface in the toolbar, so the spinner reads there
+  // even when the menu that launched `push`/`pull` has closed.
   const commitProgress = busyAction === 'commit' || busyAction === 'commit-amend'
     ? t('gitGraph.committing')
-    : busyAction === 'commit-push' || busyAction === 'commit-push-amend'
+    : busyAction === 'commit-push' || busyAction === 'commit-push-amend' || busyAction === 'push'
       ? t('gitGraph.pushing')
-      : undefined
+      : busyAction === 'pull'
+        ? t('gitGraph.pulling')
+        : undefined
 
   const generateMessage = async (): Promise<void> => {
     if (generatingRef.current || cwd === undefined || cwd.length === 0) return
