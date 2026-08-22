@@ -45,20 +45,20 @@ const FILES_CSS = `
 .dsh-files-code-line{display:flex;min-height:21px;padding-right:8px;white-space:pre}
 .dsh-files-code-line:hover{background:var(--dsw-alias-interactive-bg-hover)}
 /* The gutter is sticky and opaque: code scrolls horizontally UNDER it. The
-   background must be solid — the panel sits on --dsw-alias-bg-base, and the
+   background must be solid — the panel sits on --dsw-specific-sidebar-fill, and the
    translucent hover tint is composited over it with a gradient layer so the
    gutter never shows the text sliding beneath. */
-.dsh-files-code-ln{position:sticky;left:0;z-index:1;flex:none;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-alias-bg-base)}
-.dsh-files-code-line:hover .dsh-files-code-ln{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-alias-bg-base)}
+.dsh-files-code-ln{position:sticky;left:0;z-index:1;flex:none;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-specific-sidebar-fill)}
+.dsh-files-code-line:hover .dsh-files-code-ln{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-code-text{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-files-diff-row{display:flex;min-height:21px;padding-right:8px;white-space:pre}
 /* Same sticky trick for the diff gutter (old ln + new ln + sign ride one
    pinned wrapper); tinted rows composite their tint over the panel base so
    the gutter matches the row while staying opaque. */
-.dsh-files-diff-gutter{position:sticky;left:0;z-index:1;flex:none;display:flex;background:var(--dsw-alias-bg-base)}
-.dsh-files-diff-row.is-hunk .dsh-files-diff-gutter{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-alias-bg-base)}
-.dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(31,122,55,.12),rgba(31,122,55,.12)),var(--dsw-alias-bg-base)}
-.dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(248,81,73,.12),rgba(248,81,73,.12)),var(--dsw-alias-bg-base)}
+.dsh-files-diff-gutter{position:sticky;left:0;z-index:1;flex:none;display:flex;background:var(--dsw-specific-sidebar-fill)}
+.dsh-files-diff-row.is-hunk .dsh-files-diff-gutter{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-specific-sidebar-fill)}
+.dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(31,122,55,.12),rgba(31,122,55,.12)),var(--dsw-specific-sidebar-fill)}
+.dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(248,81,73,.12),rgba(248,81,73,.12)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-diff-ln{flex:none;padding:0 6px 0 8px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none}
 .dsh-files-diff-sign{flex:none;width:14px;text-align:center;user-select:none}
 .dsh-files-diff-text{flex:1;min-width:0}
@@ -87,8 +87,8 @@ body[data-ds-dark-theme] .dsh-files-status-badge.is-untracked{background:rgba(86
 body[data-ds-dark-theme] .dsh-files-status-badge.is-conflicted{background:rgba(198,120,221,.18);color:#c678dd}
 body[data-ds-dark-theme] .dsh-files-diff-row.is-add{color:#98c379;background:rgba(152,195,121,.12)}
 body[data-ds-dark-theme] .dsh-files-diff-row.is-del{color:#e06c75;background:rgba(224,108,117,.12)}
-body[data-ds-dark-theme] .dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(152,195,121,.12),rgba(152,195,121,.12)),var(--dsw-alias-bg-base)}
-body[data-ds-dark-theme] .dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(224,108,117,.12),rgba(224,108,117,.12)),var(--dsw-alias-bg-base)}
+body[data-ds-dark-theme] .dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(152,195,121,.12),rgba(152,195,121,.12)),var(--dsw-specific-sidebar-fill)}
+body[data-ds-dark-theme] .dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(224,108,117,.12),rgba(224,108,117,.12)),var(--dsw-specific-sidebar-fill)}
 `
 
 export function ensureFilesStyles(): void {

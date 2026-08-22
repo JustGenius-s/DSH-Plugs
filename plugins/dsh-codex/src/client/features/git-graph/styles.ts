@@ -53,7 +53,7 @@ const GRAPH_CSS = `
 .dsh-git-graph-detail-section-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-git-graph-detail-section-count{flex:none;min-width:18px;padding:0 5px;border-radius:8px;text-align:center;font-size:11px;line-height:16px;background:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-git-graph-detail-tail{position:relative;flex:none;display:flex;align-items:center;gap:6px}
-.dsh-git-graph-detail-actions{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:2px;padding-left:8px;border-radius:6px;background:linear-gradient(var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14)),var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14))),var(--dsw-alias-bg-base,#fff);visibility:hidden}
+.dsh-git-graph-detail-actions{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:2px;padding-left:8px;border-radius:6px;background:linear-gradient(var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14)),var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.14))),var(--dsw-specific-sidebar-fill,#fff);visibility:hidden}
 .dsh-git-graph-detail-tail .dsh-git-graph-detail-actions{right:100%;margin-right:2px}
 .dsh-git-graph-detail-row:hover .dsh-git-graph-detail-actions{visibility:visible}
 .dsh-git-graph-detail-action{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer}

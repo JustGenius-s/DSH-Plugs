@@ -4,11 +4,12 @@
  * renders the active panel's body through `renderSlot('side.panel', owner,
  * { only: activeId })`. The layout squeeze is one CSS variable on #root.
  *
- * Visuals and interaction mirror the native DSH sidebar column: surfaces,
- * inks and borders ride the same `--dsw-*` design tokens, icons and the
- * tooltip come from `@deepseek-ai/dsh-client-ui-primitives`, and resize
- * follows AppFrame's drag contract — pointer capture, rAF-throttled deltas
- * against the drag-start width, and an 8px hit strip with no visible pill.
+ * Visuals and interaction mirror the native DSH sidebar column: the same
+ * `--dsw-specific-sidebar-fill` surface, `--dsw-alias-border-l1` divider and
+ * no drop shadow as AppFrame's left rail. Icons and the tooltip come from
+ * `@deepseek-ai/dsh-client-ui-primitives`, and resize follows AppFrame's
+ * drag contract — pointer capture, rAF-throttled deltas against the
+ * drag-start width, and an 8px hit strip with no visible pill.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'

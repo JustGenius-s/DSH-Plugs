@@ -77,7 +77,7 @@ function isDarkTheme(): boolean {
 function resolveTerminalTheme(dark: boolean): RenderTheme {
   const base = dark ? THEME_DARK : THEME_LIGHT
   const styles = getComputedStyle(document.body)
-  const bg = styles.getPropertyValue('--dsw-alias-bg-base').trim()
+  const bg = styles.getPropertyValue('--dsw-specific-sidebar-fill').trim()
   const fg = styles.getPropertyValue('--dsw-alias-label-primary').trim()
   if (bg === '' && fg === '') return base
   return {

@@ -5,14 +5,14 @@
 // fixed right column portalled from the shell.overlay layer.
 //
 // Surfaces, inks, borders and motion ride the same `--dsw-*` design tokens as
-// DSH's own right-hand panel, so the panel tracks the active theme with no
-// hardcoded colors. The model is ui-conversation's DetailsPanel — the native
-// right-docked column with a header + close button — NOT the left sidebar:
-// the details column fills `--dsw-alias-bg-base` and only the left nav column
-// carries the `--dsw-specific-sidebar-fill` tint. Header padding (14/12/12),
-// the 28px round close button and its hover fill come from that same sheet.
-// The resize hit strip matches AppFrame's sidebar handle: an 8px, pill-less
-// col-resize strip centered on the panel's left border.
+// DSH's own left sidebar column, so the panel tracks the active theme with no
+// hardcoded colors. The chrome is the AppFrame sidebar track — fill is
+// `--dsw-specific-sidebar-fill`, the column divider is `--dsw-alias-border-l1`,
+// and there is no drop shadow, matching `.pI_x6G_sidebarCol`. Header padding
+// (14/12/12), the 28px round close button and its hover fill still come from
+// ui-conversation's DetailsPanel. The resize hit strip matches AppFrame's
+// sidebar handle: an 8px, pill-less col-resize strip centered on the panel's
+// left border.
 
 import { injectStyles } from '@just-genius/dsh-plugin-ui'
 
@@ -27,7 +27,7 @@ body[data-dsh-side-panels-dragging] #root{transition:none}
    panel slide as one piece. Overflow stays visible here so the 8px
    resize strip can hang 4px past the left border; the inner clip
    wrapper is what hides content as the track shrinks. */
-.dsh-side-panels{position:fixed;top:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;background:var(--dsw-alias-bg-base);border-left:1px solid var(--dsw-alias-border-l2);pointer-events:auto;font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary);transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out),border-left-color var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
+.dsh-side-panels{position:fixed;top:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;background:var(--dsw-specific-sidebar-fill);border-left:1px solid var(--dsw-alias-border-l1);box-shadow:none;pointer-events:auto;font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary);transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out),border-left-color var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
 .dsh-side-panels[data-collapsed]{border-left-color:transparent;pointer-events:none}
 .dsh-side-panels-inner{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;height:100%;overflow:hidden}
 .dsh-side-panels-resize{position:absolute;left:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:2;touch-action:none}
@@ -116,7 +116,7 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 
 /* Inline rename: the input keeps the tab's own typography so the strip does
    not reflow when a caption turns editable. */
-.dsh-side-panels-tab-rename{min-width:0;width:120px;border:1px solid var(--dsw-alias-state-business-primary);border-radius:4px;background:var(--dsw-alias-bg-base);padding:1px 4px;font-family:inherit;font-size:13px;line-height:16px;font-weight:500;color:var(--dsw-alias-label-primary);outline:none}
+.dsh-side-panels-tab-rename{min-width:0;width:120px;border:1px solid var(--dsw-alias-state-business-primary);border-radius:4px;background:var(--dsw-specific-sidebar-fill);padding:1px 4px;font-family:inherit;font-size:13px;line-height:16px;font-weight:500;color:var(--dsw-alias-label-primary);outline:none}
 
 /* The tab context menu is positioned from getAnchorRect; its in-place anchor
    is only a formality. */
