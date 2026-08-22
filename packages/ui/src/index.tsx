@@ -1,14 +1,14 @@
-// DSH-native UI primitives shared by the plugins in this monorepo. Every
-// component pulls the official DSH look (design tokens, geometry, motion)
-// from ./styles and self-injects it on first render, so consumers only pay
-// a component import. These components cover the official settings/list
-// chrome that @deepseek-ai/dsh-client-ui-primitives does not export
-// (PluginCard, fields, inventory rows); anything the primitives package
-// already ships (Button, Input, Menu, StateDot, ...) is used from there
-// instead of being re-created here.
+// DSH-native UI kit for plugins and standalone apps (e.g. Vellum).
 //
-// The implementation is split by domain; this entry only re-exports, so the
-// public API stays a single import surface.
+// Two layers:
+// 1. Theme tokens (--dsw-*) via installTheme() / ./theme/all.css
+// 2. Components: official-look atoms (Button, Input, …) plus settings/list
+//    chrome that @deepseek-ai/dsh-client-ui-primitives does not publish as a
+//    standalone dep (PluginCard fields, inventory rows, …).
+//
+// Components self-inject their CSS on first render (CSS modules) or via
+// ensureStyles() for the settings chrome. Standalone apps must call
+// installTheme() once at boot so --dsw-* tokens exist.
 
 export {
   Switch,
@@ -56,3 +56,27 @@ export {
 } from './page'
 
 export { ensureStyles, injectStyles } from './styles'
+
+export {
+  installTheme,
+  setThemePreference,
+  getThemePreference,
+  isDarkTheme,
+} from './install-theme'
+export type { ThemePreference } from './install-theme'
+
+export { Button } from './primitives/Button'
+export type { ButtonVariant } from './primitives/Button'
+export { Input } from './primitives/Input'
+export { Pill } from './primitives/Pill'
+export { Tooltip } from './primitives/Tooltip'
+export type { TooltipSide } from './primitives/Tooltip'
+export { Modal } from './primitives/Modal'
+export { Menu } from './primitives/Menu'
+export type { MenuEntry, MenuItem, MenuSeparator, MenuLabel } from './primitives/Menu'
+export { StateDot } from './primitives/StateDot'
+export type { StateDotState } from './primitives/StateDot'
+export { DisclosureRow } from './primitives/DisclosureRow'
+export type { DisclosureRowProps } from './primitives/DisclosureRow'
+
+export * from './icons/index'

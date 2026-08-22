@@ -42,13 +42,19 @@ Turns the web surface into a WeChat-style messenger: chat list, green/white bubb
 
 Desktop pet (whale-girl). In a plain browser it is the in-page companion; in DSH-Desktop it opens a transparent always-on-top overlay via `window.dshDesktop.overlays` so the pet sits on the OS desktop.
 
+## Shared UI package
+
+[`packages/ui`](packages/ui) (`@just-genius/dsh-plugin-ui`) ships DSH `--dsw-*` theme tokens plus React primitives (`Button`, `Input`, `Menu`, `Modal`, …) and settings chrome. Plugins bundle it at build time; standalone apps (e.g. Vellum) can depend on it via `file:` / npm and call `installTheme()` once at boot. See [packages/ui/README.md](packages/ui/README.md).
+
 ## Repository layout
 
 ```
 DSH-Plugs/
 ├── package.json          # root workspace (shared build/type toolchain)
-├── pnpm-workspace.yaml   # packages: ['plugins/*']
+├── pnpm-workspace.yaml   # packages: ['plugins/*', 'packages/*']
 ├── tsconfig.base.json    # shared TS config
+├── packages/
+│   └── ui/               # @just-genius/dsh-plugin-ui
 └── plugins/
     └── <plugin>/         # one plugin per folder
 ```

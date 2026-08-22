@@ -1,9 +1,11 @@
 import { defineConfig } from 'tsdown'
+import { dshCssModules } from './src/css-modules.ts'
 
-// Plain ESM library. react stays external: plugins bundle this package and
-// externalize react themselves against the DSH-provided peer. The second
-// entry is the node-side build helper (CSS-modules inline plugin) imported
-// by the plugins' tsdown configs.
+const PKG = '@just-genius/dsh-plugin-ui'
+
+// Plain ESM library. react stays external: apps and plugins provide it.
+// CSS modules are inlined via the same HMR-friendly contract as DSH client
+// bundles. The second entry is the node-side css-modules helper itself.
 export default defineConfig([
   {
     entry: ['src/index.tsx'],
@@ -13,6 +15,7 @@ export default defineConfig([
     clean: true,
     platform: 'browser',
     deps: { neverBundle: true },
+    plugins: [dshCssModules(PKG)],
   },
   {
     entry: { 'css-modules': 'src/css-modules.ts' },
