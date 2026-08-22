@@ -5,7 +5,7 @@ const FILES_CSS = `
 .dsh-files-status{padding:16px 12px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b0b0b5)}
 .dsh-files-status.is-error{color:#cf222e}
 .dsh-files-tree{flex:1;min-height:0;display:flex;flex-direction:column}
-.dsh-files-search{flex:none;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08))}
+.dsh-files-search{flex:none;padding:6px 8px}
 .dsh-files-search-input{display:flex;width:100%;box-sizing:border-box}
 .dsh-files-search-input input{width:100%;min-width:0;height:30px;font-size:13px}
 .dsh-files-tree-list{flex:1;min-height:0;overflow:auto;padding:4px 0}

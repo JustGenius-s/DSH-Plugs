@@ -2,7 +2,7 @@ import { injectStyles } from '@just-genius/dsh-plugin-ui'
 
 const GRAPH_CSS = `
 .dsh-git-graph{height:100%;display:flex;flex-direction:column;min-height:0;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
-.dsh-git-graph-filter{flex:none;display:flex;align-items:center;justify-content:flex-start;min-height:28px;padding:4px 8px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.08))}
+.dsh-git-graph-filter{flex:none;display:flex;align-items:center;justify-content:flex-start;min-height:28px;padding:4px 8px}
 .dsh-git-graph-filter-wrap{display:inline-flex;width:fit-content;max-width:min(220px,100%)}
 .dsh-git-graph-filter-trigger{width:auto;max-width:100%;justify-content:flex-start;gap:6px}
 .dsh-git-graph-filter-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:18px}
