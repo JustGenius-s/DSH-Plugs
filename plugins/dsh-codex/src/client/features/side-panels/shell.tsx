@@ -36,6 +36,29 @@ ensureSidePanelStyles()
 const LAUNCHER_HEADER_GAP = 20
 
 /**
+ * Whether the conversation is currently showing its chat view (as opposed to
+ * trajectory/waterfall). The session-scoped chat store that owns the active
+ * view id is not reachable from this root-scoped shell, so we read the header
+ * tablist: ui-conversation registers the chat view ('conversation.view', id
+ * 'chat') first with order 0, so it is always the FIRST tab. A selected
+ * non-first tab means a different view is active. No tablist at all — a blank
+ * session with a single view, or the header hidden during the hero phase —
+ * is the chat view by definition.
+ */
+function isChatViewActive(): boolean {
+  const sp = document.querySelector('[data-conversation-scroll]')
+  // The header is the element immediately above the conversation scrollport
+  // (ConversationRoot renders `renderSlot("conversation.session.header")`
+  // then the scrollBody), so it is the scrollport's previous sibling.
+  const header = sp?.previousElementSibling ?? null
+  const tablist = header?.querySelector('[role="tablist"]') ?? null
+  if (tablist === null) return true
+  const selected = tablist.querySelector('[role="tab"][aria-selected="true"]')
+  if (selected === null) return true
+  return selected === tablist.firstElementChild
+}
+
+/**
  * Tab caption: a lone instance keeps the panel label ("终端"); duplicates
  * pick up a 1-based ordinal so two terminals read "终端 1" / "终端 2".
  */
@@ -207,10 +230,19 @@ export function SidePanelsShell(props: ShellProps) {
   useEffect(() => {
     if (open || tabs.length === 0) {
       launcher.setOccluded(false)
+      launcher.setChatView(true)
       return undefined
     }
     let raf: number | null = null
     const measure = (): void => {
+      // The launcher only makes sense over the chat's message column. The
+      // active conversation view lives in the session-store, which this
+      // root-scoped overlay cannot subscribe to, so detect it from the header
+      // tablist instead: the chat view is the default 'conversation.view'
+      // entry (registered first by ui-conversation, order 0), so it is always
+      // the FIRST tab. Any other selected tab means trajectory/waterfall —
+      // hide the card there, and never let the occlusion auto-show fight it.
+      launcher.setChatView(isChatViewActive())
       const card = launcherRef.current
       const sp = document.querySelector('[data-conversation-scroll]')
       if (card === null || sp === null) {
@@ -246,8 +278,16 @@ export function SidePanelsShell(props: ShellProps) {
     window.addEventListener('resize', schedule)
     const ro = new ResizeObserver(schedule)
     ro.observe(document.documentElement)
+    // Watch both DOM churn (tablist mount/resize, session swap) and the
+    // header tabs' selection attribute, since switching view only flips
+    // aria-selected on an existing tab rather than re-parenting it.
     const mo = new MutationObserver(schedule)
-    mo.observe(document.body, { childList: true, subtree: true })
+    mo.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-selected'],
+    })
     return () => {
       if (raf !== null) cancelAnimationFrame(raf)
       document.removeEventListener('scroll', schedule, { capture: true })
