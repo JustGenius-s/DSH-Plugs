@@ -371,11 +371,20 @@ function TreeLevel(props: {
   /** Hover warm-up so expand usually paints with children already cached. */
   onPrefetch: (dir: string) => void
   onOpen: (state: PanelNavState) => void
+  /**
+   * Ancestor folder was gitignored — paint every descendant faded even if a
+   * nested listing omitted the flag (VS Code Explorer under node_modules).
+   */
+  ancestorIgnored?: boolean
 }) {
-  const { nodes, depth, expanded, childrenByDir, onToggle, onPrefetch, onOpen } = props
+  const {
+    nodes, depth, expanded, childrenByDir, onToggle, onPrefetch, onOpen,
+    ancestorIgnored = false,
+  } = props
   return (
     <>
       {nodes.map((node) => {
+        const ignored = ancestorIgnored || node.ignored === true
         if (node.kind === 'file') {
           return (
             <FileRow
@@ -383,6 +392,7 @@ function TreeLevel(props: {
               entry={node}
               depth={depth}
               onOpen={onOpen}
+              ignored={ignored}
             />
           )
         }
@@ -391,7 +401,7 @@ function TreeLevel(props: {
         return (
           <div key={node.path}>
             <div
-              className={'dsh-files-tree-row' + (node.ignored === true ? ' is-ignored' : '')}
+              className={'dsh-files-tree-row' + (ignored ? ' is-ignored' : '')}
               style={{ paddingLeft: 8 + depth * 14 }}
               onMouseEnter={() => onPrefetch(node.path)}
             >
@@ -399,7 +409,7 @@ function TreeLevel(props: {
                 type="button"
                 className="dsh-files-tree-row-main"
                 onClick={() => onToggle(node.path)}
-                title={node.ignored === true ? `${node.path} (gitignore)` : node.path}
+                title={ignored ? `${node.path} (gitignore)` : node.path}
               >
                 {open
                   ? <IconChevronDownOutline14 className="dsh-files-tree-chevron" />
@@ -422,6 +432,7 @@ function TreeLevel(props: {
                 onToggle={onToggle}
                 onPrefetch={onPrefetch}
                 onOpen={onOpen}
+                ancestorIgnored={ignored}
               />
             ) : null}
           </div>
@@ -438,18 +449,21 @@ function FileRow(props: {
   onOpen: (state: PanelNavState) => void
   /** Show the parent directory after the name (search results are flat). */
   hint?: boolean
+  /** Override when an ancestor directory is ignored. */
+  ignored?: boolean
 }) {
   const { entry, depth, onOpen, hint } = props
+  const ignored = props.ignored === true || entry.ignored === true
   return (
     <div
-      className={'dsh-files-tree-row' + (entry.ignored === true ? ' is-ignored' : '')}
+      className={'dsh-files-tree-row' + (ignored ? ' is-ignored' : '')}
       style={{ paddingLeft: 8 + depth * 14 }}
     >
       <button
         type="button"
         className="dsh-files-tree-row-main"
         onClick={() => onOpen({ mode: 'preview', file: entry.path })}
-        title={entry.ignored === true ? `${entry.path} (gitignore)` : entry.path}
+        title={ignored ? `${entry.path} (gitignore)` : entry.path}
       >
         <span className="dsh-files-tree-chevron" />
         <FileGlyph name={entry.name} />

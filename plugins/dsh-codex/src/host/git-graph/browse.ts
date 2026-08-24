@@ -163,9 +163,15 @@ export async function loadTree(
       status: kind === 'file' ? statusByPath.get(rel) : undefined,
     })
   }
-  const visible = showIgnored
-    ? await markGitIgnored(cwd, entries)
-    : await dropGitIgnored(cwd, entries)
+  // Inside an already-ignored directory every child is ignored (same as
+  // VS Code's per-URI checkIgnore under node_modules / lib / …).
+  const parentIgnored = showIgnored && root !== ''
+    && (await gitIgnoredPaths(cwd, [root])).has(root)
+  const visible = !showIgnored
+    ? await dropGitIgnored(cwd, entries)
+    : parentIgnored
+      ? entries.map((entry) => ({ ...entry, ignored: true as const }))
+      : await markGitIgnored(cwd, entries)
   visible.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
     return a.name.localeCompare(b.name)
@@ -237,7 +243,9 @@ export async function searchTree(
 
 /**
  * Annotate entries that `git check-ignore` reports as excluded so the client
- * can fade them (VS Code Explorer style). Tracked paths stay unmarked.
+ * can apply `gitDecoration.ignoredResourceForeground`. Tracked paths and
+ * paths matched only by a negation pattern (`!…`) stay unmarked — same as
+ * VS Code's `GitIgnoreDecorationProvider`.
  */
 async function markGitIgnored(
   cwd: string,
@@ -265,11 +273,18 @@ async function dropGitIgnored(
   return entries.filter((entry) => !ignored.has(entry.path))
 }
 
-/** Paths that match a git exclude rule (NUL stdin → NUL stdout). */
+/**
+ * Paths that match a git exclude rule.
+ *
+ * Mirrors VS Code `Repository.checkIgnore`: `check-ignore -v -z --stdin`,
+ * then keep only records whose pattern does **not** start with `!`.
+ * Output records are `<source>\0<linenum>\0<pattern>\0<path>\0` (see
+ * `git check-ignore` docs).
+ */
 async function gitIgnoredPaths(cwd: string, paths: readonly string[]): Promise<Set<string>> {
   if (paths.length === 0) return new Set()
   return new Promise((resolve) => {
-    const child = spawn('git', ['-C', cwd, 'check-ignore', '-z', '--stdin'], {
+    const child = spawn('git', ['-C', cwd, 'check-ignore', '-v', '-z', '--stdin'], {
       stdio: ['pipe', 'pipe', 'ignore'],
     })
     const ignored = new Set<string>()
@@ -278,8 +293,14 @@ async function gitIgnoredPaths(cwd: string, paths: readonly string[]): Promise<S
     child.stdout.on('data', (chunk: string) => { stdout += chunk })
     child.on('error', () => resolve(ignored))
     child.on('close', () => {
-      for (const part of stdout.split('\0')) {
-        if (part.length > 0) ignored.add(part)
+      const parts = stdout.split('\0')
+      for (let i = 0; i + 3 < parts.length; i += 4) {
+        const pattern = parts[i + 2]
+        const path = parts[i + 3]
+        if (pattern !== undefined && pattern.length > 0 && !pattern.startsWith('!')
+          && path !== undefined && path.length > 0) {
+          ignored.add(path)
+        }
       }
       resolve(ignored)
     })

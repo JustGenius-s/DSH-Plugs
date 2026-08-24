@@ -12,9 +12,13 @@ const FILES_CSS = `
 .dsh-files-tree-row{display:flex;align-items:center;gap:2px;padding-right:4px}
 .dsh-files-tree-row-main{flex:1;min-width:0;display:flex;align-items:center;gap:4px;min-height:30px;padding:0 6px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:20px;text-align:left;cursor:pointer}
 .dsh-files-tree-row-main:hover{background:var(--dsw-alias-interactive-bg-hover)}
-/* Gitignored rows: fade like VS Code Explorer (gitDecoration.ignored*). */
-.dsh-files-tree-row.is-ignored{opacity:.55}
-.dsh-files-tree-row.is-ignored .dsh-files-tree-name{color:var(--dsw-alias-label-tertiary,#8b8b90)}
+/* Gitignored rows: lightly dimmed (secondary label), not VS Code's hard
+   #8C8C8C grey which reads too dead next to our primary ink. */
+.dsh-files-tree-row.is-ignored .dsh-files-tree-name,
+.dsh-files-tree-row.is-ignored .dsh-files-tree-chevron,
+.dsh-files-tree-row.is-ignored .dsh-files-tree-dir{color:var(--dsw-alias-label-tertiary,#8b8b90)}
+.dsh-files-tree-row.is-ignored .dsh-files-file-glyph,
+.dsh-files-tree-row.is-ignored .dsh-files-folder-glyph{opacity:.78}
 .dsh-files-tree-chevron{flex:none;width:14px;height:14px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-files-file-glyph,.dsh-files-folder-glyph{flex:none;width:16px;height:16px;display:flex;align-items:center;justify-content:center}
 .dsh-files-file-glyph svg,.dsh-files-folder-glyph svg{width:16px;height:16px;display:block}
