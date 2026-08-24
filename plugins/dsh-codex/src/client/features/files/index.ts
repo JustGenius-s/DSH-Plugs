@@ -57,10 +57,16 @@ export function createFilesFeature(
                 store.getSnapshot,
                 store.getSnapshot,
               )
+              const settings = useSyncExternalStore(
+                (listener) => scope.subscribe(listener),
+                () => scope.getSnapshot(),
+                () => scope.getSnapshot(),
+              )
               const instance = snapshot.instances.find(
                 (item) => item.panelId === 'files' && item.key === props.instanceKey,
               )
               const navState = instance?.state
+              const showIgnored = (settings.value ?? DEFAULT_CONFIG).filesShowGitIgnored
               const panelProps: FilesPanelProps = {
                 sessionId: props.sessionId,
                 cwd: props.cwd,
@@ -68,6 +74,7 @@ export function createFilesFeature(
                 t: props.t,
                 navState,
                 onOpen: open,
+                showIgnored,
               }
               return createElement(FilesPanel, panelProps)
             } as never,

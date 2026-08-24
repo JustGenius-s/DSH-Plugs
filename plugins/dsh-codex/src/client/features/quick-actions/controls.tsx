@@ -24,12 +24,8 @@ import {
   type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { injectStyles } from '@just-genius/dsh-plugin-ui'
-import {
-  createQuickAction,
-  type QuickAction,
-  type QuickActionsStore,
-  type QuickActionTarget,
-} from './store'
+import { createQuickAction } from './store'
+import type { QuickAction, QuickActionsStore, QuickActionTarget } from '../../../shared/config'
 
 const QUICK_ACTIONS_CSS = `
 .dsh-codex-quick-actions-modal{width:min(560px,calc(100vw - 48px))!important;max-width:calc(100vw - 48px)!important;box-sizing:border-box}

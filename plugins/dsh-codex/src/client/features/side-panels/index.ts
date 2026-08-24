@@ -11,7 +11,8 @@ import { LauncherToggle } from './launcher-toggle'
 import { createSidePanelsStore } from './service'
 import { SidePanelsShell } from './shell'
 import type { PanelEntriesApi, PanelTabInfo } from './shell'
-import { createQuickActionsStore, type QuickAction } from '../quick-actions/store'
+import { createQuickActionsStore } from '../quick-actions/store'
+import type { QuickAction } from '../../../shared/config'
 import type { TerminalControllerStore } from '../terminal/controller'
 
 const PANEL_SLOT = 'side.panel'
@@ -34,7 +35,7 @@ export function createSidePanelsFeature(
       })
       ctx.provide('sidePanels', store)
       const launcher = createLauncherStore()
-      const quickActions = createQuickActionsStore()
+      const quickActions = createQuickActionsStore(scope)
 
       // Run a stored quick action, step by step. Each step is `{ command, target }`:
       // a `current` step runs the command in the currently active terminal; a `new`

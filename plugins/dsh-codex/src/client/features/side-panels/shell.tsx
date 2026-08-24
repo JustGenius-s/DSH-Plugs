@@ -30,7 +30,7 @@ import { launcherVisible, type LauncherStore } from './launcher-store'
 import type { SidePanelInstance, SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
 import { QuickActionsControls } from '../quick-actions/controls'
-import type { QuickAction, QuickActionsStore } from '../quick-actions/store'
+import type { QuickAction, QuickActionsStore } from '../../../shared/config'
 
 ensureSidePanelStyles()
 

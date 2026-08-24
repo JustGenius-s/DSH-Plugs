@@ -3,6 +3,19 @@ export const SETTINGS_PATH = '/dsh-codex/settings'
 
 export type TerminalShell = 'auto' | 'bash' | 'zsh'
 
+export type QuickActionTarget = 'current' | 'new'
+
+export interface QuickActionStep {
+  command: string
+  target: QuickActionTarget
+}
+
+export interface QuickAction {
+  id: string
+  name: string
+  steps: QuickActionStep[]
+}
+
 export interface DshCodexConfig {
   navigatorEnabled: boolean
   conversationCollapseEnabled: boolean
@@ -10,6 +23,8 @@ export interface DshCodexConfig {
   gitGraphEnabled: boolean
   filesEnabled: boolean
   fileLinksInPanel: boolean
+  /** When true, the files tree lists gitignored paths (VS Code default). */
+  filesShowGitIgnored: boolean
   terminalShell: TerminalShell
   terminalScrollback: number
   terminalFontSize: number
@@ -17,6 +32,7 @@ export interface DshCodexConfig {
   panelMaxWidth: number
   panelLauncherWidth: number
   panelRememberTabs: boolean
+  quickActions: QuickAction[]
 }
 
 export type CodexConfigField = keyof DshCodexConfig
@@ -32,6 +48,7 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   gitGraphEnabled: true,
   filesEnabled: true,
   fileLinksInPanel: true,
+  filesShowGitIgnored: true,
   terminalShell: 'auto',
   terminalScrollback: 5000,
   terminalFontSize: 12,
@@ -39,6 +56,7 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   panelMaxWidth: 720,
   panelLauncherWidth: 220,
   panelRememberTabs: true,
+  quickActions: [],
 }
 
 export const CODEX_CONFIG_FIELDS: readonly CodexConfigField[] = [
@@ -48,6 +66,7 @@ export const CODEX_CONFIG_FIELDS: readonly CodexConfigField[] = [
   'gitGraphEnabled',
   'filesEnabled',
   'fileLinksInPanel',
+  'filesShowGitIgnored',
   'terminalShell',
   'terminalScrollback',
   'terminalFontSize',
@@ -55,6 +74,7 @@ export const CODEX_CONFIG_FIELDS: readonly CodexConfigField[] = [
   'panelMaxWidth',
   'panelLauncherWidth',
   'panelRememberTabs',
+  'quickActions',
 ]
 
 export function clampPanelLauncherWidth(value: number): number {
@@ -109,6 +129,9 @@ export function parseCodexConfig(value: unknown): DshCodexConfig | undefined {
     fileLinksInPanel: typeof candidate.fileLinksInPanel === 'boolean'
       ? candidate.fileLinksInPanel
       : DEFAULT_CONFIG.fileLinksInPanel,
+    filesShowGitIgnored: typeof candidate.filesShowGitIgnored === 'boolean'
+      ? candidate.filesShowGitIgnored
+      : DEFAULT_CONFIG.filesShowGitIgnored,
     terminalShell: candidate.terminalShell,
     terminalScrollback: clampInt(
       candidate.terminalScrollback,
@@ -140,7 +163,33 @@ export function parseCodexConfig(value: unknown): DshCodexConfig | undefined {
         : DEFAULT_CONFIG.panelLauncherWidth,
     ),
     panelRememberTabs: candidate.panelRememberTabs,
+    quickActions: parseQuickActions(candidate.quickActions),
   }
+}
+
+function parseQuickActions(value: unknown): QuickAction[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(isQuickAction).map(action => ({
+    id: action.id,
+    name: action.name,
+    steps: action.steps.map(step => ({ ...step })),
+  }))
+}
+
+function isQuickAction(value: unknown): value is QuickAction {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Partial<QuickAction>
+  return typeof candidate.id === 'string'
+    && typeof candidate.name === 'string'
+    && Array.isArray(candidate.steps)
+    && candidate.steps.every(isQuickActionStep)
+}
+
+function isQuickActionStep(value: unknown): value is QuickActionStep {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Partial<QuickActionStep>
+  return typeof candidate.command === 'string'
+    && (candidate.target === 'current' || candidate.target === 'new')
 }
 
 /**

@@ -27,7 +27,7 @@ import {
   type GitResetMode,
 } from '../../shared/git-graph'
 import { runGraphAction } from './actions'
-import { loadChangeFiles, loadFile, loadFileDiff, loadTree } from './browse'
+import { loadChangeFiles, loadFile, loadFileDiff, loadTree, searchTree } from './browse'
 import { clampLimit, clampSkip, loadCommitBody, loadGraphLog } from './log'
 import { generateCommitMessage } from './message'
 import { handleWatch } from './watch'
@@ -240,8 +240,15 @@ async function handleTree(req: IncomingMessage, res: ServerResponse) {
     return
   }
   const path = url.searchParams.get('path') ?? ''
+  const query = url.searchParams.get('q') ?? ''
+  // Default true (VS Code Explorer). Client passes `ignored=0` when the
+  // Codex setting hides gitignored paths.
+  const showIgnored = url.searchParams.get('ignored') !== '0'
   try {
-    const entries = await loadTree(cwd, path)
+    const options = { showIgnored }
+    const entries = query.trim().length > 0
+      ? await searchTree(cwd, query, options)
+      : await loadTree(cwd, path, options)
     const value: GitGraphTreeResponse = { ok: true, cwd, path, entries }
     json(res, 200, value)
   } catch (error) {

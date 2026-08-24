@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   IconChevronDownOutline14,
   IconChevronRightOutline14,
@@ -9,6 +9,7 @@ import {
   GIT_GRAPH_DIFF_PATH,
   GIT_GRAPH_FILE_PATH,
   GIT_GRAPH_TREE_PATH,
+  GIT_GRAPH_WATCH_PATH,
   type GitChangeStatus,
   type GitFileDiff,
   type GitGraphDiffResponse,
@@ -44,6 +45,11 @@ export interface FilesPanelProps {
   navState?: PanelNavState
   /** Open a NEW files instance (multi panel): switch form or navigate. */
   onOpen: (state: PanelNavState) => void
+  /**
+   * When false, the tree hides gitignored paths (`ignored=0` on the host).
+   * Defaults to true (VS Code Explorer default).
+   */
+  showIgnored?: boolean
 }
 
 /**
@@ -63,13 +69,14 @@ export function FilesPanel(props: FilesPanelProps) {
   const mode = navState?.mode ?? 'tree'
   const file = navState?.file
   const sha = navState?.sha
+  const showIgnored = props.showIgnored !== false
 
   return (
     <div className="dsh-files">
       {cwd === undefined ? (
         <div className="dsh-files-status">{t('files.noCwd')}</div>
       ) : mode === 'tree' ? (
-        <FilesTree cwd={cwd} t={t} onOpen={props.onOpen} />
+        <FilesTree cwd={cwd} t={t} onOpen={props.onOpen} showIgnored={showIgnored} />
       ) : file === undefined ? (
         <div className="dsh-files-status">{t('files.noCwd')}</div>
       ) : mode === 'preview' ? (
@@ -107,58 +114,201 @@ export function FilesPanel(props: FilesPanelProps) {
 
 /** Search results render at most this many rows; the rest is summarized. */
 const MAX_SEARCH_ROWS = 200
+/** Collapse watch/focus storms the way VS Code's ExplorerService does (500ms). */
+const TREE_REFRESH_DEBOUNCE_MS = 400
 
 /**
- * Working-tree file browser. The whole listing arrives in one round trip as
- * flat file paths; directories are assembled client-side, so panel search
- * can match any file in the repo — expanded or not.
+ * Working-tree file browser (VS Code Explorer style).
+ *
+ * Each directory is loaded on demand from the real filesystem — gitignored
+ * folders like `node_modules` appear when their parent is listed. Expand
+ * waits for children (hover prefetches) so the row never flashes a loader.
+ * Panel search hits a bounded host-side walk (`?q=`). A shared repo watch
+ * SSE (plus focus/visibility) silently re-fetches the root and every
+ * currently expanded folder.
  */
 function FilesTree(props: {
   cwd: string
   t: (key: string) => string
   onOpen: (state: PanelNavState) => void
+  showIgnored: boolean
 }) {
-  const { cwd, t, onOpen } = props
-  const [files, setFiles] = useState<readonly GitTreeEntry[] | null>(null)
+  const { cwd, t, onOpen, showIgnored } = props
+  /** Children keyed by parent dir path (`''` = workspace root). */
+  const [childrenByDir, setChildrenByDir] = useState<ReadonlyMap<string, readonly GitTreeEntry[]>>(
+    () => new Map(),
+  )
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | undefined>()
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
+  const [matches, setMatches] = useState<readonly GitTreeEntry[] | null>(null)
+  const [searchBusy, setSearchBusy] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    setBusy(true)
-    setError(undefined)
-    void fetchTree(cwd).then((value) => {
-      if (cancelled) return
-      setBusy(false)
-      if (!value.ok) {
-        setError(value.message)
-        return
-      }
-      setFiles(value.entries)
-    })
-    return () => { cancelled = true }
-  }, [cwd])
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
+  const childrenRef = useRef(childrenByDir)
+  childrenRef.current = childrenByDir
+  /** Coalesce expand + hover prefetch onto one in-flight promise per path. */
+  const loadingDirsRef = useRef(new Map<string, Promise<boolean>>())
 
-  const toggle = useCallback((dir: string): void => {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (next.has(dir)) {
-        next.delete(dir)
-      } else {
-        next.add(dir)
-      }
+  const applyDir = useCallback((dir: string, entries: readonly GitTreeEntry[]): void => {
+    setChildrenByDir((current) => {
+      const next = new Map(current)
+      next.set(dir, entries)
       return next
     })
   }, [])
 
-  const needle = query.trim().toLowerCase()
-  const tree = useMemo(() => (files === null ? [] : buildTree(files)), [files])
-  const matches = useMemo(() => {
-    if (files === null || needle.length === 0) return []
-    return files.filter((entry) => entry.path.toLowerCase().includes(needle))
-  }, [files, needle])
+  const loadDir = useCallback(async (dir: string, opts?: { silent?: boolean }): Promise<boolean> => {
+    const silent = opts?.silent === true
+    if (!silent && dir === '') {
+      setBusy(true)
+      setError(undefined)
+    }
+    const inflight = loadingDirsRef.current.get(dir)
+    if (inflight !== undefined) return inflight
+
+    const promise = (async (): Promise<boolean> => {
+      const value = await fetchTree(cwd, dir, showIgnored)
+      if (!value.ok) {
+        if (dir === '') {
+          setBusy(false)
+          setError(value.message)
+        }
+        return false
+      }
+      applyDir(dir, value.entries)
+      if (dir === '') setBusy(false)
+      return true
+    })()
+    loadingDirsRef.current.set(dir, promise)
+    try {
+      return await promise
+    } finally {
+      loadingDirsRef.current.delete(dir)
+    }
+  }, [applyDir, cwd, showIgnored])
+
+  // Initial root load (and whenever the workspace or ignore visibility changes).
+  useEffect(() => {
+    let cancelled = false
+    setChildrenByDir(new Map())
+    setExpanded(new Set())
+    setMatches(null)
+    setQuery('')
+    setBusy(true)
+    setError(undefined)
+    loadingDirsRef.current.clear()
+    void loadDir('').then(() => {
+      if (cancelled) return
+    })
+    return () => { cancelled = true }
+  }, [cwd, loadDir])
+
+  // Live refresh: watch SSE + focus/visibility, debounced, silent re-fetch of
+  // root and every expanded directory (keeps open folders in sync).
+  useEffect(() => {
+    let source: EventSource | undefined
+    let debounce: ReturnType<typeof setTimeout> | undefined
+    let cancelled = false
+
+    const refreshOpen = (): void => {
+      if (cancelled) return
+      const dirs = ['', ...expandedRef.current]
+      void Promise.all(dirs.map((dir) => loadDir(dir, { silent: true })))
+    }
+    const schedule = (): void => {
+      clearTimeout(debounce)
+      debounce = setTimeout(refreshOpen, TREE_REFRESH_DEBOUNCE_MS)
+    }
+
+    if (typeof EventSource !== 'undefined') {
+      source = new EventSource(
+        `${GIT_GRAPH_WATCH_PATH}?cwd=${encodeURIComponent(cwd)}`,
+      )
+      source.addEventListener('change', schedule)
+    }
+    const onFocus = (): void => schedule()
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') schedule()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      cancelled = true
+      clearTimeout(debounce)
+      source?.close()
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [cwd, loadDir])
+
+  /** Warm a collapsed folder so the next expand paints with children ready. */
+  const prefetchDir = useCallback((dir: string): void => {
+    if (childrenRef.current.has(dir) || loadingDirsRef.current.has(dir)) return
+    void loadDir(dir, { silent: true })
+  }, [loadDir])
+
+  const toggle = useCallback((dir: string): void => {
+    if (expandedRef.current.has(dir)) {
+      setExpanded((current) => {
+        const next = new Set(current)
+        next.delete(dir)
+        return next
+      })
+      return
+    }
+    // Cached → open immediately. Otherwise fetch first, then open — never
+    // paint an empty / "…" child slot under the folder (VS Code has no flash
+    // because local resolve finishes before the next frame).
+    if (childrenRef.current.has(dir)) {
+      setExpanded((current) => {
+        const next = new Set(current)
+        next.add(dir)
+        return next
+      })
+      return
+    }
+    void loadDir(dir, { silent: true }).then((ok) => {
+      if (!ok || !childrenRef.current.has(dir)) return
+      setExpanded((current) => {
+        const next = new Set(current)
+        next.add(dir)
+        return next
+      })
+    })
+  }, [loadDir])
+
+  const needle = query.trim()
+  // Host-side search whenever the query is non-empty (debounced lightly).
+  useEffect(() => {
+    if (needle.length === 0) {
+      setMatches(null)
+      setSearchBusy(false)
+      return
+    }
+    let cancelled = false
+    setSearchBusy(true)
+    const timer = setTimeout(() => {
+      void fetchTreeSearch(cwd, needle, showIgnored).then((value) => {
+        if (cancelled) return
+        setSearchBusy(false)
+        if (!value.ok) {
+          setMatches([])
+          return
+        }
+        setMatches(value.entries.filter((entry) => entry.kind === 'file'))
+      })
+    }, 200)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [cwd, needle, showIgnored])
+
+  const rootEntries = childrenByDir.get('')
+  const searchList = matches ?? []
 
   return (
     <div className="dsh-files-tree">
@@ -174,31 +324,35 @@ function FilesTree(props: {
       <div className="dsh-files-tree-list">
         {error !== undefined ? (
           <div className="dsh-files-status is-error">{error}</div>
-        ) : busy && files === null ? (
-          <div className="dsh-files-status">{t('files.loading')}</div>
-        ) : files === null || files.length === 0 ? (
-          <div className="dsh-files-status">{t('files.empty')}</div>
         ) : needle.length > 0 ? (
-          matches.length === 0 ? (
+          searchBusy && matches === null ? (
+            <div className="dsh-files-status">{t('files.loading')}</div>
+          ) : searchList.length === 0 ? (
             <div className="dsh-files-status">{t('files.searchEmpty')}</div>
           ) : (
             <>
-              {matches.slice(0, MAX_SEARCH_ROWS).map((entry) => (
+              {searchList.slice(0, MAX_SEARCH_ROWS).map((entry) => (
                 <FileRow key={entry.path} entry={entry} depth={0} onOpen={onOpen} hint />
               ))}
-              {matches.length > MAX_SEARCH_ROWS ? (
+              {searchList.length >= MAX_SEARCH_ROWS ? (
                 <div className="dsh-files-status dsh-files-tree-note">
                   {t('files.searchTruncated').replace('{count}', String(MAX_SEARCH_ROWS))}
                 </div>
               ) : null}
             </>
           )
+        ) : busy && rootEntries === undefined ? (
+          <div className="dsh-files-status">{t('files.loading')}</div>
+        ) : rootEntries === undefined || rootEntries.length === 0 ? (
+          <div className="dsh-files-status">{t('files.empty')}</div>
         ) : (
           <TreeLevel
-            nodes={tree}
+            nodes={rootEntries}
             depth={0}
             expanded={expanded}
+            childrenByDir={childrenByDir}
             onToggle={toggle}
+            onPrefetch={prefetchDir}
             onOpen={onOpen}
           />
         )}
@@ -207,15 +361,18 @@ function FilesTree(props: {
   )
 }
 
-/** One directory level of the assembled tree; children render when open. */
+/** One directory level; children come from the lazy `childrenByDir` map. */
 function TreeLevel(props: {
-  nodes: readonly TreeNode[]
+  nodes: readonly GitTreeEntry[]
   depth: number
   expanded: ReadonlySet<string>
+  childrenByDir: ReadonlyMap<string, readonly GitTreeEntry[]>
   onToggle: (dir: string) => void
+  /** Hover warm-up so expand usually paints with children already cached. */
+  onPrefetch: (dir: string) => void
   onOpen: (state: PanelNavState) => void
 }) {
-  const { nodes, depth, expanded, onToggle, onOpen } = props
+  const { nodes, depth, expanded, childrenByDir, onToggle, onPrefetch, onOpen } = props
   return (
     <>
       {nodes.map((node) => {
@@ -230,17 +387,19 @@ function TreeLevel(props: {
           )
         }
         const open = expanded.has(node.path)
+        const children = childrenByDir.get(node.path)
         return (
           <div key={node.path}>
             <div
-              className="dsh-files-tree-row"
+              className={'dsh-files-tree-row' + (node.ignored === true ? ' is-ignored' : '')}
               style={{ paddingLeft: 8 + depth * 14 }}
+              onMouseEnter={() => onPrefetch(node.path)}
             >
               <button
                 type="button"
                 className="dsh-files-tree-row-main"
                 onClick={() => onToggle(node.path)}
-                title={node.path}
+                title={node.ignored === true ? `${node.path} (gitignore)` : node.path}
               >
                 {open
                   ? <IconChevronDownOutline14 className="dsh-files-tree-chevron" />
@@ -253,12 +412,15 @@ function TreeLevel(props: {
                 <span className="dsh-files-tree-name">{node.name}</span>
               </button>
             </div>
-            {open ? (
+            {/* Only expand after children are cached — never paint a loader slot. */}
+            {open && children !== undefined && children.length > 0 ? (
               <TreeLevel
-                nodes={node.children}
+                nodes={children}
                 depth={depth + 1}
                 expanded={expanded}
+                childrenByDir={childrenByDir}
                 onToggle={onToggle}
+                onPrefetch={onPrefetch}
                 onOpen={onOpen}
               />
             ) : null}
@@ -269,7 +431,7 @@ function TreeLevel(props: {
   )
 }
 
-/** One file row: click opens a preview instance, hover reveals the diff button. */
+/** One file row: click opens a preview instance. */
 function FileRow(props: {
   entry: GitTreeEntry
   depth: number
@@ -279,12 +441,15 @@ function FileRow(props: {
 }) {
   const { entry, depth, onOpen, hint } = props
   return (
-    <div className="dsh-files-tree-row" style={{ paddingLeft: 8 + depth * 14 }}>
+    <div
+      className={'dsh-files-tree-row' + (entry.ignored === true ? ' is-ignored' : '')}
+      style={{ paddingLeft: 8 + depth * 14 }}
+    >
       <button
         type="button"
         className="dsh-files-tree-row-main"
         onClick={() => onOpen({ mode: 'preview', file: entry.path })}
-        title={entry.path}
+        title={entry.ignored === true ? `${entry.path} (gitignore)` : entry.path}
       >
         <span className="dsh-files-tree-chevron" />
         <FileGlyph name={entry.name} />
@@ -300,54 +465,6 @@ function FileRow(props: {
       </button>
     </div>
   )
-}
-
-interface TreeNode {
-  name: string
-  path: string
-  kind: 'dir' | 'file'
-  status?: GitChangeStatus
-  children: TreeNode[]
-}
-
-/** Assemble nested directories from a flat file listing, sorted dirs-first. */
-function buildTree(entries: readonly GitTreeEntry[]): TreeNode[] {
-  const root: TreeNode[] = []
-  const dirs = new Map<string, TreeNode>()
-  for (const entry of entries) {
-    const parts = entry.path.split('/')
-    let siblings = root
-    let prefix = ''
-    for (let index = 0; index < parts.length - 1; index += 1) {
-      const part = parts[index] ?? ''
-      prefix = prefix === '' ? part : prefix + '/' + part
-      let dir = dirs.get(prefix)
-      if (dir === undefined) {
-        dir = { name: part, path: prefix, kind: 'dir', children: [] }
-        dirs.set(prefix, dir)
-        siblings.push(dir)
-      }
-      siblings = dir.children
-    }
-    siblings.push({
-      name: entry.name,
-      path: entry.path,
-      kind: 'file',
-      status: entry.status,
-      children: [],
-    })
-  }
-  const sortNodes = (nodes: TreeNode[]): void => {
-    nodes.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
-    for (const node of nodes) {
-      if (node.kind === 'dir') sortNodes(node.children)
-    }
-  }
-  sortNodes(root)
-  return root
 }
 
 function parentOf(path: string): string {
@@ -622,8 +739,24 @@ function FilesDiffView(props: {
   )
 }
 
-function fetchTree(cwd: string): Promise<GitGraphTreeResponse> {
+function fetchTree(
+  cwd: string,
+  path = '',
+  showIgnored = true,
+): Promise<GitGraphTreeResponse> {
   const params = new URLSearchParams({ cwd })
+  if (path.length > 0) params.set('path', path)
+  if (!showIgnored) params.set('ignored', '0')
+  return fetchJson<GitGraphTreeResponse>(`${GIT_GRAPH_TREE_PATH}?${params.toString()}`)
+}
+
+function fetchTreeSearch(
+  cwd: string,
+  query: string,
+  showIgnored = true,
+): Promise<GitGraphTreeResponse> {
+  const params = new URLSearchParams({ cwd, q: query })
+  if (!showIgnored) params.set('ignored', '0')
   return fetchJson<GitGraphTreeResponse>(`${GIT_GRAPH_TREE_PATH}?${params.toString()}`)
 }
 

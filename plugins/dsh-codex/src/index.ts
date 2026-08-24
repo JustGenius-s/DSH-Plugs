@@ -18,13 +18,14 @@ export const name = 'dsh-codex'
 export const inject = ['subprocess', 'webServer', 'settings', 'llm', 'agentDefaultModel'] as const
 
 /** Host-side schema for the one durable Codex configuration namespace. */
-export const ConfigSchema = Schema.object({
+export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   navigatorEnabled: Schema.boolean().default(DEFAULT_CONFIG.navigatorEnabled),
   conversationCollapseEnabled: Schema.boolean().default(DEFAULT_CONFIG.conversationCollapseEnabled),
   terminalEnabled: Schema.boolean().default(DEFAULT_CONFIG.terminalEnabled),
   gitGraphEnabled: Schema.boolean().default(DEFAULT_CONFIG.gitGraphEnabled),
   filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),
   fileLinksInPanel: Schema.boolean().default(DEFAULT_CONFIG.fileLinksInPanel),
+  filesShowGitIgnored: Schema.boolean().default(DEFAULT_CONFIG.filesShowGitIgnored),
   terminalShell: Schema.union([
     Schema.const('auto'),
     Schema.const('bash'),
@@ -36,6 +37,14 @@ export const ConfigSchema = Schema.object({
   panelMaxWidth: Schema.number().min(300).max(720).default(DEFAULT_CONFIG.panelMaxWidth),
   panelLauncherWidth: Schema.number().min(PANEL_LAUNCHER_WIDTH_MIN).max(PANEL_LAUNCHER_WIDTH_MAX).default(DEFAULT_CONFIG.panelLauncherWidth),
   panelRememberTabs: Schema.boolean().default(DEFAULT_CONFIG.panelRememberTabs),
+  quickActions: Schema.array(Schema.object({
+    id: Schema.string(),
+    name: Schema.string(),
+    steps: Schema.array(Schema.object({
+      command: Schema.string(),
+      target: Schema.union([Schema.const('current'), Schema.const('new')]),
+    })),
+  })).default([]),
 })
 
 export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {

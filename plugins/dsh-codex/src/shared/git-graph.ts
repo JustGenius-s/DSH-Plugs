@@ -156,13 +156,23 @@ export interface GitGraphFilesOk {
 
 export type GitGraphFilesResponse = GitGraphFilesOk | GitGraphErr
 
-/** One directory entry in the file-tree browser. */
+/**
+ * One directory entry in the file-tree browser.
+ *
+ * `loadTree` returns the **immediate** children of one directory (dirs and
+ * files). Search (`?q=`) returns a flat list of matching files only.
+ */
 export interface GitTreeEntry {
   name: string
   path: string
   kind: 'dir' | 'file'
   /** Working-tree status for files (tree browser only, workdir mode). */
   status?: GitChangeStatus
+  /**
+   * True when the path matches a `.gitignore` / exclude rule. Only set while
+   * the files tree is showing ignored entries; omitted when they are hidden.
+   */
+  ignored?: boolean
 }
 
 export interface GitGraphTreeOk {

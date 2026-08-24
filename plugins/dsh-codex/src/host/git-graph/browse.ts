@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process'
-import { stat } from 'node:fs/promises'
+import { execFile, spawn } from 'node:child_process'
+import { readdir, stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import { join, posix, resolve } from 'node:path'
+import { isAbsolute, join, posix, relative, resolve } from 'node:path'
 import { execGit } from './git-exec'
 import type {
   GitChangeFile,
@@ -98,27 +98,197 @@ export async function loadChangeFiles(
   return files
 }
 
+/** Cap on explorer search hits (matches the client `MAX_SEARCH_ROWS`). */
+const TREE_SEARCH_LIMIT = 200
+/** Safety cap so a rare query cannot walk an entire `node_modules` tree. */
+const TREE_SEARCH_MAX_DIRS = 2_500
+
+export interface LoadTreeOptions {
+  /** When false, drop paths matched by `.gitignore` / exclude rules. Default true. */
+  showIgnored?: boolean
+}
+
 /**
- * The full working-tree file listing, flat (every entry is a file with its
- * repo-relative `path`; the client assembles directories itself). Tracked
- * files come from `git ls-files -z`, statuses from
- * `git status --porcelain -z -uall`; untracked files — which `ls-files`
- * never reports — are merged in from the status side, so the browser shows
- * work-in-progress too. `path`, when given, restricts the listing to that
- * directory.
+ * One directory of the working-tree browser (VS Code Explorer style).
  *
- * Loading everything in one round trip (instead of one request per expanded
- * directory) keeps panel search honest: a query can match any file in the
- * repo, not just the ones already fetched.
+ * Uses the real filesystem so gitignored paths (`node_modules`, build
+ * outputs, …) can appear. `.git` is the only name always skipped. `path`
+ * is the repo-relative directory to list (`''` = workspace root). Children
+ * are not recursed — the client loads each folder when the user expands it.
+ *
+ * Git status from `status --porcelain -z -uall` is overlaid on files so
+ * modified / untracked badges still show. When `showIgnored` is true
+ * (default), gitignored rows are kept and flagged `ignored` for a faded
+ * Explorer look; pass `showIgnored: false` to hide them entirely.
  */
-export async function loadTree(cwd: string, path: string): Promise<GitTreeEntry[]> {
+export async function loadTree(
+  cwd: string,
+  path: string,
+  options: LoadTreeOptions = {},
+): Promise<GitTreeEntry[]> {
+  const showIgnored = options.showIgnored !== false
   await assertGitRepo(cwd)
   const root = posixSafe(path)
-  const tracked = await gitText(
-    cwd,
-    ['ls-files', '-z', '--', root === '' ? '.' : root],
-    GIT_TIMEOUT_MS,
-  ).catch(() => '')
+  const abs = resolveUnderCwd(cwd, root)
+  const statusByPath = await loadStatusByPath(cwd)
+  let dirents
+  try {
+    dirents = await readdir(abs, { withFileTypes: true })
+  } catch (error) {
+    const code = error !== null && typeof error === 'object' && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : ''
+    if (code === 'ENOENT' || code === 'ENOTDIR') return []
+    throw error
+  }
+
+  const entries: GitTreeEntry[] = []
+  for (const dirent of dirents) {
+    if (dirent.name === '.git' || dirent.name === '.' || dirent.name === '..') continue
+    const rel = root === '' ? dirent.name : root + '/' + dirent.name
+    let kind: 'dir' | 'file' = dirent.isDirectory() ? 'dir' : 'file'
+    if (dirent.isSymbolicLink()) {
+      const target = await stat(join(abs, dirent.name))
+        .then((value) => (value.isDirectory() ? 'dir' : 'file'))
+        .catch(() => 'file' as const)
+      kind = target
+    } else if (!dirent.isFile() && !dirent.isDirectory()) {
+      // Sockets / fifos / devices: treat as non-openable files.
+      kind = 'file'
+    }
+    entries.push({
+      name: dirent.name,
+      path: rel,
+      kind,
+      status: kind === 'file' ? statusByPath.get(rel) : undefined,
+    })
+  }
+  const visible = showIgnored
+    ? await markGitIgnored(cwd, entries)
+    : await dropGitIgnored(cwd, entries)
+  visible.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+  return visible
+}
+
+/**
+ * Flat file search across the worktree. BFS from the repo root, stops after
+ * {@link TREE_SEARCH_LIMIT} hits or {@link TREE_SEARCH_MAX_DIRS} directories
+ * visited so huge trees stay bounded. When `showIgnored` is false, ignored
+ * directories are never entered (keeps `node_modules` out of the walk).
+ */
+export async function searchTree(
+  cwd: string,
+  query: string,
+  options: LoadTreeOptions = {},
+): Promise<GitTreeEntry[]> {
+  const needle = query.trim().toLowerCase()
+  if (needle.length === 0) return []
+  const showIgnored = options.showIgnored !== false
+  await assertGitRepo(cwd)
+  const statusByPath = await loadStatusByPath(cwd)
+  const matches: GitTreeEntry[] = []
+  const queue: string[] = ['']
+  let visited = 0
+  while (queue.length > 0 && matches.length < TREE_SEARCH_LIMIT && visited < TREE_SEARCH_MAX_DIRS) {
+    const dir = queue.shift() ?? ''
+    visited += 1
+    const abs = resolveUnderCwd(cwd, dir)
+    let dirents
+    try {
+      dirents = await readdir(abs, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    const pending: GitTreeEntry[] = []
+    for (const dirent of dirents) {
+      if (dirent.name === '.git' || dirent.name === '.' || dirent.name === '..') continue
+      const rel = dir === '' ? dirent.name : dir + '/' + dirent.name
+      let isDir = dirent.isDirectory()
+      if (dirent.isSymbolicLink()) {
+        isDir = await stat(join(abs, dirent.name))
+          .then((value) => value.isDirectory())
+          .catch(() => false)
+      }
+      pending.push({
+        name: dirent.name,
+        path: rel,
+        kind: isDir ? 'dir' : 'file',
+        status: isDir ? undefined : statusByPath.get(rel),
+      })
+    }
+    const visible = showIgnored
+      ? await markGitIgnored(cwd, pending)
+      : await dropGitIgnored(cwd, pending)
+    for (const entry of visible) {
+      if (entry.kind === 'dir') {
+        queue.push(entry.path)
+        continue
+      }
+      if (!entry.path.toLowerCase().includes(needle)) continue
+      matches.push(entry)
+      if (matches.length >= TREE_SEARCH_LIMIT) break
+    }
+  }
+  return matches
+}
+
+/**
+ * Annotate entries that `git check-ignore` reports as excluded so the client
+ * can fade them (VS Code Explorer style). Tracked paths stay unmarked.
+ */
+async function markGitIgnored(
+  cwd: string,
+  entries: readonly GitTreeEntry[],
+): Promise<GitTreeEntry[]> {
+  if (entries.length === 0) return []
+  const ignored = await gitIgnoredPaths(cwd, entries.map((entry) => entry.path))
+  if (ignored.size === 0) return [...entries]
+  return entries.map((entry) => (
+    ignored.has(entry.path) ? { ...entry, ignored: true } : entry
+  ))
+}
+
+/**
+ * Drop entries that `git check-ignore` reports as excluded. Tracked files
+ * that happen to match a pattern stay (check-ignore skips the index).
+ */
+async function dropGitIgnored(
+  cwd: string,
+  entries: readonly GitTreeEntry[],
+): Promise<GitTreeEntry[]> {
+  if (entries.length === 0) return []
+  const ignored = await gitIgnoredPaths(cwd, entries.map((entry) => entry.path))
+  if (ignored.size === 0) return [...entries]
+  return entries.filter((entry) => !ignored.has(entry.path))
+}
+
+/** Paths that match a git exclude rule (NUL stdin → NUL stdout). */
+async function gitIgnoredPaths(cwd: string, paths: readonly string[]): Promise<Set<string>> {
+  if (paths.length === 0) return new Set()
+  return new Promise((resolve) => {
+    const child = spawn('git', ['-C', cwd, 'check-ignore', '-z', '--stdin'], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+    })
+    const ignored = new Set<string>()
+    let stdout = ''
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => { stdout += chunk })
+    child.on('error', () => resolve(ignored))
+    child.on('close', () => {
+      for (const part of stdout.split('\0')) {
+        if (part.length > 0) ignored.add(part)
+      }
+      resolve(ignored)
+    })
+    child.stdin.end(paths.join('\0') + '\0', 'utf8')
+  })
+}
+
+/** Working-tree porcelain → path → status (first side wins if duplicated). */
+async function loadStatusByPath(cwd: string): Promise<Map<string, GitChangeStatus>> {
   const porcelain = await gitText(
     cwd,
     ['status', '--porcelain', '-z', '-uall'],
@@ -126,30 +296,20 @@ export async function loadTree(cwd: string, path: string): Promise<GitTreeEntry[
   ).catch(() => '')
   const statusByPath = new Map<string, GitChangeStatus>()
   for (const file of parsePorcelainZ(porcelain)) {
-    statusByPath.set(file.path, file.status)
+    if (!statusByPath.has(file.path)) statusByPath.set(file.path, file.status)
   }
+  return statusByPath
+}
 
-  const entries = new Map<string, GitTreeEntry>()
-  const prefix = root === '' ? '' : root + '/'
-  const put = (file: string, status: GitChangeStatus | undefined): void => {
-    if (file.length === 0 || entries.has(file)) return
-    if (prefix !== '' && !file.startsWith(prefix)) return
-    const slash = file.lastIndexOf('/')
-    entries.set(file, {
-      name: slash === -1 ? file : file.slice(slash + 1),
-      path: file,
-      kind: 'file',
-      status,
-    })
+/** Resolve `rel` under `cwd`; reject escapes outside the workspace. */
+function resolveUnderCwd(cwd: string, rel: string): string {
+  const root = resolve(cwd)
+  const abs = resolve(root, rel === '' ? '.' : rel)
+  const relToRoot = relative(root, abs)
+  if (relToRoot.startsWith('..') || isAbsolute(relToRoot)) {
+    throw badRequest('invalid path')
   }
-  for (const file of tracked.split('\0')) {
-    put(file, statusByPath.get(file))
-  }
-  // Untracked files never appear in ls-files; deleted ones drop out of it.
-  for (const [file, status] of statusByPath) {
-    put(file, status)
-  }
-  return [...entries.values()].sort((a, b) => a.path.localeCompare(b.path))
+  return abs
 }
 
 /** Image extensions the panel previews inline, mapped to their MIME type. */
