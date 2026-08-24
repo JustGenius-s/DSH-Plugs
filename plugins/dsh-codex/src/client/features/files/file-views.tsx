@@ -38,8 +38,6 @@ import {
 } from './highlight'
 import { renderMarkdown } from './markdown'
 
-/** Lines shown before a long file collapses behind an expand row. */
-const MAX_PREVIEW_LINES = 400
 /** Diff rows shown before a long patch collapses behind an expand row. */
 const MAX_DIFF_ROWS = 240
 /**
@@ -96,44 +94,27 @@ export function FileCodeView(props: {
 }) {
   const { content, lang, labels } = props
   const lines = useMemo(() => splitLines(content), [content])
-  const [expanded, setExpanded] = useState(false)
-  const capped = !expanded && lines.length > MAX_PREVIEW_LINES
-  const list = useMemo(
-    () => (capped ? lines.slice(0, MAX_PREVIEW_LINES) : lines),
-    [capped, lines],
-  )
-  // Highlight only the painted slice (not the whole buffer), and after the
-  // first plain-text paint — sync Shiki on render blocked open for 0.5–2s+.
-  // Expanding past the preview cap re-tokenizes the full buffer; keep the
-  // already-painted prefix colored until that finishes (don't flash plain).
+  // Highlight after the first plain-text paint — sync Shiki on render blocked
+  // open for 0.5–2s+. Oversized buffers skip (see highlight.ts caps); the
+  // virtual window still scrolls the full file as plain text.
   const [highlighted, setHighlighted] = useState<HighlightSpan[][] | undefined>(undefined)
   useEffect(() => {
-    setHighlighted(undefined)
-  }, [content, lang])
-  useEffect(() => {
     let cancelled = false
-    const slice = list.join('\n')
+    setHighlighted(undefined)
     const handle = window.setTimeout(() => {
       let result: HighlightSpan[][] | undefined
       try {
-        result = highlightLines(slice, lang)
+        result = highlightLines(content, lang)
       } catch {
         result = undefined
       }
-      if (cancelled) return
-      // Expand past the skip-cap: keep the already-painted prefix colored
-      // instead of flashing the whole file back to plain text.
-      setHighlighted((prev) => {
-        if (result !== undefined) return result
-        if (prev !== undefined && prev.length > 0) return prev
-        return undefined
-      })
+      if (!cancelled) setHighlighted(result)
     }, 0)
     return () => {
       cancelled = true
       window.clearTimeout(handle)
     }
-  }, [lang, list])
+  }, [content, lang])
 
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
@@ -159,19 +140,10 @@ export function FileCodeView(props: {
     })
   }, [matches])
 
-  // A match past the preview cap needs the full buffer painted.
-  useEffect(() => {
-    if (!findOpen || matches.length === 0) return
-    const hit = matches[activeMatch]
-    if (hit !== undefined && hit.line >= MAX_PREVIEW_LINES) {
-      setExpanded(true)
-    }
-  }, [findOpen, matches, activeMatch])
-
   const gutterWidth = String(lines.length).length
   const {
     start, end, onScroll, totalHeight, offsetY, scrollerRef, scrollToLine,
-  } = useVirtualWindow(list.length)
+  } = useVirtualWindow(lines.length)
 
   const goToMatch = useCallback((index: number): void => {
     if (matches.length === 0) return
@@ -179,8 +151,6 @@ export function FileCodeView(props: {
     setActiveMatch(next)
     const hit = matches[next]
     if (hit === undefined) return
-    if (hit.line >= MAX_PREVIEW_LINES) setExpanded(true)
-    // Defer scroll until expand/list settle when needed.
     requestAnimationFrame(() => scrollToLine(hit.line))
   }, [matches, scrollToLine])
 
@@ -251,13 +221,13 @@ export function FileCodeView(props: {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [findOpen, openFind, closeFind, goToMatch, activeMatch])
 
-  // Keep the active match in view after expand / list length changes.
+  // Keep the active match in view when navigating.
   useLayoutEffect(() => {
     if (!findOpen || matches.length === 0) return
     const hit = matches[activeMatch]
     if (hit === undefined) return
-    if (hit.line < list.length) scrollToLine(hit.line)
-  }, [findOpen, matches, activeMatch, list.length, scrollToLine])
+    scrollToLine(hit.line)
+  }, [findOpen, matches, activeMatch, scrollToLine])
 
   const matchesByLine = useMemo(() => {
     const map = new Map<number, FindMatch[]>()
@@ -323,13 +293,13 @@ export function FileCodeView(props: {
       <div className="dsh-files-view" ref={scrollerRef} onScroll={onScroll}>
         <div
           className="dsh-files-code"
-          style={{ height: totalHeight + (capped ? 28 : 0) }}
+          style={{ height: totalHeight }}
         >
           <div
             className="dsh-files-virt-window"
             style={{ top: offsetY }}
           >
-            {list.slice(start, end).map((line, offset) => {
+            {lines.slice(start, end).map((line, offset) => {
               const index = start + offset
               const lineHits = matchesByLine.get(index)
               const findRanges = lineHits?.map((hit) => ({
@@ -361,18 +331,6 @@ export function FileCodeView(props: {
               )
             })}
           </div>
-          {capped ? (
-            <div
-              className="dsh-files-expand-slot"
-              style={{ top: list.length * ROW_HEIGHT }}
-            >
-              <ExpandRow
-                count={lines.length - MAX_PREVIEW_LINES}
-                labels={labels}
-                onExpand={() => setExpanded(true)}
-              />
-            </div>
-          ) : null}
         </div>
       </div>
     </div>

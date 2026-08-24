@@ -406,10 +406,10 @@ export const MAX_TOKENIZATION_LINE_LENGTH = 4_000
 /**
  * Skip whole-buffer highlighting past these sizes. Measured with lazy
  * grammars: ~800-line TS (~26 KB) ~0.8s deferred; pnpm-lock.yaml (591 KB)
- * was ~2.4s. The old 500-line gate blanked ordinary expanded previews
- * (`files-panel.tsx` is ~800 lines). Keep a higher line ceiling for normal
- * source, and a byte ceiling for lockfiles / generated dumps. Caps apply
- * independently of overlong-line blanking.
+ * was ~2.4s. The preview paints the full file via virtualization; these
+ * caps only skip Shiki (plain text remains scrollable). Keep a high line
+ * ceiling for normal source, and a byte ceiling for lockfiles / dumps.
+ * Caps apply independently of overlong-line blanking.
  */
 const SKIP_ALL_HIGHLIGHT_BYTES = 250_000
 const SKIP_ALL_HIGHLIGHT_LINES = 4_000
