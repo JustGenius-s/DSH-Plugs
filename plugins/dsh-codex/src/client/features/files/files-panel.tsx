@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   IconChevronDownOutline14,
   IconChevronRightOutline14,
   IconSearchOutline16,
   Input,
+  Menu,
+  type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   GIT_GRAPH_DIFF_PATH,
@@ -56,6 +58,11 @@ export interface FilesPanelProps {
    * Defaults to true.
    */
   visible?: boolean
+  /**
+   * Insert a worktree file into the conversation draft as an `@file` chip.
+   * Wired by the feature wrapper; omitted when conversation is unavailable.
+   */
+  onAddToChat?: (path: string) => boolean
 }
 
 /**
@@ -89,6 +96,7 @@ export function FilesPanel(props: FilesPanelProps) {
           onOpen={props.onOpen}
           showIgnored={showIgnored}
           visible={visible}
+          onAddToChat={props.onAddToChat}
         />
       ) : file === undefined ? (
         <div className="dsh-files-status">{t('files.noCwd')}</div>
@@ -140,14 +148,22 @@ const TREE_REFRESH_DEBOUNCE_MS = 400
  * SSE (plus focus/visibility) silently re-fetches the root and every
  * currently expanded folder.
  */
+interface FileContextMenuState {
+  path: string
+  x: number
+  y: number
+}
+
 function FilesTree(props: {
   cwd: string
   t: (key: string) => string
   onOpen: (state: PanelNavState) => void
   showIgnored: boolean
   visible: boolean
+  onAddToChat?: (path: string) => boolean
 }) {
-  const { cwd, t, onOpen, showIgnored, visible } = props
+  const { cwd, t, onOpen, showIgnored, visible, onAddToChat } = props
+  const [contextMenu, setContextMenu] = useState<FileContextMenuState | null>(null)
   /** Children keyed by parent dir path (`''` = workspace root). */
   const [childrenByDir, setChildrenByDir] = useState<ReadonlyMap<string, readonly GitTreeEntry[]>>(
     () => new Map(),
@@ -332,6 +348,24 @@ function FilesTree(props: {
   const rootEntries = childrenByDir.get('')
   const searchList = matches ?? []
 
+  const openFileMenu = useCallback((event: ReactMouseEvent, path: string): void => {
+    if (onAddToChat === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    setContextMenu({ path, x: event.clientX, y: event.clientY })
+  }, [onAddToChat])
+
+  const menuItems = useMemo((): readonly MenuEntry[] => {
+    if (onAddToChat === undefined) return []
+    return [{ id: 'add-to-chat', label: t('context.addToChat') }]
+  }, [onAddToChat, t])
+
+  const onMenuSelect = useCallback((id: string): void => {
+    if (contextMenu === null) return
+    if (id === 'add-to-chat') onAddToChat?.(contextMenu.path)
+    setContextMenu(null)
+  }, [contextMenu, onAddToChat])
+
   return (
     <div className="dsh-files-tree">
       <div className="dsh-files-search">
@@ -354,7 +388,14 @@ function FilesTree(props: {
           ) : (
             <>
               {searchList.slice(0, MAX_SEARCH_ROWS).map((entry) => (
-                <FileRow key={entry.path} entry={entry} depth={0} onOpen={onOpen} hint />
+                <FileRow
+                  key={entry.path}
+                  entry={entry}
+                  depth={0}
+                  onOpen={onOpen}
+                  onContextMenu={openFileMenu}
+                  hint
+                />
               ))}
               {searchList.length >= MAX_SEARCH_ROWS ? (
                 <div className="dsh-files-status dsh-files-tree-note">
@@ -376,9 +417,28 @@ function FilesTree(props: {
             onToggle={toggle}
             onPrefetch={prefetchDir}
             onOpen={onOpen}
+            onContextMenu={openFileMenu}
           />
         )}
       </div>
+      {onAddToChat !== undefined ? (
+        <Menu
+          open={contextMenu !== null}
+          portal
+          dense
+          side="bottom"
+          align="start"
+          anchor={<span className="dsh-files-menu-anchor" aria-hidden="true" />}
+          getAnchorRect={() => (
+            contextMenu === null
+              ? null
+              : new DOMRect(contextMenu.x, contextMenu.y, 1, 1)
+          )}
+          items={menuItems}
+          onSelect={onMenuSelect}
+          onClose={() => setContextMenu(null)}
+        />
+      ) : null}
     </div>
   )
 }
@@ -393,6 +453,7 @@ function TreeLevel(props: {
   /** Hover warm-up so expand usually paints with children already cached. */
   onPrefetch: (dir: string) => void
   onOpen: (state: PanelNavState) => void
+  onContextMenu?: (event: ReactMouseEvent, path: string) => void
   /**
    * Ancestor folder was gitignored — paint every descendant faded even if a
    * nested listing omitted the flag (VS Code Explorer under node_modules).
@@ -401,7 +462,7 @@ function TreeLevel(props: {
 }) {
   const {
     nodes, depth, expanded, childrenByDir, onToggle, onPrefetch, onOpen,
-    ancestorIgnored = false,
+    onContextMenu, ancestorIgnored = false,
   } = props
   return (
     <>
@@ -414,6 +475,7 @@ function TreeLevel(props: {
               entry={node}
               depth={depth}
               onOpen={onOpen}
+              onContextMenu={onContextMenu}
               ignored={ignored}
             />
           )
@@ -454,6 +516,7 @@ function TreeLevel(props: {
                 onToggle={onToggle}
                 onPrefetch={onPrefetch}
                 onOpen={onOpen}
+                onContextMenu={onContextMenu}
                 ancestorIgnored={ignored}
               />
             ) : null}
@@ -469,12 +532,13 @@ function FileRow(props: {
   entry: GitTreeEntry
   depth: number
   onOpen: (state: PanelNavState) => void
+  onContextMenu?: (event: ReactMouseEvent, path: string) => void
   /** Show the parent directory after the name (search results are flat). */
   hint?: boolean
   /** Override when an ancestor directory is ignored. */
   ignored?: boolean
 }) {
-  const { entry, depth, onOpen, hint } = props
+  const { entry, depth, onOpen, onContextMenu, hint } = props
   const ignored = props.ignored === true || entry.ignored === true
   return (
     <div
@@ -485,6 +549,9 @@ function FileRow(props: {
         type="button"
         className="dsh-files-tree-row-main"
         onClick={() => onOpen({ mode: 'preview', file: entry.path })}
+        onContextMenu={onContextMenu === undefined
+          ? undefined
+          : (event) => onContextMenu(event, entry.path)}
         title={ignored ? `${entry.path} (gitignore)` : entry.path}
       >
         <span className="dsh-files-tree-chevron" />

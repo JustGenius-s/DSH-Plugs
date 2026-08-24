@@ -5,6 +5,7 @@ import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
+import { insertFileReference } from './add-to-chat'
 import { FilesPanel, type FilesPanelProps } from './files-panel'
 
 const PANEL_SLOT = 'side.panel'
@@ -77,6 +78,7 @@ export function createFilesFeature(
                 onOpen: open,
                 showIgnored,
                 visible: props.visible !== false,
+                onAddToChat: (path) => insertFileReference(ctx, props.sessionId, path),
               }
               return createElement(FilesPanel, panelProps)
             } as never,

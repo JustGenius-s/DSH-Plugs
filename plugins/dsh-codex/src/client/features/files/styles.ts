@@ -23,6 +23,7 @@ const FILES_CSS = `
 .dsh-files-file-glyph,.dsh-files-folder-glyph{flex:none;width:16px;height:16px;display:flex;align-items:center;justify-content:center}
 .dsh-files-file-glyph svg,.dsh-files-folder-glyph svg{width:16px;height:16px;display:block}
 .dsh-files-tree-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-files-menu-anchor{position:fixed;width:0;height:0;pointer-events:none}
 /* Status badges and diff tints default to the LIGHT palette (GitHub-light
    flavored); the data-ds-dark-theme block at the end restates them in the
    original One Dark values. */
