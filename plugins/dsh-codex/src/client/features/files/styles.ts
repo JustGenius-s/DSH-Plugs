@@ -37,6 +37,35 @@ const FILES_CSS = `
    vertical (virtualized) and horizontal scrolling so sticky gutters keep
    working against the same scrollport. */
 .dsh-files-preview,.dsh-files-diff{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.dsh-files-code-shell{flex:1;min-height:0;display:flex;flex-direction:column;outline:none}
+/* VS Code–style find widget above the code scrollport. */
+.dsh-files-find{flex:none;display:flex;align-items:center;gap:4px;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l,rgba(128,128,128,.16));background:var(--dsw-specific-sidebar-fill)}
+.dsh-files-find-input{flex:1;min-width:0;height:28px;padding:0 8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.2));border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:28px;outline:none}
+.dsh-files-find-input:focus{border-color:var(--dsw-alias-state-business-primary,#4176e6)}
+.dsh-files-find-input.is-invalid{border-color:#cf222e}
+.dsh-files-find-input::-webkit-search-cancel-button{display:none}
+.dsh-files-find-toggles{flex:none;display:inline-flex;align-items:center;gap:1px;padding:1px;border-radius:6px;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.1))}
+.dsh-files-find-toggle{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:24px;padding:0 5px;border:none;border-radius:5px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);font:inherit;font-size:11px;font-weight:600;line-height:1;letter-spacing:.02em;cursor:pointer}
+.dsh-files-find-toggle:hover{color:var(--dsw-alias-label-primary)}
+.dsh-files-find-toggle.is-active{background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-state-business-primary,#4176e6);box-shadow:0 0 0 1px rgba(65,118,230,.35)}
+/* Whole-word: |ab| — VS Code word-boundary bars, not bare "ab" (reads as case). */
+.dsh-files-find-whole{display:inline-flex;align-items:center;gap:2px;font:inherit;font-size:inherit;font-weight:inherit;line-height:1;letter-spacing:inherit}
+.dsh-files-find-whole-bar{display:inline-block;width:1.5px;height:11px;border-radius:1px;background:currentColor;opacity:.85}
+.dsh-files-find-count{flex:none;min-width:4.5em;padding:0 4px;font-size:12px;line-height:18px;text-align:center;color:var(--dsw-alias-label-tertiary,#8b8b90);white-space:nowrap}
+.dsh-files-find-count.is-invalid{color:#cf222e}
+.dsh-files-find-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer}
+.dsh-files-find-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+.dsh-files-find-btn:disabled{opacity:.4;cursor:default}
+.dsh-files-code-text .dsh-files-find-hit{background:rgba(234,179,8,.38);border-radius:2px}
+.dsh-files-code-text .dsh-files-find-active{background:rgba(249,115,22,.55);border-radius:2px}
+.dsh-files-code-line.is-find-active-line{background:rgba(249,115,22,.08)}
+body[data-ds-dark-theme] .dsh-files-find-input{background:rgba(255,255,255,.06)}
+body[data-ds-dark-theme] .dsh-files-find-input.is-invalid{border-color:#f87171}
+body[data-ds-dark-theme] .dsh-files-find-toggle.is-active{background:rgba(255,255,255,.1);color:#79a8ff;box-shadow:0 0 0 1px rgba(121,168,255,.4)}
+body[data-ds-dark-theme] .dsh-files-find-count.is-invalid{color:#f87171}
+body[data-ds-dark-theme] .dsh-files-code-text .dsh-files-find-hit{background:rgba(234,179,8,.28)}
+body[data-ds-dark-theme] .dsh-files-code-text .dsh-files-find-active{background:rgba(249,115,22,.45)}
+body[data-ds-dark-theme] .dsh-files-code-line.is-find-active-line{background:rgba(249,115,22,.12)}
 .dsh-files-image{flex:1;min-height:0;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:16px}
 .dsh-files-image img{max-width:100%;height:auto;border-radius:6px;background:repeating-conic-gradient(rgba(128,128,128,.18) 0% 25%,transparent 0% 50%) 0 0/16px 16px}
 .dsh-files-preview .dsh-files-status,.dsh-files-diff .dsh-files-status{padding:16px 12px}
@@ -81,7 +110,9 @@ const FILES_CSS = `
    inline plus a --shiki-dark custom property (see highlight.ts); under the
    app's dark marker the dark value wins. !important beats the inline style.
    Covers both the file preview and the diff view. */
-body[data-ds-dark-theme] .dsh-files-code-text span,body[data-ds-dark-theme] .dsh-files-diff-text span{color:var(--shiki-dark)!important}
+/* Only flip spans that carry an inline style (Shiki tokens). Find-overlay
+   pieces without token styles must inherit the line color. */
+body[data-ds-dark-theme] .dsh-files-code-text span[style],body[data-ds-dark-theme] .dsh-files-diff-text span[style]{color:var(--shiki-dark)!important}
 
 /* Dark restatement of the status/diff palette (One Dark values). */
 body[data-ds-dark-theme] .dsh-files-status.is-error{color:#f87171}

@@ -182,8 +182,12 @@ export async function loadTree(
 /**
  * Flat file search across the worktree. BFS from the repo root, stops after
  * {@link TREE_SEARCH_LIMIT} hits or {@link TREE_SEARCH_MAX_DIRS} directories
- * visited so huge trees stay bounded. When `showIgnored` is false, ignored
- * directories are never entered (keeps `node_modules` out of the walk).
+ * visited so huge trees stay bounded.
+ *
+ * Ignored directories are **never** entered — same as VS Code Quick Open / file
+ * search — even when the Explorer setting shows gitignored rows. Walking
+ * `node_modules` while marking every child with `check-ignore` took ~26s on
+ * this repo and left the client stuck on “loading”.
  */
 export async function searchTree(
   cwd: string,
@@ -225,11 +229,16 @@ export async function searchTree(
         status: isDir ? undefined : statusByPath.get(rel),
       })
     }
+    // Always classify ignore so we can skip ignored dirs. When the Explorer
+    // setting hides them, drop those rows from results entirely.
+    const annotated = await markGitIgnored(cwd, pending)
     const visible = showIgnored
-      ? await markGitIgnored(cwd, pending)
-      : await dropGitIgnored(cwd, pending)
+      ? annotated
+      : annotated.filter((entry) => entry.ignored !== true)
     for (const entry of visible) {
       if (entry.kind === 'dir') {
+        // Never descend into gitignored folders (node_modules, dist, …).
+        if (entry.ignored === true) continue
         queue.push(entry.path)
         continue
       }

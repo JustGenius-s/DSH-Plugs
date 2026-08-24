@@ -295,16 +295,20 @@ function FilesTree(props: {
     }
     let cancelled = false
     setSearchBusy(true)
+    setMatches(null)
     const timer = setTimeout(() => {
-      void fetchTreeSearch(cwd, needle, showIgnored).then((value) => {
-        if (cancelled) return
-        setSearchBusy(false)
-        if (!value.ok) {
-          setMatches([])
-          return
-        }
-        setMatches(value.entries.filter((entry) => entry.kind === 'file'))
-      })
+      void fetchTreeSearch(cwd, needle, showIgnored)
+        .then((value) => {
+          if (cancelled) return
+          if (!value.ok) {
+            setMatches([])
+            return
+          }
+          setMatches(value.entries.filter((entry) => entry.kind === 'file'))
+        })
+        .finally(() => {
+          if (!cancelled) setSearchBusy(false)
+        })
     }, 200)
     return () => {
       cancelled = true
@@ -617,6 +621,19 @@ function langHintOf(path: string): string {
 function viewLabels(t: (key: string) => string): ViewLabels {
   return {
     expand: (count) => t('files.expand').replace('{count}', String(count)),
+    findPlaceholder: t('files.findPlaceholder'),
+    findNoResults: t('files.findNoResults'),
+    findInvalidRegex: t('files.findInvalidRegex'),
+    findMatchCount: (current, total) =>
+      t('files.findMatchCount')
+        .replace('{current}', String(current))
+        .replace('{total}', String(total)),
+    findPrev: t('files.findPrev'),
+    findNext: t('files.findNext'),
+    findClose: t('files.findClose'),
+    findMatchCase: t('files.findMatchCase'),
+    findWholeWord: t('files.findWholeWord'),
+    findRegex: t('files.findRegex'),
   }
 }
 

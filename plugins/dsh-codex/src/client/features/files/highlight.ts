@@ -404,13 +404,15 @@ function ensureLanguage(grammarId: string): boolean {
  */
 export const MAX_TOKENIZATION_LINE_LENGTH = 4_000
 /**
- * Skip whole-buffer highlighting past these sizes. Measured: pnpm-lock.yaml
- * (591 KB / 6.6k lines) took ~2.4s on the main thread; a 20 KB TS file ~0.6s.
- * Sidebar preview prefers plain text over a multi-second stall. Byte and
- * line caps apply independently of overlong-line blanking.
+ * Skip whole-buffer highlighting past these sizes. Measured with lazy
+ * grammars: ~800-line TS (~26 KB) ~0.8s deferred; pnpm-lock.yaml (591 KB)
+ * was ~2.4s. The old 500-line gate blanked ordinary expanded previews
+ * (`files-panel.tsx` is ~800 lines). Keep a higher line ceiling for normal
+ * source, and a byte ceiling for lockfiles / generated dumps. Caps apply
+ * independently of overlong-line blanking.
  */
-const SKIP_ALL_HIGHLIGHT_BYTES = 100_000
-const SKIP_ALL_HIGHLIGHT_LINES = 500
+const SKIP_ALL_HIGHLIGHT_BYTES = 250_000
+const SKIP_ALL_HIGHLIGHT_LINES = 4_000
 const SKIP_ALL_HIGHLIGHT_OVERLONG = 10
 
 /** One highlighted run of a line: text plus the inline style shiki assigned. */
