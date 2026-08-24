@@ -8,9 +8,6 @@ import {
   type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  GIT_GRAPH_DIFF_PATH,
-  GIT_GRAPH_FILE_PATH,
-  GIT_GRAPH_TREE_PATH,
   type GitChangeStatus,
   type GitFileDiff,
   type GitGraphDiffResponse,
@@ -25,6 +22,7 @@ import { subscribeRepoWatch } from '../repo-watch'
 import { FileCodeView, FileDiffView, FileMarkdownView, type ViewLabels } from './file-views'
 import { isMarkdownFile } from './markdown'
 import { ensureFilesStyles } from './styles'
+import { fetchDiff, fetchFile, fetchTree, fetchTreeSearch } from './files-api'
 
 ensureFilesStyles()
 
@@ -855,53 +853,4 @@ function FilesDiffView(props: {
       />
     </div>
   )
-}
-
-function fetchTree(
-  cwd: string,
-  path = '',
-  showIgnored = true,
-): Promise<GitGraphTreeResponse> {
-  const params = new URLSearchParams({ cwd })
-  if (path.length > 0) params.set('path', path)
-  if (!showIgnored) params.set('ignored', '0')
-  return fetchJson<GitGraphTreeResponse>(`${GIT_GRAPH_TREE_PATH}?${params.toString()}`)
-}
-
-function fetchTreeSearch(
-  cwd: string,
-  query: string,
-  showIgnored = true,
-): Promise<GitGraphTreeResponse> {
-  const params = new URLSearchParams({ cwd, q: query })
-  if (!showIgnored) params.set('ignored', '0')
-  return fetchJson<GitGraphTreeResponse>(`${GIT_GRAPH_TREE_PATH}?${params.toString()}`)
-}
-
-function fetchFile(cwd: string, path: string, sha?: string): Promise<GitGraphFileResponse> {
-  const params = new URLSearchParams({ cwd, path })
-  if (sha !== undefined) params.set('sha', sha)
-  return fetchJson<GitGraphFileResponse>(`${GIT_GRAPH_FILE_PATH}?${params.toString()}`)
-}
-
-function fetchDiff(cwd: string, path: string, sha?: string): Promise<GitGraphDiffResponse> {
-  const params = new URLSearchParams({ cwd, path })
-  if (sha !== undefined) params.set('sha', sha)
-  return fetchJson<GitGraphDiffResponse>(`${GIT_GRAPH_DIFF_PATH}?${params.toString()}`)
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  try {
-    const response = await fetch(url, {
-      cache: 'no-store',
-      headers: { accept: 'application/json' },
-    })
-    return await response.json() as T
-  } catch (error) {
-    return {
-      ok: false,
-      code: 'git',
-      message: error instanceof Error ? error.message : String(error),
-    } as T
-  }
 }

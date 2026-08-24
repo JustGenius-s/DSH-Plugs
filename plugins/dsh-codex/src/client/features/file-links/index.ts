@@ -20,22 +20,7 @@ import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
-
-/**
- * The client runtime's sessions face, narrowed structurally. This package
- * compiles host and client entries in one program, and the host-side
- * `sessions` augmentation (dsh-host-apiproxy's SessionStore) wins the
- * merged `Context` interface — so the client face is read through a cast,
- * the same way the shell narrows `useSessions` state.
- */
-interface ClientSessionsLike {
-  list: {
-    getSnapshot(): {
-      current?: string
-      byId?: Record<string, { cwd?: string }>
-    }
-  }
-}
+import { currentSessionLocation } from '../../host-adapters/sessions'
 
 export function createFileLinksFeature(
   ctx: ClientContext,
@@ -94,11 +79,9 @@ function panelTarget(
   if (!normalized.startsWith('/') && !/^[A-Za-z]:\//.test(normalized)) {
     return undefined
   }
-  const sessions = ctx.sessions as unknown as ClientSessionsLike
-  const state = sessions.list.getSnapshot()
-  const sessionId = state.current
+  const { sessionId, cwd: rawCwd } = currentSessionLocation(ctx.sessions)
   if (sessionId === undefined) return undefined
-  const cwd = state.byId?.[sessionId]?.cwd?.replace(/\\/g, '/')
+  const cwd = rawCwd?.replace(/\\/g, '/')
   if (cwd === undefined || cwd === '') return undefined
   const root = cwd.endsWith('/') ? cwd : cwd + '/'
   const trimmed = normalized.replace(/\/+$/, '')

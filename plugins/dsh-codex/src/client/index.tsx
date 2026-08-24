@@ -77,6 +77,7 @@ export function apply(ctx: ClientContext): void {
     return () => {
       features.dispose()
       terminalControllers.dispose()
+      scope.dispose()
     }
   }, 'dsh-codex: feature manager')
 }

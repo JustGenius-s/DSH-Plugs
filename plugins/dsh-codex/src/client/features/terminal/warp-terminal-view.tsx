@@ -25,23 +25,29 @@ import { ensureWarpTerminalStyles } from './styles'
 import { createBlockGrid, writeToGrid, disposeGrid, resizeGrid, type StoreOptions, type BlockGrid } from './block-store'
 import { composeDoc, type DocBlock, type ComposedDoc } from './doc-model'
 import { buildPalette, measureCells, paintVisible, extractSelection, type RenderTheme, type CellMetrics, type SelectionRange } from './cell-render'
+import {
+  TerminalConnectionController,
+  type TerminalConnectionState,
+} from './connection-controller'
+import { TerminalQueryResponder } from './query-responder'
+import {
+  historyGhost,
+  historyNavigationAllowed,
+  historyPrefixMatches,
+  keyToBytes,
+  lineBounds,
+  MAX_HISTORY_ENTRIES,
+  mergeHistory,
+  pasteInputBytes,
+  visibleCompletionRows,
+  wordCaret,
+  type CompletionMenu,
+} from './input-model'
 
 ensureWarpTerminalStyles()
 
 const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const LINE_HEIGHT = 1.2
-
-// Paste pipeline mirrored from Warp (crates/warp_tui/src/terminal_content_element.rs):
-// CRLF/LF normalize to CR, and the payload is wrapped in the bracketed-paste
-// markers only when the receiving line editor / program enabled mode ?2004.
-function normalizePasteText(text: string): string {
-  return text.replace(/\r\n/g, '\r').replace(/\n/g, '\r')
-}
-
-function pasteInputBytes(text: string, bracketedPaste: boolean): string {
-  const normalized = normalizePasteText(text)
-  return bracketedPaste ? '\x1b[200~' + normalized + '\x1b[201~' : normalized
-}
 
 // Canvas themes: the dark palette is the panel's original One Dark flavor,
 // the light palette is VSCode's Light+ terminal. Background/foreground/cursor
@@ -100,13 +106,6 @@ interface Block {
   exitCode: number | null
 }
 
-interface CompletionMenu {
-  start: number
-  end: number
-  candidates: TerminalCompletionCandidate[]
-  selectedIndex: number
-}
-
 type CompletionIntent = 'suggest' | 'tab'
 
 interface CompletionRequest {
@@ -126,34 +125,11 @@ const KIND_LABEL: Record<TerminalCompletionCandidate['kind'], 'completion.comman
   history: 'completion.history',
 }
 
-const MAX_HISTORY_ENTRIES = 2000
-
-let blockCounter = 0
 function newBlockId(): string {
-  blockCounter += 1
-  return 'b' + Date.now().toString(36) + '-' + blockCounter
-}
-
-function buildWsUrl(cwd: string | undefined, shell: TerminalShell, sessionToken: string): string {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const query = new URLSearchParams()
-  if (cwd) query.set('cwd', cwd)
-  if (shell !== 'auto') query.set('shell', shell)
-  query.set('session', sessionToken)
-  query.set('rows', '30')
-  query.set('cols', '100')
-  return proto + '//' + window.location.host + '/dsh-codex/terminal/ws?' + query.toString()
-}
-
-/**
- * Reconnect token for one terminal view. The host keeps the PTY alive across
- * socket drops keyed by this id, so a reconnect resumes the same shell.
- */
-function newSessionToken(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
+    return 'b-' + crypto.randomUUID()
   }
-  return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12)
+  return 'b-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)
 }
 
 function displayPath(cwd: string): string {
@@ -265,10 +241,9 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const [completionMenu, setCompletionMenu] = useState<CompletionMenu | null>(null)
   const [ghost, setGhost] = useState('')
   const [currentContext, setCurrentContext] = useState<BlockContext | null>(null)
-  const [connState, setConnState] = useState<'connecting' | 'ready' | 'reconnecting' | 'disconnected'>('connecting')
+  const [connState, setConnState] = useState<TerminalConnectionState>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
-  const [reconnectToken, setReconnectToken] = useState(0)
   const [altActive, setAltActive] = useState(false)
   const [doc, setDoc] = useState<ComposedDoc | null>(null)
   const [metrics, setMetrics] = useState<CellMetrics>({ cellWidth: 8, cellHeight: 14 })
@@ -282,7 +257,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const terminalFontSizeRef = useRef(terminalFontSize)
   const [viewHeight, setViewHeight] = useState(600)
 
-  const wsRef = useRef<WebSocket | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const draftRef = useRef('')
   const historyRef = useRef<string[]>([])
@@ -311,39 +285,26 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const scrollTopRef = useRef(0)
   const sendResizeRef = useRef(() => {})
   const lastSentDimsRef = useRef('')
-  const termcapBufferRef = useRef('')
-  const oscQueryBufferRef = useRef('')
   // Reported by the host's setup probe: the shell's line editor accepts
   // bracketed paste, so multi-line submissions can arrive as one buffer.
   const shellBracketedPasteRef = useRef(false)
   const handleServerMessageRef = useRef((m: ServerMessage) => { void m })
-  // Ready gate for controller-driven runs: a `run` resolves once the PTY is
-  // OPEN and has delivered a `ready` message, so an external consumer never
-  // submits a command into a socket that is still connecting. Rejected when
-  // the view unmounts (so a pending run fails instead of hanging forever).
-  const readyPromiseRef = useRef<Promise<void> | null>(null)
-  const readyResolveRef = useRef<(() => void) | null>(null)
-  const readyRejectRef = useRef<((reason?: unknown) => void) | null>(null)
-  // Context gate for controller-driven runs. The host delivers `ready` first,
-  // then asynchronously an `updateContext` (the `context` message). A quick-
-  // action `run` must not create its first block until the host has reported a
-  // current context, or the block header renders differently than a manually
-  // opened tab (whose first block always carries a context). Resolved by
-  // `case 'context'`, rejected on unmount / connection replacement exactly
-  // like the ready gate.
-  const contextPromiseRef = useRef<Promise<void> | null>(null)
-  const contextResolveRef = useRef<(() => void) | null>(null)
-  const contextRejectRef = useRef<((reason?: unknown) => void) | null>(null)
+  const connectionRef = useRef<TerminalConnectionController | null>(null)
+  connectionRef.current ??= new TerminalConnectionController({
+    onMessage: message => handleServerMessageRef.current(message),
+    onState: state => setConnState(state),
+    onMalformedMessage: parseError => {
+      console.warn('[warp-terminal] dropped malformed host message', parseError)
+    },
+  })
+  const connection = connectionRef.current
+  const queryResponderRef = useRef<TerminalQueryResponder | null>(null)
+  queryResponderRef.current ??= new TerminalQueryResponder(data => {
+    connection.send({ type: 'input', data })
+  })
   // Kept current so the controller's `run` closure always dispatches through
   // the latest submitCommand without re-registering on every render.
   const submitCommandRef = useRef<((command: string) => void) | null>(null)
-  const lastSessionKeyRef = useRef('')
-  const sessionTokenRef = useRef(newSessionToken())
-  // Set when the host reported the shell's own `exit`: a real end of session,
-  // so no auto-reconnect (a reconnect would silently spawn a fresh shell).
-  const exitedRef = useRef(false)
-  const retryCountRef = useRef(0)
-  const retryTimerRef = useRef(0)
   const eraseScrollbackBufRef = useRef('')
   // Clearing commands (`clear`, or ED 3 in the output stream) wipe blocks
   // whose block-end is still in flight. Count them so back-to-back clears
@@ -380,8 +341,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // programs like vim) lay out to what we actually render, not the spawn-time
   // placeholder. Sent on ready and whenever the panel is measured again.
   const sendResize = useCallback(() => {
-    const ws = wsRef.current
-    if (ws === null || ws.readyState !== WebSocket.OPEN) return
     const scrollEl = scrollRef.current
     const m = metricsRef.current
     // Single source of truth: render with colsRef (measure's value), and tell
@@ -392,19 +351,17 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     if (lastSentDimsRef.current === key) return
     lastSentDimsRef.current = key
     const message: ClientMessage = { type: 'resize', cols, rows }
-    ws.send(JSON.stringify(message))
-  }, [])
+    connection.send(message)
+  }, [connection])
   sendResizeRef.current = sendResize
 
   // Forward terminal query answers (cursor position, device attributes, ...)
   // from any grid back to the PTY. Bound at grid creation so the very first
   // query a full-screen program sends is answered before it can block.
   const forwardQueryResponse = useCallback((data: string) => {
-    const ws = wsRef.current
-    if (ws === null || ws.readyState !== WebSocket.OPEN) return
     const message: ClientMessage = { type: 'input', data }
-    ws.send(JSON.stringify(message))
-  }, [])
+    connection.send(message)
+  }, [connection])
 
   const newGrid = useCallback((id: string): BlockGrid => {
     return createBlockGrid(id, { cols: colsRef.current, scrollback: terminalScrollbackRef.current }, forwardQueryResponse)
@@ -491,119 +448,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   useEffect(() => {
     schedulePaint()
   }, [theme, schedulePaint])
-  // xterm.js answers cursor-position / device-attribute queries but NOT
-  // XTGETTCAP (DCS +q termcap queries). vim 9.1 issues those at startup; with
-  // no answer it assumes a dumb terminal and stops echoing typed characters.
-  // Intercept the queries in the PTY stream and answer with xterm values.
-  const XTGETTCAP_ANSWERS: Record<string, string> = {
-    '436f': '323536',   // Co -> 256 colors
-    '6b75': '1b4f41',   // ku -> ESC O A (up)
-    '6b64': '1b4f42',   // kd -> ESC O B (down)
-    '6b72': '1b4f43',   // kr -> ESC O C (right)
-    '6b6c': '1b4f44',       // kl -> ESC O D (left)
-    '2332': '1b5b313b3248', // #2 -> ESC [ 1 ; 2 H
-    '2334': '1b5b313b3244', // #4 -> ESC [ 1 ; 2 D
-    '2569': '1b5b313b3243', // %i -> ESC [ 1 ; 2 C
-    '6b34': '1b4f53',       // k4 -> ESC O S
-    '6b35': '1b5b31357e',   // k5 -> ESC [ 1 5 ~
-    '6b32': '1b4f51',       // k2 -> ESC O Q
-    '6b33': '1b4f52',       // k3 -> ESC O R
-    '6b36': '1b5b31377e',   // k6 -> ESC [ 1 7 ~
-    '2a37': '1b5b313b3246', // *7 -> ESC [ 1 ; 2 F
-    '4631': '1b5b32337e',   // F1 -> ESC [ 2 3 ~
-    '4632': '1b5b32347e',   // F2 -> ESC [ 2 4 ~
-  }
-  const answerTermcapQueries = (text: string): void => {
-    const DCSQ = '\x1bP+q'
-    const ST = '\x1b\\'
-    const pending = termcapBufferRef.current + text
-    let idx = 0
-
-    for (;;) {
-      const start = pending.indexOf(DCSQ, idx)
-      if (start === -1) {
-        // Preserve only a suffix which could start DCSQ. PTY chunks routinely
-        // split ESC P + q across WebSocket message boundaries.
-        termcapBufferRef.current = ''
-        const max = Math.min(DCSQ.length - 1, pending.length)
-        for (let len = max; len > 0; len -= 1) {
-          const suffix = pending.slice(pending.length - len)
-          if (DCSQ.startsWith(suffix)) {
-            termcapBufferRef.current = suffix
-            break
-          }
-        }
-        return
-      }
-
-      const end = pending.indexOf(ST, start + DCSQ.length)
-      const nextStart = pending.indexOf(DCSQ, start + DCSQ.length)
-      if (nextStart !== -1 && (end === -1 || nextStart < end)) {
-        // A stale partial prefix can be followed by a fresh query in the next
-        // PTY chunk. Restart at the newer DCS instead of swallowing both.
-        idx = nextStart
-        continue
-      }
-      if (end === -1) {
-        termcapBufferRef.current = pending.slice(start)
-        return
-      }
-
-      const hexQuery = pending.slice(start + DCSQ.length, end).toLowerCase()
-      if (!/^[0-9a-f]+$/.test(hexQuery)) {
-        idx = end + ST.length
-        continue
-      }
-      const valueHex = XTGETTCAP_ANSWERS[hexQuery]
-      const payload = valueHex === undefined
-        ? '\x1bP0+r' + hexQuery + ST
-        : '\x1bP1+r' + hexQuery + '=' + valueHex + ST
-      const ws = wsRef.current
-      const open = ws !== null && ws.readyState === WebSocket.OPEN
-      if (open) {
-        const message: ClientMessage = { type: 'input', data: payload }
-        ws.send(JSON.stringify(message))
-      }
-      idx = end + ST.length
-    }
-  }
-  // Vim also queries foreground/background colors through OSC 10/11. A
-  // headless xterm has no DOM renderer, so it does not answer those queries;
-  // reply directly or Vim can remain in its terminal-capability wait state.
-  const answerOscQueries = (text: string): void => {
-    const BEL = '\x07'
-    const ST = '\x1b\\'
-    const queries = [
-      { token: '\x1b]10;?' + BEL, reply: '\x1b]10;rgb:e6e6/e6e6/e8e8' + ST },
-      { token: '\x1b]11;?' + BEL, reply: '\x1b]11;rgb:1515/1515/1717' + ST },
-      { token: '\x1b]12;?' + BEL, reply: '\x1b]12;rgb:e6e6/e6e6/e8e8' + ST },
-      { token: '\x1b]10;?' + ST, reply: '\x1b]10;rgb:e6e6/e6e6/e8e8' + ST },
-      { token: '\x1b]11;?' + ST, reply: '\x1b]11;rgb:1515/1515/1717' + ST },
-      { token: '\x1b]12;?' + ST, reply: '\x1b]12;rgb:e6e6/e6e6/e8e8' + ST },
-    ]
-    let pending = oscQueryBufferRef.current + text
-    for (;;) {
-      let hit: { index: number; token: string; reply: string } | null = null
-      for (const query of queries) {
-        const index = pending.indexOf(query.token)
-        if (index !== -1 && (hit === null || index < hit.index)) hit = { index, ...query }
-      }
-      if (hit === null) break
-      const ws = wsRef.current
-      const open = ws !== null && ws.readyState === WebSocket.OPEN
-      if (open) ws.send(JSON.stringify({ type: 'input', data: hit.reply } satisfies ClientMessage))
-      pending = pending.slice(hit.index + hit.token.length)
-    }
-    oscQueryBufferRef.current = ''
-    const max = Math.max(...queries.map((query) => query.token.length)) - 1
-    for (let len = Math.min(max, pending.length); len > 0; len -= 1) {
-      const suffix = pending.slice(pending.length - len)
-      if (queries.some((query) => query.token.startsWith(suffix))) {
-        oscQueryBufferRef.current = suffix
-        break
-      }
-    }
-  }
   // `clear` must wipe the whole transcript, not just the running block's
   // grid: in the block model the "scrollback" IS the earlier blocks. Two
   // entry points share this reset — the runDraft command check (covers
@@ -637,8 +481,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   }, [rebuildDoc, schedulePaint])
 
   const appendOutput = useCallback((text: string) => {
-    answerTermcapQueries(text)
-    answerOscQueries(text)
+    queryResponderRef.current?.consume(text)
     if (altActiveRef.current && altTermRef.current !== null) {
       const term = altTermRef.current
       term.write(text, () => {
@@ -740,8 +583,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   }, [])
 
   const requestCompletion = useCallback((cursor: number, intent: CompletionIntent) => {
-    const ws = wsRef.current
-    if (ws === null || ws.readyState !== WebSocket.OPEN) return
     if (runningIdRef.current !== null || altActiveRef.current) return
     const input = draftRef.current
     if (intent === 'suggest') {
@@ -752,8 +593,8 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     completionRequestIdRef.current = requestId
     completionRequestRef.current = { requestId, input, cursor, intent }
     const message: ClientMessage = { type: 'complete', requestId, input, cursor }
-    ws.send(JSON.stringify(message))
-  }, [refreshHistoryGhost])
+    connection.send(message)
+  }, [connection, refreshHistoryGhost])
 
   const acceptGhost = useCallback(() => {
     const hint = ghostRef.current
@@ -863,17 +704,13 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const handleServerMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
       case 'ready':
-        retryCountRef.current = 0
         shellBracketedPasteRef.current = message.bracketedPaste
-        setConnState('ready')
         setError(null)
-        readyResolveRef.current?.()
         requestAnimationFrame(() => sendResizeRef.current())
         break
       case 'context':
         currentContextRef.current = message.context
         setCurrentContext(message.context)
-        contextResolveRef.current?.()
         break
       case 'history': {
         historyRef.current = mergeHistory(message.commands, historyRef.current)
@@ -931,8 +768,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
           runningIdRef.current = null
           setRunningId(null)
         }
-        exitedRef.current = true
-        setConnState('disconnected')
         break
       }
       case 'error':
@@ -946,46 +781,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // Stabilize the WS handler: it transitively depends on cursorVisible (blink),
   // which would otherwise reconnect the socket every 530ms and kill the PTY.
   handleServerMessageRef.current = handleServerMessage
-
-  // Create the controller's ready gate for this view. It resolves on the next
-  // host `ready` message and is rejected in cleanup, so a controller `run`
-  // blocked on it fails cleanly instead of waiting forever. The lifecycle is
-  // bound to the connection identity ([sessionId, reconnectToken]) — the same
-  // keys that drive the WebSocket effect below — so every new connection
-  // installs a fresh promise and the previous one is rejected (an already-
-  // resolved stale gate would otherwise let a run submit into a socket that
-  // is still connecting after a reconnect). Declared before the WebSocket
-  // effect so the new gate is installed before the new socket can emit ready.
-  useEffect(() => {
-    let readyResolve!: () => void
-    let readyReject!: (reason?: unknown) => void
-    const readyPromise = new Promise<void>((res, rej) => { readyResolve = res; readyReject = rej })
-    // The rejection must always be observed or a never-awaiting `run` would
-    // surface an unhandled rejection on cleanup; `run` attaches its own await.
-    void readyPromise.catch(() => {})
-    let contextResolve!: () => void
-    let contextReject!: (reason?: unknown) => void
-    const contextPromise = new Promise<void>((res, rej) => { contextResolve = res; contextReject = rej })
-    // Same unhandled-rejection guard for the context gate; `run` awaits it too.
-    void contextPromise.catch(() => {})
-    readyPromiseRef.current = readyPromise
-    readyResolveRef.current = readyResolve
-    readyRejectRef.current = readyReject
-    contextPromiseRef.current = contextPromise
-    contextResolveRef.current = contextResolve
-    contextRejectRef.current = contextReject
-    return () => {
-      const reason = new Error('warp-terminal view connection closed')
-      readyRejectRef.current?.(reason)
-      contextRejectRef.current?.(reason)
-      readyPromiseRef.current = null
-      readyResolveRef.current = null
-      readyRejectRef.current = null
-      contextPromiseRef.current = null
-      contextResolveRef.current = null
-      contextRejectRef.current = null
-    }
-  }, [sessionId, reconnectToken])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -1050,60 +845,15 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     // (the chips/headers) until its own `updateContext` arrives.
     currentContextRef.current = null
     setCurrentContext(null)
-    window.clearTimeout(retryTimerRef.current)
-    const sessionKey = sessionId
-    if (lastSessionKeyRef.current !== sessionKey) {
-      lastSessionKeyRef.current = sessionKey
-      // A new DSH session gets a fresh PTY, never a reattach.
-      sessionTokenRef.current = newSessionToken()
-      exitedRef.current = false
-      retryCountRef.current = 0
-    }
-    let disposed = false
-    const ws = new WebSocket(buildWsUrl(sessionCwd, terminalShellRef.current, sessionTokenRef.current))
-    wsRef.current = ws
-    ws.onmessage = (event) => {
-      if (disposed) return
-      try {
-        handleServerMessageRef.current(JSON.parse(String(event.data)) as ServerMessage)
-      } catch (parseError) {
-        console.warn('[warp-terminal] dropped malformed host message', parseError)
-      }
-    }
-    ws.onclose = () => {
-      if (disposed) return
-      // The shell itself exited (user ran `exit`): this is a real end of
-      // session, not a network drop — stay disconnected until a manual click.
-      if (exitedRef.current) {
-        setRunningId(null)
-        runningIdRef.current = null
-        setConnState('disconnected')
-        return
-      }
-      // Keep the running block open across the reconnect: the host replays
-      // what the shell printed while detached, and it belongs to that block.
-      // Any other drop is auto-reconnected with capped exponential backoff.
-      // The host keeps the PTY alive for a grace period, so the reattach
-      // resumes the same shell and replays whatever it printed meanwhile.
-      setConnState('reconnecting')
-      const attempt = retryCountRef.current
-      retryCountRef.current = attempt + 1
-      const delay = Math.min(500 * Math.pow(2, attempt), 8000)
-      retryTimerRef.current = window.setTimeout(() => {
-        if (!disposed) setReconnectToken((token) => token + 1)
-      }, delay)
-    }
-    ws.onerror = () => { ws.close() }
-    return () => {
-      disposed = true
-      window.clearTimeout(retryTimerRef.current)
-      ws.onmessage = null
-      ws.onclose = null
-      ws.onerror = null
-      ws.close()
-      if (wsRef.current === ws) wsRef.current = null
-    }
-  }, [sessionId, reconnectToken])
+    queryResponderRef.current?.reset()
+    connection.connect({ sessionId, cwd: sessionCwd, shell: terminalShellRef.current })
+  }, [connection, sessionId])
+
+  useEffect(() => {
+    connection.updateShell(terminalShell)
+  }, [connection, terminalShell])
+
+  useEffect(() => () => connection.dispose(), [connection])
   // `submitCommand` is the single send path shared by the interactive editor
   // (`runDraft`) and the controller (`run`). It mirrors the pre-existing
   // runDraft behavior: an empty command is ignored, a running command block
@@ -1112,8 +862,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // line editor enabled mode ?2004.
   const submitCommand = useCallback((command: string) => {
     if (command.trim().length === 0) return
-    const ws = wsRef.current
-    if (ws === null || ws.readyState !== WebSocket.OPEN) return
+    if (!connection.isOpen()) return
     const running = runningIdRef.current
     if (running !== null) {
       setBlocks((prev) => prev.map((block) => (block.id === running ? { ...block, command: block.command + '\n' + command } : block)))
@@ -1127,7 +876,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       const grid = gridsRef.current.get(running)
       const wrap = command.includes('\n') && (grid?.term.modes.bracketedPasteMode ?? false)
       const message: ClientMessage = { type: 'input', data: pasteInputBytes(command, wrap) + '\n' }
-      ws.send(JSON.stringify(message))
+      if (!connection.send(message)) return
       rebuildDoc()
       schedulePaint()
       return
@@ -1181,10 +930,10 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     // raw stream (line-by-line execution, as before).
     const wrap = command.includes('\n') && shellBracketedPasteRef.current
     const message: ClientMessage = { type: 'input', data: pasteInputBytes(command, wrap) + '\n' }
-    ws.send(JSON.stringify(message))
+    if (!connection.send(message)) return
     rebuildDoc()
     schedulePaint()
-  }, [rebuildDoc, schedulePaint, clearTranscript, newGrid])
+  }, [connection, rebuildDoc, schedulePaint, clearTranscript, newGrid])
   submitCommandRef.current = submitCommand
 
   const runDraft = useCallback(() => {
@@ -1209,31 +958,16 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       // NOT swallowed here: it propagates to the quick-action caller so a run
       // that could not be submitted surfaces as a failure instead of returning
       // silently.
-      const gates = [readyPromiseRef.current, contextPromiseRef.current].filter((p): p is Promise<void> => p !== null)
-      if (gates.length > 0) {
-        await Promise.all(gates)
-      }
-      // The gates only prove messages were delivered at some point, not that
-      // the socket is still OPEN. In the reconnect delay window the socket has
-      // dropped (readyState CLOSING/CLOSED) while the host keeps the PTY alive,
-      // so a submission here would silently vanish. Fail fast so the
-      // quick-action surfaces the run as failed instead of reporting success
-      // into a dead socket.
-      const ws = wsRef.current
-      if (ws === null || ws.readyState !== WebSocket.OPEN) {
-        throw new Error('warp-terminal socket is not open')
-      }
+      await connection.waitUntilOperational()
       await submitCommandRef.current?.(command)
     }
     return controllerStore.register(controllerId, { run })
-  }, [controllerStore, controllerId])
+  }, [connection, controllerStore, controllerId])
 
   const killRunning = useCallback(() => {
-    const ws = wsRef.current
-    if (ws === null || ws.readyState !== WebSocket.OPEN) return
     const message: ClientMessage = { type: 'signal', signal: 'SIGINT' }
-    ws.send(JSON.stringify(message))
-  }, [])
+    connection.send(message)
+  }, [connection])
 
   const rerun = useCallback((command: string) => setDraft(command), [])
   const copyCommand = useCallback(async (command: string) => {
@@ -1246,19 +980,15 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   useEffect(() => {
     if (!altActive) return
     const onKey = (event: KeyboardEvent) => {
-      const ws = wsRef.current
-      const open = ws !== null && ws.readyState === WebSocket.OPEN
       const data = keyToBytes(event)
-      if (!open) return
       if (data === null) return
+      if (!connection.send({ type: 'input', data })) return
       event.preventDefault()
       event.stopPropagation()
-      const message: ClientMessage = { type: 'input', data }
-      ws.send(JSON.stringify(message))
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [altActive])
+  }, [altActive, connection])
 
   // While the editor is hidden (command running), keystrokes land on the
   // focused scroll surface and go straight to the PTY, like a normal
@@ -1268,14 +998,11 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     if (altActiveRef.current || runningIdRef.current === null) return
     const key = event.key.toLowerCase()
     if ((event.metaKey || event.ctrlKey) && key === 'c' && selectionRef.current !== null) return
-    const ws = wsRef.current
-    if (ws === null || ws.readyState !== WebSocket.OPEN) return
     const data = keyToBytes(event.nativeEvent)
     if (data === null) return
+    if (!connection.send({ type: 'input', data })) return
     event.preventDefault()
-    const message: ClientMessage = { type: 'input', data }
-    ws.send(JSON.stringify(message))
-  }, [])
+  }, [connection])
 
   // Paste routing (Warp parity): with the alt screen up or a command running,
   // the clipboard goes straight to the PTY — CR-normalized and wrapped in the
@@ -1290,9 +1017,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     const text = event.clipboardData.getData('text')
     if (text.length === 0) return
     if (altActiveRef.current || runningIdRef.current !== null) {
-      const ws = wsRef.current
-      if (ws === null || ws.readyState !== WebSocket.OPEN) return
-      event.preventDefault()
       const term = altActiveRef.current
         ? altTermRef.current
         : gridsRef.current.get(runningIdRef.current ?? '')?.term
@@ -1300,7 +1024,8 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         type: 'input',
         data: pasteInputBytes(text, term?.modes.bracketedPasteMode ?? false),
       }
-      ws.send(JSON.stringify(message))
+      if (!connection.send(message)) return
+      event.preventDefault()
       return
     }
     event.preventDefault()
@@ -1308,7 +1033,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     const current = draftRef.current
     const caret = textarea !== null && document.activeElement === textarea ? textarea.selectionStart : current.length
     setDraftWithCaret(current.slice(0, caret) + text + current.slice(caret), caret + text.length, true)
-  }, [setDraftWithCaret])
+  }, [connection, setDraftWithCaret])
 
   const pointToCell = useCallback((clientX: number, clientY: number): { row: number; col: number } => {
     const canvas = canvasRef.current
@@ -1538,11 +1263,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
           <button
             type="button"
             className="dsh-warp-terminal-reconnect"
-            onClick={() => {
-              retryCountRef.current = 0
-              window.clearTimeout(retryTimerRef.current)
-              setReconnectToken((token) => token + 1)
-            }}
+            onClick={() => connection.retryNow()}
           >
             {t('reconnect')}
           </button>
@@ -1551,7 +1272,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       {connState === 'disconnected' && (
         <div className="dsh-warp-terminal-banner">
           <span className="dsh-warp-terminal-error">{error ?? t('status.disconnected')}</span>
-          <button type="button" className="dsh-warp-terminal-reconnect" onClick={() => { exitedRef.current = false; retryCountRef.current = 0; setReconnectToken((token) => token + 1) }}>
+          <button type="button" className="dsh-warp-terminal-reconnect" onClick={() => connection.restart()}>
             {t('reconnect')}
           </button>
         </div>
@@ -1705,10 +1426,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                 event.preventDefault()
                 if (running) {
                   const data = keyToBytes(event.nativeEvent as KeyboardEvent)
-                  const ws = wsRef.current
-                  if (data !== null && ws !== null && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage))
-                  }
+                  if (data !== null) connection.send({ type: 'input', data })
                 } else {
                   requestCompletion(cursor, 'tab')
                 }
@@ -1736,10 +1454,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
                 if (running) {
                   event.preventDefault()
                   const data = keyToBytes(event.nativeEvent as KeyboardEvent)
-                  const ws = wsRef.current
-                  if (data !== null && ws !== null && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage))
-                  }
+                  if (data !== null) connection.send({ type: 'input', data })
                   return
                 }
                 if (!event.shiftKey && !event.altKey && !event.metaKey &&
@@ -1864,116 +1579,4 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       )}
     </div>
   )
-}
-
-const COMPLETION_MENU_ROWS = 12
-
-function visibleCompletionRows(menu: CompletionMenu): Array<{ index: number; candidate: TerminalCompletionCandidate }> {
-  const count = menu.candidates.length
-  const windowSize = Math.min(COMPLETION_MENU_ROWS, count)
-  const selected = Math.max(0, Math.min(menu.selectedIndex, count - 1))
-  const start = count <= windowSize ? 0 : Math.max(0, Math.min(selected - 2, count - windowSize))
-  return menu.candidates.slice(start, start + windowSize).map((candidate, offset) => ({
-    index: start + offset,
-    candidate,
-  }))
-}
-
-function historyGhost(history: string[], input: string): string | null {
-  if (input.length === 0) return null
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const command = history[index]
-    if (command.length > input.length && command.startsWith(input)) return command.slice(input.length)
-  }
-  return null
-}
-
-function historyPrefixMatches(history: string[], input: string, limit = 12): string[] {
-  const seen = new Set<string>()
-  const matches: string[] = []
-  for (let index = history.length - 1; index >= 0; index -= 1) {
-    const command = history[index]
-    if (command.length === 0) continue
-    if (input.length > 0 && !command.startsWith(input)) continue
-    if (seen.has(command)) continue
-    seen.add(command)
-    matches.push(command)
-    if (matches.length >= limit) break
-  }
-  return matches
-}
-
-function mergeHistory(loaded: string[], session: string[]): string[] {
-  if (loaded.length === 0) return session.slice()
-  if (session.length === 0) return loaded.slice()
-  let overlap = 0
-  const maxOverlap = Math.min(loaded.length, session.length)
-  for (let size = maxOverlap; size > 0; size -= 1) {
-    let same = true
-    for (let index = 0; index < size; index += 1) {
-      if (loaded[loaded.length - size + index] !== session[index]) {
-        same = false
-        break
-      }
-    }
-    if (same) {
-      overlap = size
-      break
-    }
-  }
-  const next = loaded.concat(session.slice(overlap))
-  return next.length > MAX_HISTORY_ENTRIES ? next.slice(next.length - MAX_HISTORY_ENTRIES) : next
-}
-
-function historyNavigationAllowed(value: string, cursor: number, direction: number): boolean {
-  if (!value.includes('\n')) return true
-  return direction < 0 ? !value.slice(0, cursor).includes('\n') : !value.slice(cursor).includes('\n')
-}
-
-function lineBounds(value: string, cursor: number): { start: number; end: number } {
-  const start = value.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1
-  const nextBreak = value.indexOf('\n', cursor)
-  return { start, end: nextBreak === -1 ? value.length : nextBreak }
-}
-
-function wordCaret(value: string, cursor: number, direction: -1 | 1): number {
-  if (direction < 0) {
-    let next = cursor
-    while (next > 0 && /\s/.test(value[next - 1])) next -= 1
-    while (next > 0 && !/\s/.test(value[next - 1])) next -= 1
-    return next
-  }
-  let next = cursor
-  while (next < value.length && !/\s/.test(value[next])) next += 1
-  while (next < value.length && /\s/.test(value[next])) next += 1
-  return next
-}
-
-function keyToBytes(event: KeyboardEvent): string | null {
-  const ESC = '\x1b'
-  if (event.ctrlKey && event.key.length === 1) {
-    const code = event.key.toUpperCase().charCodeAt(0)
-    if (code >= 64 && code <= 95) return String.fromCharCode(code - 64)
-    return null
-  }
-  if (event.metaKey) return null
-  switch (event.key) {
-    case 'Enter': return '\r'
-    case 'Backspace': return '\x7f'
-    case 'Tab': return '\t'
-    case 'Escape': return ESC
-    case 'ArrowUp': return ESC + '[A'
-    case 'ArrowDown': return ESC + '[B'
-    case 'ArrowRight': return ESC + '[C'
-    case 'ArrowLeft': return ESC + '[D'
-    case 'Home': return ESC + '[H'
-    case 'End': return ESC + '[F'
-    case 'PageUp': return ESC + '[5~'
-    case 'PageDown': return ESC + '[6~'
-    case 'Delete': return ESC + '[3~'
-    case 'Insert': return ESC + '[2~'
-    default: break
-  }
-  if (event.key.length === 1) return event.key
-  return null
 }

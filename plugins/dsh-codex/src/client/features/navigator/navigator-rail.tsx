@@ -2,14 +2,24 @@ import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import type { DshCodexConfig } from '../../../shared/config'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/client'
-import type { IApiClient, SubagentAddress } from '@deepseek-ai/dsh-client-connection/client'
-
-// One rail per session: the turnTail chain renders once per completed turn,
-// but the navigator is a single fixed overlay. The first mounted turn claims
-// the rail for its session; every other turn renders nothing.
-const claimedSessions = new Set<string>()
+import type {
+  IApiClient,
+  SessionEvent,
+} from '@deepseek-ai/dsh-client-connection/client'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import {
+  chatAnchorRow,
+  chatFlow,
+  closestConversationScroll,
+} from '../../host-adapters/conversation-dom'
+import type { NavigatorRegistry } from './registry'
+import {
+  readConversationHistoryPage,
+  type ConversationHistoryAddress,
+} from '../../host-adapters/conversation-history'
 
 /** Stepped bar widths, indexed by distance from the hovered bar (e-pi effect). */
 const LEVEL_WIDTHS = [18, 26, 34, 46]
@@ -39,11 +49,11 @@ interface HistoryEntry {
 
 function textOf(data: unknown): string {
   if (data && typeof data === 'object') {
-    const content = (data as any).content
+    const content = 'content' in data ? data.content : undefined
     if (Array.isArray(content)) {
       const text = content
-        .filter((b: any) => b && typeof b === 'object' && b.type === 'text')
-        .map((b: any) => String(b.text ?? ''))
+        .filter(block => block && typeof block === 'object' && 'type' in block && block.type === 'text')
+        .map(block => String('text' in block ? block.text ?? '' : ''))
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim()
@@ -54,41 +64,19 @@ function textOf(data: unknown): string {
 }
 
 /** Mirror the ChatView classification: compaction checkpoints are markers, not user messages. */
-function isCompactionCheckpoint(event: any): boolean {
+function isCompactionCheckpoint(event: SessionEvent): boolean {
   if (!event || event.type !== 'user/message') return false
-  const source = (event as any).data?.source
+  const source = event.data?.source
   return source?.kind === 'plugin' && source?.plugin === 'compact' && isReplacementSurfaceEvent(event)
 }
 
 /** True for one durable user-authored append-surface message. */
-function isUserMessageEvent(event: any): boolean {
+function isUserMessageEvent(event: SessionEvent): boolean {
   if (!event || event.type !== 'user/message') return false
-  const data = (event as any).data
+  const data = event.data
   if (!data || data.source?.kind !== 'user') return false
   if (!isAppendSurfaceEvent(event)) return false
   return !isCompactionCheckpoint(event)
-}
-
-async function fetchHistoryPage(
-  api: IApiClient,
-  sessionId: string,
-  address: SubagentAddress | undefined,
-  beforeSeq: number | undefined,
-): Promise<{ events: Array<{ event: any }>; hasMore: boolean } | null> {
-  const payload: any = { maxMessages: HISTORY_PAGE_SIZE }
-  if (beforeSeq !== undefined) payload.beforeSeq = beforeSeq
-  const response: any = address
-    ? await api.subagents.history({ ...address, ...payload })
-    : await api.sessions.history({ sessionId, ...payload })
-  const result = response?.result
-  if (!result?.ok) return null
-  return result.value as { events: Array<{ event: any }>; hasMore: boolean }
-}
-
-function cssEscape(value: string): string {
-  const escape = (window as any).CSS?.escape
-  if (typeof escape === 'function') return escape(value)
-  return value.replace(/["'\\\0-\x1f]/g, (c: string) => '\\' + c)
 }
 
 /** rAF-driven scroll: sets scrollTop directly each frame so it cannot be
@@ -110,35 +98,47 @@ function animateScroll(sp: HTMLElement, target: number) {
   requestAnimationFrame(step)
 }
 
-export function NavigatorRail(props: any) {
-  const { sessionId, useSession, api, loadOlder } = props
-  const scope = props.scope as SettingsScope<DshCodexConfig> | undefined
+type NavigatorRailProps = PropsRuntime<'conversation.chat.turnTail'> & {
+  scope: SettingsScope<DshCodexConfig>
+  registry: NavigatorRegistry
+  api: IApiClient
+  loadOlder: () => Promise<void>
+}
+
+export function NavigatorRail(props: NavigatorRailProps) {
+  const { registry, scope, sessionId, seq } = props
+  const tokenRef = useRef<symbol | null>(null)
+  tokenRef.current ??= Symbol(`navigator:${sessionId}:${seq}`)
+  const token = tokenRef.current
+
+  useEffect(() => registry.register(sessionId, token, seq), [registry, seq, sessionId, token])
+  const registrySnapshot = useSyncExternalStore(registry.subscribe, registry.getSnapshot)
   const scopeSnapshot = useSyncExternalStore(
-    scope === undefined ? () => () => {} : listener => scope.subscribe(listener),
-    scope === undefined ? () => undefined : () => scope.getSnapshot(),
-    scope === undefined ? () => undefined : () => scope.getSnapshot(),
+    listener => scope.subscribe(listener),
+    () => scope.getSnapshot(),
+    () => scope.getSnapshot(),
   )
   const navigatorEnabled = scopeSnapshot?.value?.navigatorEnabled ?? true
-  const [claimed] = useState(() => {
-    if (claimedSessions.has(sessionId)) return false
-    claimedSessions.add(sessionId)
-    return true
-  })
-  useEffect(() => {
-    if (!claimed) return
-    claimedSessions.add(sessionId)
-    return () => { claimedSessions.delete(sessionId) }
-  }, [claimed, sessionId])
-  if (!claimed || !navigatorEnabled) return null
+  if (!navigatorEnabled || !registry.isOwner(registrySnapshot, sessionId, token)) return null
+  return <NavigatorRailContent {...props} />
+}
 
+function NavigatorRailContent(props: NavigatorRailProps) {
+  const { sessionId, useSession, api, loadOlder } = props
   const hostRef = useRef<HTMLSpanElement | null>(null)
-  const order = useSession((s: any) => s?.chat?.order)
-  const nodes = useSession((s: any) => s?.chat?.nodes)
-  const hasMore = useSession((s: any) => s?.hasMore)
-  const loadingOlder = useSession((s: any) => s?.loadingOlder)
-  const subagent = useSession((s: any) => s?.subagent)
+  const order = useSession((snapshot: ConversationSnapshot) => snapshot.chat.order)
+  const nodes = useSession((snapshot: ConversationSnapshot) => snapshot.chat.nodes)
+  const hasMore = useSession((snapshot: ConversationSnapshot) => snapshot.hasMore)
+  const loadingOlder = useSession((snapshot: ConversationSnapshot) => snapshot.loadingOlder)
+  const subagent = useSession((snapshot: ConversationSnapshot) => snapshot.subagent)
 
-  const address: SubagentAddress | undefined = subagent?.address
+  const address: ConversationHistoryAddress | undefined = subagent === null
+    ? undefined
+    : {
+        parentSessionId: String(subagent.address.parentSessionId),
+        childSessionId: String(subagent.address.childSessionId),
+        mode: subagent.address.mode,
+      }
   const addressKey = address
     ? `subagent:${address.parentSessionId}:${address.childSessionId}:${address.mode}`
     : 'session'
@@ -153,7 +153,6 @@ export function NavigatorRail(props: any) {
   const loadAttemptsRef = useRef(0)
 
   useEffect(() => {
-    if (!api) return
     let cancelled = false
     const acc = new Map<number, HistoryEntry>()
     const publish = () => {
@@ -163,7 +162,13 @@ export function NavigatorRail(props: any) {
     ;(async () => {
       let beforeSeq: number | undefined
       while (!cancelled) {
-        const page = await fetchHistoryPage(api, sessionId, address, beforeSeq)
+        const page = await readConversationHistoryPage(
+          api,
+          sessionId,
+          address,
+          beforeSeq,
+          HISTORY_PAGE_SIZE,
+        )
         if (cancelled) return
         if (!page) break
         for (const item of page.events) {
@@ -206,14 +211,14 @@ export function NavigatorRail(props: any) {
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const sp = host.closest('[data-conversation-scroll]') as HTMLElement | null
+    const sp = closestConversationScroll(host)
     if (!sp) return
     const measure = () => {
       const rect = sp.getBoundingClientRect()
       const off: Record<string, number> = {}
       for (const e of entries) {
         if (!e.key) continue
-        const row = sp.querySelector(`[data-chat-anchor-key="${cssEscape(e.key)}"]`)
+        const row = chatAnchorRow(sp, e.key)
         if (row) off[e.key] = row.getBoundingClientRect().top - rect.top + sp.scrollTop
       }
       setOffsets(off)
@@ -224,7 +229,7 @@ export function NavigatorRail(props: any) {
     window.addEventListener('resize', measure)
     const ro = new ResizeObserver(measure)
     ro.observe(sp)
-    const flow = sp.querySelector('[data-chat-flow]')
+    const flow = chatFlow(sp)
     const mo = new MutationObserver(() => measure())
     mo.observe(flow ?? sp, { childList: true, subtree: true })
     return () => {
@@ -248,12 +253,12 @@ export function NavigatorRail(props: any) {
 
   const jumpToKey = (key: string) => {
     const host = hostRef.current
-    const sp = host?.closest('[data-conversation-scroll]') as HTMLElement | null
+    const sp = host === null || host === undefined ? null : closestConversationScroll(host)
     if (!sp) {
       console.warn('[session-navigator] jump: scrollport not found')
       return
     }
-    const row = sp.querySelector(`[data-chat-anchor-key="${cssEscape(key)}"]`)
+    const row = chatAnchorRow(sp, key)
     if (!row) {
       console.warn('[session-navigator] jump: row not found', key)
       return
@@ -270,7 +275,7 @@ export function NavigatorRail(props: any) {
       return
     }
     const host = hostRef.current
-    const sp = host?.closest('[data-conversation-scroll]') as HTMLElement | null
+    const sp = host === null || host === undefined ? null : closestConversationScroll(host)
     if (sp) sp.scrollTop = 0
     setPendingSeq(entry.seq)
   }
@@ -315,10 +320,9 @@ export function NavigatorRail(props: any) {
     const id = window.setTimeout(() => {
       try {
         const host = hostRef.current
-        const sp = host?.closest('[data-conversation-scroll]') as HTMLElement | null
+        const sp = host === null || host === undefined ? null : closestConversationScroll(host)
         if (sp) sp.scrollTop = 0
-        const result = loadOlder()
-        if (result && typeof result.catch === 'function') result.catch(() => {})
+        void loadOlder().catch(() => {})
       } catch (error) {
         console.warn('[session-navigator] jump: loadOlder failed', error)
         setPendingSeq(null)
@@ -363,7 +367,7 @@ export function NavigatorRail(props: any) {
         overflowY: railScrollable ? 'auto' : 'hidden',
         overscrollBehavior: 'contain',
         pointerEvents: railScrollable ? 'auto' : 'none',
-        scrollbarWidth: 'none' as any,
+        scrollbarWidth: 'none',
       }}
       onMouseLeave={leave}
     >

@@ -23,8 +23,8 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MutableRefObject,
   type ReactNode,
-  type RefObject,
   type UIEvent,
 } from 'react'
 import {
@@ -37,6 +37,11 @@ import {
   type HighlightSpan,
 } from './highlight'
 import { renderMarkdown } from './markdown'
+import {
+  collectFindMatches,
+  type FindMatch,
+  type FindOptions,
+} from './find-model'
 
 /** Diff rows shown before a long patch collapses behind an expand row. */
 const MAX_DIFF_ROWS = 240
@@ -64,25 +69,6 @@ export interface ViewLabels {
   findMatchCase: string
   findWholeWord: string
   findRegex: string
-}
-
-/** VS Code find-widget toggles (Match Case / Whole Word / Regex). */
-interface FindOptions {
-  matchCase: boolean
-  wholeWord: boolean
-  regex: boolean
-}
-
-interface FindMatch {
-  line: number
-  start: number
-  end: number
-}
-
-interface FindResult {
-  matches: FindMatch[]
-  /** True when regex mode is on and the pattern failed to compile. */
-  invalidRegex: boolean
 }
 
 /** One file's contents with a line-number gutter and syntax highlighting. */
@@ -124,8 +110,8 @@ export function FileCodeView(props: {
     regex: false,
   })
   const [activeMatch, setActiveMatch] = useState(0)
-  const findInputRef = useRef<HTMLInputElement>(null)
-  const shellRef = useRef<HTMLDivElement>(null)
+  const findInputRef = useRef<HTMLInputElement | null>(null)
+  const shellRef = useRef<HTMLDivElement | null>(null)
 
   const findResult = useMemo(
     () => collectFindMatches(lines, findQuery, findOptions),
@@ -259,7 +245,7 @@ export function FileCodeView(props: {
   return (
     <div
       className="dsh-files-code-shell"
-      ref={shellRef}
+      ref={(node) => { shellRef.current = node }}
       tabIndex={-1}
       onMouseDown={(event) => {
         const tag = (event.target as HTMLElement).tagName
@@ -344,7 +330,7 @@ function FindBar(props: {
   matchCount: number
   activeIndex: number
   invalidRegex: boolean
-  inputRef: RefObject<HTMLInputElement | null>
+  inputRef: MutableRefObject<HTMLInputElement | null>
   onQueryChange: (value: string) => void
   onOptionsChange: (patch: Partial<FindOptions>) => void
   onPrev: () => void
@@ -366,7 +352,7 @@ function FindBar(props: {
   return (
     <div className="dsh-files-find" role="search">
       <input
-        ref={inputRef}
+        ref={(node) => { inputRef.current = node }}
         className={
           'dsh-files-find-input'
           + (invalidRegex && query.length > 0 ? ' is-invalid' : '')
@@ -467,68 +453,6 @@ function FindBar(props: {
   )
 }
 
-/**
- * Collect find matches for the preview buffer — same option set as VS Code's
- * find widget: Match Case, Match Whole Word, Use Regular Expression.
- */
-function collectFindMatches(
-  lines: readonly string[],
-  query: string,
-  options: FindOptions,
-): FindResult {
-  if (query.length === 0) return { matches: [], invalidRegex: false }
-
-  let pattern: RegExp
-  try {
-    pattern = buildFindPattern(query, options)
-  } catch {
-    return { matches: [], invalidRegex: true }
-  }
-
-  const out: FindMatch[] = []
-  for (let line = 0; line < lines.length; line += 1) {
-    const hay = lines[line] ?? ''
-    if (hay.length === 0 && !options.regex) continue
-    pattern.lastIndex = 0
-    let match = pattern.exec(hay)
-    while (match !== null) {
-      const text = match[0] ?? ''
-      // Zero-width matches (e.g. `a*`) would loop forever — advance one char.
-      if (text.length === 0) {
-        if (pattern.lastIndex >= hay.length) break
-        pattern.lastIndex += 1
-        match = pattern.exec(hay)
-        continue
-      }
-      out.push({ line, start: match.index, end: match.index + text.length })
-      if (!pattern.global) break
-      match = pattern.exec(hay)
-    }
-  }
-  return { matches: out, invalidRegex: false }
-}
-
-/** Compile the find query into a sticky global RegExp for one line at a time. */
-function buildFindPattern(query: string, options: FindOptions): RegExp {
-  const flags = options.matchCase ? 'g' : 'gi'
-  let source: string
-  if (options.regex) {
-    source = query
-  } else {
-    source = escapeRegExp(query)
-  }
-  if (options.wholeWord) {
-    // Word-ish boundaries on both sides (letters/digits/underscore), same idea
-    // as VS Code's "Match Whole Word" for typical code identifiers.
-    source = `(?<![\\w])(?:${source})(?![\\w])`
-  }
-  return new RegExp(source, flags)
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 type DiffRowKind = 'hunk' | 'add' | 'del' | 'ctx' | 'note'
 
 interface DiffRow {
@@ -561,7 +485,7 @@ export function FileDiffView(props: {
   const { start, end, onScroll, totalHeight, offsetY, scrollerRef } = useVirtualWindow(list.length)
 
   return (
-    <div className="dsh-files-view" ref={scrollerRef} onScroll={onScroll}>
+    <div className="dsh-files-view" ref={(node) => { scrollerRef.current = node }} onScroll={onScroll}>
       <div
         className="dsh-files-diff-body"
         style={{ height: totalHeight + (capped ? 28 : 0) }}
@@ -642,11 +566,11 @@ function useVirtualWindow(count: number): {
   end: number
   offsetY: number
   totalHeight: number
-  scrollerRef: RefObject<HTMLDivElement | null>
+  scrollerRef: MutableRefObject<HTMLDivElement | null>
   onScroll: (event: UIEvent<HTMLDivElement>) => void
   scrollToLine: (lineIndex: number) => void
 } {
-  const scrollerRef = useRef<HTMLDivElement>(null)
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
   const [window, setWindow] = useState({ start: 0, end: Math.min(count, 60) })
   const raf = useRef(0)
 

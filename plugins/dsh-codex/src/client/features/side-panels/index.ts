@@ -14,6 +14,7 @@ import type { PanelEntriesApi, PanelTabInfo } from './shell'
 import { createQuickActionsStore } from '../quick-actions/store'
 import type { QuickAction } from '../../../shared/config'
 import type { TerminalControllerStore } from '../terminal/controller'
+import { currentSessionLocation } from '../../host-adapters/sessions'
 
 const PANEL_SLOT = 'side.panel'
 const NS = 'settings.codex'
@@ -43,15 +44,7 @@ export function createSidePanelsFeature(
       // the session cwd) and runs the command there. Every command is trimmed and
       // must be non-empty; any failure rejects the whole action.
       const executeQuickAction = async (action: QuickAction): Promise<void> => {
-        // Narrow the host sessions face structurally (the host-side `sessions`
-        // augmentation wins the merged Context type) to read the current session
-        // id and its working directory.
-        const sessions = ctx.sessions as unknown as {
-          list: { getSnapshot(): { current?: string; byId?: Record<string, { cwd?: string }> } }
-        }
-        const sessionState = sessions.list.getSnapshot()
-        const sessionId = sessionState.current
-        const sessionCwd = sessionId === undefined ? undefined : sessionState.byId?.[sessionId]?.cwd
+        const { sessionId, cwd: sessionCwd } = currentSessionLocation(ctx.sessions)
 
         // The active terminal instance for the current session, if any. The
         // `current` target runs in it; a `new` target seeds its cwd from it.
@@ -180,6 +173,9 @@ export function createSidePanelsFeature(
         unsubscribeSettings()
         disposeShell()
         disposeLauncherToggle()
+        quickActions.dispose()
+        launcher.dispose()
+        store.dispose()
       }
     },
   }

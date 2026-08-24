@@ -27,6 +27,7 @@ import { DEFAULT_CONFIG, type DshCodexConfig, type TerminalShell } from '../../s
 import type { BlockContext, ClientMessage, ServerMessage } from '../../shared/terminal-protocol'
 import { completeTerminalInput } from './completion'
 import { loadShellHistory } from './history'
+import { resizeSubprocessTerminal } from '../adapters/subprocess-terminal'
 
 export const name = 'dsh-codex-terminal'
 
@@ -457,9 +458,8 @@ function onClientMessage(session: TerminalSession, raw: unknown): void {
       const rows = Math.max(5, Math.min(200, Math.floor(message.rows)))
       session.cols = cols
       session.rows = rows
-      const pty = (session.handle as unknown as { terminal?: { resize?: (c: number, r: number) => void } }).terminal
       try {
-        pty?.resize?.(cols, rows)
+        resizeSubprocessTerminal(session.handle, cols, rows)
       } catch {
         // Ignore a resize racing terminal shutdown.
       }

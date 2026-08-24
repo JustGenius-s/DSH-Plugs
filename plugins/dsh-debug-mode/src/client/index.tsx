@@ -28,7 +28,7 @@ export function apply(ctx: ClientContext): void {
     inject: (sessionId) => ({
       sessionId: String(sessionId),
       exitDebugMode: async () => {
-        const result = await ctx.remote.commands.execute(sessionId, '/debug off', [])
+        const result = await ctx.remote.commands.execute(sessionId, '/debug off')
         if (!result.ok) return `${result.error.message} (${result.error.code})`
         if (result.value === undefined) return 'unknown command: /debug off'
         return null

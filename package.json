@@ -5,9 +5,11 @@
   "type": "module",
   "description": "DeepSeek Harness (DSH) plugin monorepo — one folder = one plugin",
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm -r build && pnpm check:client-modules",
     "watch": "pnpm -r --parallel watch",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm check:dependency-contracts && pnpm -r typecheck",
+    "check:dependency-contracts": "node scripts/check-dependency-contracts.mjs",
+    "check:client-modules": "node scripts/check-client-modules.mjs",
     "clean": "pnpm -r clean"
   },
   "devDependencies": {

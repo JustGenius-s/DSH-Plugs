@@ -1,9 +1,0 @@
-export const ROUTE_PREFIX = '/whale-girl'
-export const STATE_PATH = `${ROUTE_PREFIX}/state`
-export const INTERACT_PATH = `${ROUTE_PREFIX}/interact`
-export const CONFIG_PATH = `${ROUTE_PREFIX}/config`
-export const ASSETS_PATH = `${ROUTE_PREFIX}/assets`
-export const EVENTS_PATH = `${ROUTE_PREFIX}/events`
-export const PRESENCE_PATH = `${ROUTE_PREFIX}/presence`
-export const SESSIONS_PATH = `${ROUTE_PREFIX}/sessions`
-export const OVERLAY_PATH = `${ROUTE_PREFIX}/overlay`

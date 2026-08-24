@@ -1,36 +1,17 @@
 /**
  * Insert a workspace file into the conversation composer as an `@file`
  * reference chip — same payload the built-in `@` picker uses for files
- * (`source: "reference"`, `appearance: "file"`).
+ * (`source: "reference"`).
  *
  * Relies on `dsh-client-ui-reference` already registering the `reference`
  * trigger source + codec; this module only dispatches the insert bail.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ReferenceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { insertComposerReference } from '../../host-adapters/composer'
 
 /** Source name owned by `@deepseek-ai/dsh-client-ui-reference`. */
 const FILE_REFERENCE_SOURCE = 'reference'
-
-interface ClientSessionsLike {
-  scope(id: string): ClientContext | undefined
-}
-
-interface InputStateFace {
-  readonly draft: string
-  readonly draftRev: number
-}
-
-interface SessionInputFace {
-  readonly state: { getSnapshot(): InputStateFace }
-}
-
-interface ConversationFace {
-  readonly input: {
-    for(actx: unknown): SessionInputFace
-  }
-}
 
 /**
  * Format a relative worktree path the way the shared `@path` grammar does
@@ -59,30 +40,13 @@ export function insertFileReference(
   if (label.length === 0) return false
 
   try {
-    const sessions = ctx.sessions as unknown as ClientSessionsLike
-    const actx = sessions.scope(sessionId)
-    if (actx === undefined) return false
-    const conversation = ctx.get('conversation') as ConversationFace | undefined
-    if (conversation === undefined) return false
-    const input = conversation.input.for(actx)
-    const snapshot = input.state.getSnapshot()
-
     const reference: ReferenceInsert = {
       source: FILE_REFERENCE_SOURCE,
       ref: mention,
       label,
-      appearance: 'file',
       clipboardText: mention,
     }
-    const span = {
-      start: snapshot.draft.length,
-      end: snapshot.draft.length,
-      draftRev: snapshot.draftRev,
-    }
-    return actx.bail(actx, 'slash/input-insert-reference', {
-      reference,
-      span,
-    }) === true
+    return insertComposerReference(ctx, sessionId, reference)
   } catch {
     return false
   }

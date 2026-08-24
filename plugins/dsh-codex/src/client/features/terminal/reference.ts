@@ -20,9 +20,8 @@
  *   `execute()` dispatches for a menu pick, so the composer applies it with
  *   the full CAS + phase guards and mints one chip occurrence.
  *
- * The selected text is retained by `ref` in a module registry so the codec
- * can rebuild the model form at submit time; entries are pruned when the
- * chip is removed or the registry grows.
+ * The selected text is retained by `ref` in the feature-owned registry so the
+ * codec can rebuild the model form at submit time; disposal clears the data.
  */
 
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
@@ -30,7 +29,7 @@ import type {
   InputTriggerSource,
   ReferenceInsert,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { insertComposerReference } from '../../host-adapters/composer'
 
 /** Source name the composer's `serializeReference` routing key uses. */
 export const TERMINAL_REFERENCE_SOURCE = 'terminal'
@@ -39,54 +38,6 @@ interface TerminalSelectionEntry {
   readonly ref: string
   readonly text: string
   readonly label: string
-}
-
-/** Module-level registry: ref → captured text, readable by the codec later. */
-const entries = new Map<string, TerminalSelectionEntry>()
-let refSeq = 0
-
-function mintRef(): string {
-  refSeq += 1
-  return 'terminal:' + refSeq.toString(36)
-}
-
-/**
- * Model form of one terminal reference: the captured text as plain text. No
- * fenced block — the user bubble renders text verbatim (MessageText, no
- * markdown parsing), so a ``` fence would show up as literal noise instead
- * of a code block.
- */
-function serializeTerminalReference(ref: string): Promise<string> {
-  const entry = entries.get(ref)
-  if (entry === undefined) {
-    return Promise.reject(new Error(`terminal reference "${ref}" is no longer available`))
-  }
-  return Promise.resolve('\n' + entry.text + '\n')
-}
-
-/**
- * The client runtime's sessions face, narrowed structurally. This package
- * compiles host and client entries in one program, and the host-side
- * `sessions` augmentation (dsh-host-apiproxy's SessionStore) wins the
- * merged `Context` interface — so the client face is read through a cast,
- * the same way file-links narrows `ctx.sessions`.
- */
-interface ClientSessionsLike {
-  scope(id: string): ClientContext | undefined
-}
-
-/** Minimal structural face of the conversation input facade we read. */
-interface InputStateFace {
-  readonly draft: string
-  readonly draftRev: number
-}
-interface SessionInputFace {
-  readonly state: { getSnapshot(): InputStateFace }
-}
-interface ConversationFace {
-  readonly input: {
-    for(actx: unknown): SessionInputFace
-  }
 }
 
 export interface TerminalReferenceApi {
@@ -104,6 +55,14 @@ export interface TerminalReferenceApi {
 }
 
 export function createTerminalReference(ctx: ClientContext): TerminalReferenceApi {
+  const entries = new Map<string, TerminalSelectionEntry>()
+  const mintRef = (): string => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return 'terminal:' + crypto.randomUUID()
+    }
+    return 'terminal:' + Date.now().toString(36) + Math.random().toString(36).slice(2)
+  }
+
   const source: InputTriggerSource = {
     trigger: '@',
     name: TERMINAL_REFERENCE_SOURCE,
@@ -114,7 +73,11 @@ export function createTerminalReference(ctx: ClientContext): TerminalReferenceAp
         return entries.get(ref)?.text ?? ''
       },
       serialize(ref: string, _signal: AbortSignal): Promise<string> {
-        return serializeTerminalReference(ref)
+        const entry = entries.get(ref)
+        if (entry === undefined) {
+          return Promise.reject(new Error(`terminal reference "${ref}" is no longer available`))
+        }
+        return Promise.resolve('\n' + entry.text + '\n')
       },
     },
   }
@@ -127,16 +90,6 @@ export function createTerminalReference(ctx: ClientContext): TerminalReferenceAp
     const trimmed = text.trim()
     if (trimmed.length === 0) return false
     try {
-      const sessions = ctx.sessions as unknown as ClientSessionsLike
-      const actx = sessions.scope(sessionId)
-      if (actx === undefined) return false
-      // Optional at call time: avoid an undeclared property throw; conversation
-      // is provided by the web profile but is not a hard dep of this plugin.
-      const conversation = ctx.get('conversation') as ConversationFace | undefined
-      if (conversation === undefined) return false
-      const input = conversation.input.for(actx)
-      const snapshot = input.state.getSnapshot()
-
       const ref = mintRef()
       entries.set(ref, { ref, text: trimmed, label })
 
@@ -146,16 +99,7 @@ export function createTerminalReference(ctx: ClientContext): TerminalReferenceAp
         label,
         clipboardText: '@' + label,
       }
-      // Append the chip at the end of the current draft: empty span at EOF.
-      const span = {
-        start: snapshot.draft.length,
-        end: snapshot.draft.length,
-        draftRev: snapshot.draftRev,
-      }
-      const applied = actx.bail(actx, 'slash/input-insert-reference', {
-        reference,
-        span,
-      }) === true
+      const applied = insertComposerReference(ctx, sessionId, reference)
       if (!applied) entries.delete(ref)
       return applied
     } catch {
@@ -163,5 +107,11 @@ export function createTerminalReference(ctx: ClientContext): TerminalReferenceAp
     }
   }
 
-  return { insert, dispose: disposeSource }
+  return {
+    insert,
+    dispose() {
+      entries.clear()
+      disposeSource()
+    },
+  }
 }

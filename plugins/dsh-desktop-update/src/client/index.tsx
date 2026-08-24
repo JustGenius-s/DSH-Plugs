@@ -1,7 +1,7 @@
 // Browser half of @just-genius/dsh-desktop-update.
 //
 // Registers the `desktop-update` settings card into the Plugins section's
-// configurable tab (rc.7+ keyed `settings.plugin.item`; on older hosts the
+// configurable tab (`settings.plugin.item`; on older hosts the
 // card simply never dispatches) and, when the desktop shell is present, uses
 // the three-family `window.dshDesktop` API: `seats` for applicationMenu +
 // tray, `notify` for system notifications. A plain browser has no
@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the ctx.settingsScope Context merge (the implementation lives
 // in the Settings surface; binding happens on this plugin's fiber).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-// Type-only: the keyed `settings.plugin.item` slot declaration (rc.7+).
+// Type-only: the `settings.plugin.item` slot declaration.
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 
 import { UpdateCard, type DesktopUpdateConfig } from './card'

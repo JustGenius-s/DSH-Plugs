@@ -10,6 +10,7 @@ import {
   type CodexConfigField,
   type DshCodexConfig,
 } from '../../shared/config'
+import { createSnapshotChannel } from '../core/observable'
 
 interface SettingsWire {
   ok?: unknown
@@ -20,7 +21,11 @@ interface SettingsWire {
  * Browser mirror of the Codex section that talks to the plugin's own HTTP
  * route instead of the Host settings RPC (which refuses `dsh-codex`).
  */
-export function createCodexSettingsStore(): SettingsScope<DshCodexConfig> {
+export interface CodexSettingsStore extends SettingsScope<DshCodexConfig> {
+  dispose(): void
+}
+
+export function createCodexSettingsStore(): CodexSettingsStore {
   let snapshot: SettingsScopeSnapshot<DshCodexConfig> = {
     status: 'loading',
     value: undefined,
@@ -30,12 +35,12 @@ export function createCodexSettingsStore(): SettingsScope<DshCodexConfig> {
     writable: false,
     mode: 'memory',
   }
-  const listeners = new Set<() => void>()
+  const channel = createSnapshotChannel(snapshot)
   let writes = Promise.resolve()
 
   const publish = (next: SettingsScopeSnapshot<DshCodexConfig>): void => {
     snapshot = next
-    for (const listener of [...listeners]) listener()
+    channel.publish(next)
   }
 
   const ready = (value: DshCodexConfig): SettingsScopeSnapshot<DshCodexConfig> => ({
@@ -87,16 +92,14 @@ export function createCodexSettingsStore(): SettingsScope<DshCodexConfig> {
   void reload()
 
   return {
-    getSnapshot: () => snapshot,
-    subscribe: (listener) => {
-      listeners.add(listener)
-      return () => { listeners.delete(listener) }
-    },
+    getSnapshot: channel.getSnapshot,
+    subscribe: channel.subscribe,
     set,
     unset: (field) => {
       if (!isConfigField(field)) return Promise.resolve()
       return set(field, DEFAULT_CONFIG[field])
     },
+    dispose: channel.dispose,
   }
 }
 

@@ -36,9 +36,6 @@ export async function generateCommitMessage(
   if (diff.length === 0) {
     throw badRequest('no changes to summarize')
   }
-  if (signal?.aborted === true) {
-    throw new Error('aborted')
-  }
   const llm = ctx.get('llm')
   const defaultModel = ctx.get('agentDefaultModel')
   if (llm === undefined || defaultModel === undefined) {

@@ -1,3 +1,5 @@
+import { createSnapshotChannel } from '../../core/observable'
+
 /**
  * The collapsed launcher's visibility state, shared between the shell (which
  * measures occlusion and owns the card) and the session-header toggle (which
@@ -43,6 +45,7 @@ export interface LauncherStore {
   setOccluded(occluded: boolean): void
   /** Flip visibility with an explicit override (the header toggle). */
   toggle(): void
+  dispose(): void
 }
 
 export function launcherVisible(snapshot: LauncherSnapshot): boolean {
@@ -52,28 +55,18 @@ export function launcherVisible(snapshot: LauncherSnapshot): boolean {
 
 export function createLauncherStore(): LauncherStore {
   let snapshot: LauncherSnapshot = { chatView: true, occluded: false, override: null }
-  const listeners = new Set<() => void>()
-  const emit = (): void => {
-    for (const listener of [...listeners]) listener()
-  }
+  const channel = createSnapshotChannel(snapshot)
   const set = (patch: Partial<LauncherSnapshot>): void => {
     const next = { ...snapshot, ...patch }
     if (next.chatView === snapshot.chatView
       && next.occluded === snapshot.occluded
       && next.override === snapshot.override) return
     snapshot = next
-    emit()
+    channel.publish(next)
   }
   const store: LauncherStore = {
-    getSnapshot() {
-      return snapshot
-    },
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => {
-        listeners.delete(listener)
-      }
-    },
+    getSnapshot: channel.getSnapshot,
+    subscribe: channel.subscribe,
     visible() {
       return launcherVisible(snapshot)
     },
@@ -92,6 +85,9 @@ export function createLauncherStore(): LauncherStore {
       // the chat view can never paint a 'show' that the gate would contradict.
       if (!snapshot.chatView) return
       set({ override: launcherVisible(snapshot) ? 'hide' : 'show' })
+    },
+    dispose() {
+      channel.dispose()
     },
   }
   return store

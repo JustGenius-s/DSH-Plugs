@@ -6,27 +6,21 @@
 //
 // 视觉：sprite sheet 帧播放器（assets/manifest.json 声明 状态→sheet/frames/fps/playback，
 // 每状态一张横排帧图，透明背景）；sheet 缺失/未加载时显示占位（不再 emoji 降级）。
-// 状态选择与表情映射是纯函数（client/logic.mjs，可单测）；本文件只做 DOM 与计时。
+// 状态选择与表情映射来自 shared 领域层；本文件只做 DOM 与计时。
 // 交互要点：瞬发 eat/play 由 TRANSIENT_MS 超时兜底复位（sheet 缺失也保证不卡死）；
 // pointer capture 只在越过拖拽阈值后启用（纯点击不捕获，菜单按钮 click 正常派发）。
 
-import { TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, pickState, nextWorkingRhythm, shouldWake, nextBlinkAt, nextFacingAt, wakeFromInteraction } from './logic.mjs'
-import { parseCharacters, getCharacter, stateOf, listCharacters } from './character.mjs'
-// 路由端点单一来源（src/routes.mjs，verify-routes-sync 门禁守护）：esbuild 内联进 bundle。
-import { STATE_PATH, INTERACT_PATH, CONFIG_PATH, ASSETS_PATH, EVENTS_PATH } from './routes.mjs'
-import { xpProgress, xpFillAsset, hudUrl, titleDef, titleIcon, titleName, titleDescription } from './xp.mjs'
+import { TRANSIENT_MS, WAKE_MS, JOY_MS, ROUND_CELEBRATE_MS, pickState, nextWorkingRhythm, shouldWake, nextBlinkAt, nextFacingAt, wakeFromInteraction, parseCharacters, getCharacter, stateOf, listCharacters } from '../shared/logic.ts'
+import { STATE_PATH, INTERACT_PATH, CONFIG_PATH, ASSETS_PATH, EVENTS_PATH } from '../shared/routes.ts'
+import { DEFAULTS } from '../shared/config.ts'
+import { xpProgress, xpFillAsset, hudUrl, titleDef, titleIcon, titleName, titleDescription } from '../shared/pet-state.ts'
 
 const ASSETS_URL = ASSETS_PATH
 const MANIFEST_URL = `${ASSETS_URL}/manifest.json`
 // 客户端运行参数：默认值与 Node half 的 src/config.mjs DEFAULTS 一致（单一来源——
 // 消费端不写第二份默认值，见 verify-config-sync 门禁）。/state 的 configRevision
 // 变化时拉取新值（applyClientConfig），未配置时用默认值。
-const CFG_DEFAULTS = {
-  enabled: true, size: 110, opacity: 1,
-  walk: { enabled: true, minWaitMs: 18000, maxWaitMs: 40000, minMs: 3000, maxMs: 6000, speedPxPerSec: 45 },
-  sleepAfterMs: 60000, pollMs: 3000, bubbleMs: 2500,
-}
-let cfg = { ...CFG_DEFAULTS }
+const CFG_DEFAULTS = DEFAULTS
 // 动画状态机检查频率：50ms 时每秒 20 次条件检查，空闲标签页持续耗 CPU；
 // 200ms 对眨眼/转身（随机间隔 3-25s）的触发延迟最多 200ms，肉眼无感。帧切换由
 // cfg.fps 控制、游走由 rAF 驱动，均不受此值影响；页面隐藏时定时器整体暂停（onVisibility）。
@@ -192,6 +186,9 @@ export function apply(ctx = {}) {
     console.warn('[whale-girl] apply 已存在实例，跳过重复挂载')
     return () => {}
   }
+  // Runtime configuration belongs to this mounted instance. Keeping it local
+  // prevents an unloaded/reloaded pet from inheriting another mount's state.
+  let cfg = { ...CFG_DEFAULTS }
   const style = document.createElement('style')
   style.textContent = CSS
   document.head.appendChild(style)

@@ -16,6 +16,7 @@
  */
 
 import type { PanelIconName } from './icons'
+import { createSnapshotChannel } from '../../core/observable'
 
 /** One open panel instance: a tab in the strip. */
 export interface SidePanelInstance {
@@ -163,6 +164,8 @@ export interface SidePanelsService {
   getSnapshot(): SidePanelsSnapshot
   /** Subscribe to store changes. Returns the unsubscriber. */
   subscribe(listener: () => void): () => void
+  /** Release subscribers and retained application state. */
+  dispose(): void
 }
 
 const WIDTH_KEY = 'dsh-side-panels:width'
@@ -302,10 +305,10 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     activeKey: null,
     retainedSessions: [],
   }
-  const listeners = new Set<() => void>()
+  const channel = createSnapshotChannel(snapshot)
 
   const emit = (): void => {
-    for (const listener of [...listeners]) listener()
+    channel.publish(snapshot)
   }
 
   const retainCurrentSession = (next: SidePanelsSnapshot): void => {
@@ -492,15 +495,8 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
       setSnapshot({ instances })
       saveTabs()
     },
-    getSnapshot() {
-      return snapshot
-    },
-    subscribe(listener) {
-      listeners.add(listener)
-      return () => {
-        listeners.delete(listener)
-      }
-    },
+    getSnapshot: channel.getSnapshot,
+    subscribe: channel.subscribe,
     setSession(next) {
       if (next === sessionId) return
       sessionId = next
@@ -545,6 +541,12 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
       if (preferences.defaultWidth === undefined || readStorage(WIDTH_KEY) !== null) return
       const width = clampWidth(preferences.defaultWidth)
       if (width !== snapshot.width) setSnapshot({ width })
+    },
+    dispose() {
+      channel.dispose()
+      descriptors.clear()
+      retained.clear()
+      counters.clear()
     },
   }
   return store

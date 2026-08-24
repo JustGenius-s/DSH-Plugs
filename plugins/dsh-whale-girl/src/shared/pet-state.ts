@@ -1,3 +1,5 @@
+import { ASSETS_PATH } from './routes.ts'
+
 export interface PetStats {
   tasksDone: number
   failures: number
@@ -93,6 +95,10 @@ export function xpFillAsset(ratio: number): string {
   if (r < 0.6) return 'game_hud_bar_exp.png'
   if (r < 0.8) return 'game_hud_bar_hp_oran.png'
   return 'game_hud_bar_hp_red.png'
+}
+
+export function hudUrl(name: string): string {
+  return `${ASSETS_PATH}/hud/${name}`
 }
 
 type TitleWhen = (stats: PetStats, level: number) => boolean

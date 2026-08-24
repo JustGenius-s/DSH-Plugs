@@ -30,35 +30,17 @@ import { launcherVisible, type LauncherStore } from './launcher-store'
 import type { SidePanelInstance, SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
 import { QuickActionsControls } from '../quick-actions/controls'
-import type { QuickAction, QuickActionsStore } from '../../../shared/config'
+import type { QuickAction } from '../../../shared/config'
+import type { QuickActionsStore } from '../quick-actions/store'
+import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+import { sessionCwd } from '../../host-adapters/sessions'
+import { useSidePanelLayout } from './layout-controller'
 
 ensureSidePanelStyles()
 
 /** Breathing room between the conversation header's bottom edge and the launcher card. */
 const LAUNCHER_HEADER_GAP = 20
-
-/**
- * Whether the conversation is currently showing its chat view (as opposed to
- * trajectory/waterfall). The session-scoped chat store that owns the active
- * view id is not reachable from this root-scoped shell, so we read the header
- * tablist: ui-conversation registers the chat view ('conversation.view', id
- * 'chat') first with order 0, so it is always the FIRST tab. A selected
- * non-first tab means a different view is active. No tablist at all — a blank
- * session with a single view, or the header hidden during the hero phase —
- * is the chat view by definition.
- */
-function isChatViewActive(): boolean {
-  const sp = document.querySelector('[data-conversation-scroll]')
-  // The header is the element immediately above the conversation scrollport
-  // (ConversationRoot renders `renderSlot("conversation.session.header")`
-  // then the scrollBody), so it is the scrollport's previous sibling.
-  const header = sp?.previousElementSibling ?? null
-  const tablist = header?.querySelector('[role="tablist"]') ?? null
-  if (tablist === null) return true
-  const selected = tablist.querySelector('[role="tab"][aria-selected="true"]')
-  if (selected === null) return true
-  return selected === tablist.firstElementChild
-}
 
 /**
  * Tab caption: a lone instance keeps the panel label ("终端"); duplicates
@@ -83,8 +65,6 @@ function instanceCaption(
   const ordinal = siblings.findIndex(item => item.key === instance.key) + 1
   return ordinal > 0 ? label + ' ' + String(ordinal) : label
 }
-
-interface SessionRecord { cwd?: string }
 
 /** Reactive read face over the slot ledger for `side.panel`. */
 export interface PanelEntriesApi {
@@ -111,7 +91,7 @@ interface ShellProps {
     },
     opts?: { only?: string },
   ) => unknown
-  useSessions: (selector: (state: never) => unknown) => unknown
+  useSessions: SnapshotSelectorHook<SessionListState>
   store: SidePanelsStore
   launcher: LauncherStore
   entries: PanelEntriesApi
@@ -124,19 +104,9 @@ interface ShellProps {
 export function SidePanelsShell(props: ShellProps) {
   const { renderSlot, useSessions, store, launcher, entries, quickActions, executeQuickAction, scope, t } = props
 
-  const sessionId = useSessions((state) => {
-    const s = state as { current?: string } | undefined
-    return s?.current
-  }) as string | undefined
-
-  const sessionsById = useSessions((state) => {
-    const s = state as { byId?: Record<string, SessionRecord> } | undefined
-    return s?.byId
-  }) as Record<string, SessionRecord> | undefined
-  const sessionIds = useSessions((state) => {
-    const s = state as { ids?: readonly string[] } | undefined
-    return s?.ids
-  }) as readonly string[] | undefined
+  const sessionId = useSessions(state => state.current)
+  const sessionsById = useSessions(state => state.byId)
+  const sessionIds = useSessions(state => state.ids)
 
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const tabs = useSyncExternalStore(entries.subscribe, entries.list)
@@ -178,136 +148,7 @@ export function SidePanelsShell(props: ShellProps) {
   const terminalActive = activeInstance?.panelId === 'terminal'
 
   const open = snapshot.open && live.length > 0
-
-  // Drive the layout squeeze: one CSS variable on <html> plus a body attribute.
-  useEffect(() => {
-    const root = document.documentElement
-    root.style.setProperty('--dsh-side-panels-width', open ? `${snapshot.width}px` : '0px')
-    if (open) {
-      document.body.setAttribute('data-dsh-side-panels-open', '')
-    } else {
-      document.body.removeAttribute('data-dsh-side-panels-open')
-    }
-    return () => {
-      root.style.setProperty('--dsh-side-panels-width', '0px')
-      document.body.removeAttribute('data-dsh-side-panels-open')
-    }
-  }, [open, snapshot.width])
-
-  // The collapsed launcher hangs under the conversation header rather than in
-  // the viewport's corner, where it sat on top of the header's own action
-  // cluster. `[data-conversation-scroll]` is ui-conversation's documented
-  // scrollport hook (README; ChatView resolves its host through it) and its
-  // top edge IS the header's bottom edge — so measuring it tracks the header
-  // through its variable heights (subagent breadcrumb rows) and through the
-  // hero/blank phase that hides the header outright, with no height guess.
-  const [anchorTop, setAnchorTop] = useState<number | null>(null)
-  useEffect(() => {
-    if (!open) {
-      let raf: number | null = null
-      const measure = (): void => {
-        const el = document.querySelector('[data-conversation-scroll]')
-        setAnchorTop(el === null ? null : Math.round(el.getBoundingClientRect().top))
-      }
-      // Observer callbacks can land mid-layout; coalesce to one rAF like the
-      // AppFrame's own viewport tracking does.
-      const schedule = (): void => {
-        raf ??= requestAnimationFrame(() => { raf = null; measure() })
-      }
-      measure()
-      const observer = new ResizeObserver(schedule)
-      const scroll = document.querySelector('[data-conversation-scroll]')
-      if (scroll !== null) observer.observe(scroll)
-      // The header is what moves the scrollport, and a column/viewport reflow
-      // can move it without resizing the scrollport's own box.
-      observer.observe(document.documentElement)
-      window.addEventListener('resize', schedule)
-      return () => {
-        observer.disconnect()
-        window.removeEventListener('resize', schedule)
-        if (raf !== null) cancelAnimationFrame(raf)
-      }
-    }
-    return undefined
-  }, [open])
-
-  // Occlusion auto-hide: the card hangs over the conversation's top-right
-  // corner, which is empty chrome on wide windows but covers message rows
-  // once the centered chat column reaches under it. When any visible chat
-  // row intersects the card, the card conceals itself and the session header
-  // grows a toggle (LauncherToggle) to bring it back. The card hides with
-  // `visibility`, not `display`, so its rect stays measurable and scrolling
-  // the conversation out from under it auto-shows it again.
-  const launcherRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (open) {
-      launcher.setOccluded(false)
-      launcher.setChatView(true)
-      return undefined
-    }
-    let raf: number | null = null
-    const measure = (): void => {
-      // The launcher only makes sense over the chat's message column. The
-      // active conversation view lives in the session-store, which this
-      // root-scoped overlay cannot subscribe to, so detect it from the header
-      // tablist instead: the chat view is the default 'conversation.view'
-      // entry (registered first by ui-conversation, order 0), so it is always
-      // the FIRST tab. Any other selected tab means trajectory/waterfall —
-      // hide the card there, and never let the occlusion auto-show fight it.
-      launcher.setChatView(isChatViewActive())
-      const card = launcherRef.current
-      const sp = document.querySelector('[data-conversation-scroll]')
-      if (card === null || sp === null) {
-        launcher.setOccluded(false)
-        return
-      }
-      const cardRect = card.getBoundingClientRect()
-      const spRect = sp.getBoundingClientRect()
-      const overScrollport = cardRect.left < spRect.right && cardRect.right > spRect.left
-        && cardRect.top < spRect.bottom && cardRect.bottom > spRect.top
-      let hit = false
-      if (overScrollport) {
-        for (const row of sp.querySelectorAll('[data-chat-anchor-key]')) {
-          const r = row.getBoundingClientRect()
-          if (r.bottom < spRect.top || r.top > spRect.bottom) continue
-          if (cardRect.left < r.right && cardRect.right > r.left
-            && cardRect.top < r.bottom && cardRect.bottom > r.top) {
-            hit = true
-            break
-          }
-        }
-      }
-      launcher.setOccluded(hit)
-    }
-    const schedule = (): void => {
-      raf ??= requestAnimationFrame(() => { raf = null; measure() })
-    }
-    measure()
-    // Capture-phase document scroll listener: scroll does not bubble, and the
-    // scrollport element is replaced on session switch, so a listener bound
-    // to the element found at mount would silently go stale.
-    document.addEventListener('scroll', schedule, { capture: true, passive: true })
-    window.addEventListener('resize', schedule)
-    const ro = new ResizeObserver(schedule)
-    ro.observe(document.documentElement)
-    // Watch both DOM churn (tablist mount/resize, session swap) and the
-    // header tabs' selection attribute, since switching view only flips
-    // aria-selected on an existing tab rather than re-parenting it.
-    const mo = new MutationObserver(schedule)
-    mo.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['aria-selected'],
-    })
-    return () => {
-      if (raf !== null) cancelAnimationFrame(raf)
-      document.removeEventListener('scroll', schedule, { capture: true })
-      window.removeEventListener('resize', schedule)
-      ro.disconnect()
-      mo.disconnect()
-    }
-  }, [open, tabs.length, launcher])
+  const { anchorTop, launcherRef } = useSidePanelLayout(open, snapshot.width, launcher, tabs.length)
 
   // Resize mirrors AppFrame's DragHandle: pointer capture keeps the gesture on
   // the strip (no window listeners), deltas are rAF-throttled, and the base is
@@ -558,7 +399,7 @@ export function SidePanelsShell(props: ShellProps) {
               'side.panel',
               {
                 sessionId: session.sessionId,
-                cwd: sessionsById?.[session.sessionId]?.cwd,
+                cwd: sessionCwd(sessionsById, session.sessionId),
                 instanceKey: instance.key,
                 state: instance.state,
                 // Hidden retained panes stay mounted but must not hold SSE.
@@ -574,7 +415,7 @@ export function SidePanelsShell(props: ShellProps) {
 
   const launcherCard = tabs.length > 0 ? (
     <div
-      ref={launcherRef}
+      ref={node => { launcherRef.current = node }}
       className="dsh-side-panels-launcher"
       style={{
         width: launcherWidth,

@@ -25,7 +25,8 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { injectStyles } from '@just-genius/dsh-plugin-ui'
 import { createQuickAction } from './store'
-import type { QuickAction, QuickActionsStore, QuickActionTarget } from '../../../shared/config'
+import type { QuickActionsStore } from './store'
+import type { QuickAction, QuickActionTarget } from '../../../shared/config'
 
 const QUICK_ACTIONS_CSS = `
 .dsh-codex-quick-actions-modal{width:min(560px,calc(100vw - 48px))!important;max-width:calc(100vw - 48px)!important;box-sizing:border-box}
@@ -222,14 +223,14 @@ function ManageModal({ store, t, onClose }: ManageModalProps) {
   const save = (): void => {
     if (draft === null) return
     const exists = snapshot.actions.some(action => action.id === draft.id)
-    if (exists) store.update(draft)
-    else store.add(draft)
+    if (exists) void store.update(draft)
+    else void store.add(draft)
     setDraft(null)
   }
 
   const deleteDraft = (): void => {
     if (draft === null) return
-    store.remove(draft.id)
+    void store.remove(draft.id)
     setDraft(null)
   }
 
@@ -292,7 +293,7 @@ function ManageModal({ store, t, onClose }: ManageModalProps) {
                     <button
                       type="button"
                       className="dsh-codex-quick-actions-danger"
-                      onClick={() => { store.remove(action.id) }}
+                      onClick={() => { void store.remove(action.id) }}
                     >
                       {t('quickActions.delete')}
                     </button>
