@@ -13,6 +13,7 @@ import { createGitGraphFeature } from './features/git-graph'
 import { createNavigatorFeature } from './features/navigator'
 import { createSidePanelsFeature } from './features/side-panels'
 import { createTerminalFeature } from './features/terminal'
+import { createTerminalControllerStore, type TerminalControllerStore } from './features/terminal/controller'
 import { CodexSettingsSection } from './settings/CodexSettingsSection'
 import { installCodexSettingsIcon } from './settings/codex-settings-icon'
 import { en, zh, type CodexKey } from './locales'
@@ -42,11 +43,18 @@ export function apply(ctx: ClientContext): void {
   }, CodexSettingsSection))
   ctx.effect(() => installCodexSettingsIcon(() => t('nav')), 'dsh-codex: settings icon')
 
+  // A single terminal-controller registry shared by the side-panels quick
+  // actions and the terminal feature. Both receive the SAME store — the
+  // quick-action executor resolves a terminal it opened against it, and the
+  // terminal panel registers each PTY into it — so ownership lives here and
+  // dispose is single-sourced (never per-feature).
+  const terminalControllers = createTerminalControllerStore()
+
   const features = createCodexFeatureManager([
     createConversationCollapseFeature(ctx, scope, t),
     createNavigatorFeature(ctx, scope),
-    createSidePanelsFeature(ctx, scope, t),
-    createTerminalFeature(ctx, scope, t),
+    createSidePanelsFeature(ctx, scope, t, terminalControllers),
+    createTerminalFeature(ctx, scope, t, terminalControllers),
     createGitGraphFeature(ctx, scope, t),
     createFilesFeature(ctx, scope, t),
     // After side-panels/files: the patch reroutes chat file links into the
@@ -55,6 +63,9 @@ export function apply(ctx: ClientContext): void {
   ])
   ctx.effect(() => {
     features.activate()
-    return () => features.dispose()
+    return () => {
+      features.dispose()
+      terminalControllers.dispose()
+    }
   }, 'dsh-codex: feature manager')
 }

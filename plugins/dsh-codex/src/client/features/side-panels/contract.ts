@@ -8,6 +8,9 @@
  * shell renders the tab strip and the active panel.
  */
 
+import type { PanelNavState } from './service'
+
+
 export interface SidePanelOwnerProps {
   /** Current session id (panels are re-keyed off this on session switch). */
   sessionId: string
@@ -22,7 +25,10 @@ export interface SidePanelOwnerProps {
    * Single-instance panels can ignore it.
    */
   instanceKey?: string
+  /** Navigation payload stored on this panel instance. */
+  state?: PanelNavState
 }
+
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

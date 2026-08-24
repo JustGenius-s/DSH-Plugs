@@ -4,7 +4,9 @@ import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
+import type { PanelNavState } from '../side-panels/service'
 import { WarpTerminalView } from './warp-terminal-view'
+import type { TerminalControllerStore } from './controller'
 
 const PANEL_SLOT = 'side.panel'
 const NS = 'settings.codex'
@@ -13,11 +15,12 @@ interface TerminalPanelProps {
   sessionId: string
   cwd?: string
   instanceKey?: string
+  state?: PanelNavState
   t: (key: string) => string
 }
 
-function createTerminalPanel(scope: SettingsScope<DshCodexConfig>) {
-  return function TerminalPanel({ sessionId, cwd, instanceKey, t }: TerminalPanelProps) {
+function createTerminalPanel(scope: SettingsScope<DshCodexConfig>, controllerStore: TerminalControllerStore) {
+  return function TerminalPanel({ sessionId, cwd, instanceKey, state, t }: TerminalPanelProps) {
     const subscribe = (listener: () => void) => scope.subscribe(listener)
     const getSnapshot = () => scope.getSnapshot()
     const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
@@ -28,10 +31,12 @@ function createTerminalPanel(scope: SettingsScope<DshCodexConfig>) {
 
     return createElement(WarpTerminalView, {
       sessionId: terminalId,
-      cwd,
+      cwd: state?.cwd ?? cwd,
       terminalShell: config.terminalShell,
       terminalScrollback: config.terminalScrollback,
       terminalFontSize: config.terminalFontSize,
+      controllerStore,
+      controllerId: terminalId,
       t,
     })
   }
@@ -41,11 +46,12 @@ export function createTerminalFeature(
   ctx: ClientContext,
   scope: SettingsScope<DshCodexConfig>,
   t: (key: CodexKey) => string,
+  controllerStore: TerminalControllerStore,
 ): CodexFeature {
   return {
     id: 'terminal',
     activate() {
-      const TerminalPanel = createTerminalPanel(scope)
+      const TerminalPanel = createTerminalPanel(scope, controllerStore)
       const disposeDescriptor = ctx.sidePanels.describe('terminal', { icon: 'terminal', multi: true })
       const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => {
         let disposeEntry: (() => void) | undefined

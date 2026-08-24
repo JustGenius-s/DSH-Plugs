@@ -50,6 +50,8 @@ export interface PanelNavState {
   view?: 'changes' | 'graph'
   /** Tab caption override (the git graph tab reads "Graph", not "Git 2"). */
   title?: string
+  /** Initial working directory for terminal instances. */
+  cwd?: string
 }
 
 export interface SidePanelSessionSnapshot {
@@ -125,7 +127,7 @@ export interface SidePanelsService {
    * single-instance panel reuses its existing one. When `state` is given, a
    * reused single instance updates its navigation state in place.
    */
-  open(id?: string, state?: PanelNavState): void
+  open(id?: string, state?: PanelNavState): string | undefined
   /** Close the sidebar (instances stay open, so reopening restores the tabs). */
   close(): void
   /** Toggle the sidebar; `id` also opens/activates that panel. */
@@ -373,7 +375,7 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
       if (id === undefined) {
         setSnapshot({ open: true })
         writeStorage(OPEN_KEY, '1')
-        return
+        return snapshot.activeKey ?? undefined
       }
       // Single-instance panels reuse their tab; multi panels add one.
       const existing = descriptors.get(id)?.multi === true
@@ -387,17 +389,20 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
           ? snapshot.instances
           : snapshot.instances.map(i => i.key === existing.key ? instance : i)
         setSnapshot({ open: true, activeKey: existing.key, instances })
-      } else {
-        const instance: SidePanelInstance = { key: nextKey(id), panelId: id }
-        if (state !== undefined) instance.state = state
-        setSnapshot({
-          open: true,
-          instances: [...snapshot.instances, instance],
-          activeKey: instance.key,
-        })
+        writeStorage(OPEN_KEY, '1')
+        saveTabs()
+        return existing.key
       }
+      const instance: SidePanelInstance = { key: nextKey(id), panelId: id }
+      if (state !== undefined) instance.state = state
+      setSnapshot({
+        open: true,
+        instances: [...snapshot.instances, instance],
+        activeKey: instance.key,
+      })
       writeStorage(OPEN_KEY, '1')
       saveTabs()
+      return instance.key
     },
     close() {
       setSnapshot({ open: false })

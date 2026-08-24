@@ -19,6 +19,7 @@ import type {
   TerminalCompletionCandidate,
 } from '../../../shared/terminal-protocol'
 import type { TerminalShell } from '../../../shared/config'
+import type { TerminalControllerStore } from './controller'
 import { ensureWarpTerminalStyles } from './styles'
 import { createBlockGrid, writeToGrid, disposeGrid, resizeGrid, type StoreOptions, type BlockGrid } from './block-store'
 import { composeDoc, type DocBlock, type ComposedDoc } from './doc-model'
@@ -242,11 +243,13 @@ export interface WarpTerminalViewProps {
   terminalShell: TerminalShell
   terminalScrollback: number
   terminalFontSize: number
+  controllerStore?: TerminalControllerStore
+  controllerId?: string
   t: (key: string) => string
 }
 
 export function WarpTerminalView(props: WarpTerminalViewProps) {
-  const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t } = props
+  const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t, controllerStore, controllerId } = props
   const sessionCwd = cwd
 
   const [blocks, setBlocks] = useState<Block[]>([])
@@ -305,6 +308,26 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // bracketed paste, so multi-line submissions can arrive as one buffer.
   const shellBracketedPasteRef = useRef(false)
   const handleServerMessageRef = useRef((m: ServerMessage) => { void m })
+  // Ready gate for controller-driven runs: a `run` resolves once the PTY is
+  // OPEN and has delivered a `ready` message, so an external consumer never
+  // submits a command into a socket that is still connecting. Rejected when
+  // the view unmounts (so a pending run fails instead of hanging forever).
+  const readyPromiseRef = useRef<Promise<void> | null>(null)
+  const readyResolveRef = useRef<(() => void) | null>(null)
+  const readyRejectRef = useRef<((reason?: unknown) => void) | null>(null)
+  // Context gate for controller-driven runs. The host delivers `ready` first,
+  // then asynchronously an `updateContext` (the `context` message). A quick-
+  // action `run` must not create its first block until the host has reported a
+  // current context, or the block header renders differently than a manually
+  // opened tab (whose first block always carries a context). Resolved by
+  // `case 'context'`, rejected on unmount / connection replacement exactly
+  // like the ready gate.
+  const contextPromiseRef = useRef<Promise<void> | null>(null)
+  const contextResolveRef = useRef<(() => void) | null>(null)
+  const contextRejectRef = useRef<((reason?: unknown) => void) | null>(null)
+  // Kept current so the controller's `run` closure always dispatches through
+  // the latest submitCommand without re-registering on every render.
+  const submitCommandRef = useRef<((command: string) => void) | null>(null)
   const lastSessionKeyRef = useRef('')
   const sessionTokenRef = useRef(newSessionToken())
   // Set when the host reported the shell's own `exit`: a real end of session,
@@ -835,11 +858,13 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         shellBracketedPasteRef.current = message.bracketedPaste
         setConnState('ready')
         setError(null)
+        readyResolveRef.current?.()
         requestAnimationFrame(() => sendResizeRef.current())
         break
       case 'context':
         currentContextRef.current = message.context
         setCurrentContext(message.context)
+        contextResolveRef.current?.()
         break
       case 'history': {
         historyRef.current = mergeHistory(message.commands, historyRef.current)
@@ -913,6 +938,46 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // which would otherwise reconnect the socket every 530ms and kill the PTY.
   handleServerMessageRef.current = handleServerMessage
 
+  // Create the controller's ready gate for this view. It resolves on the next
+  // host `ready` message and is rejected in cleanup, so a controller `run`
+  // blocked on it fails cleanly instead of waiting forever. The lifecycle is
+  // bound to the connection identity ([sessionId, reconnectToken]) — the same
+  // keys that drive the WebSocket effect below — so every new connection
+  // installs a fresh promise and the previous one is rejected (an already-
+  // resolved stale gate would otherwise let a run submit into a socket that
+  // is still connecting after a reconnect). Declared before the WebSocket
+  // effect so the new gate is installed before the new socket can emit ready.
+  useEffect(() => {
+    let readyResolve!: () => void
+    let readyReject!: (reason?: unknown) => void
+    const readyPromise = new Promise<void>((res, rej) => { readyResolve = res; readyReject = rej })
+    // The rejection must always be observed or a never-awaiting `run` would
+    // surface an unhandled rejection on cleanup; `run` attaches its own await.
+    void readyPromise.catch(() => {})
+    let contextResolve!: () => void
+    let contextReject!: (reason?: unknown) => void
+    const contextPromise = new Promise<void>((res, rej) => { contextResolve = res; contextReject = rej })
+    // Same unhandled-rejection guard for the context gate; `run` awaits it too.
+    void contextPromise.catch(() => {})
+    readyPromiseRef.current = readyPromise
+    readyResolveRef.current = readyResolve
+    readyRejectRef.current = readyReject
+    contextPromiseRef.current = contextPromise
+    contextResolveRef.current = contextResolve
+    contextRejectRef.current = contextReject
+    return () => {
+      const reason = new Error('warp-terminal view connection closed')
+      readyRejectRef.current?.(reason)
+      contextRejectRef.current?.(reason)
+      readyPromiseRef.current = null
+      readyResolveRef.current = null
+      readyRejectRef.current = null
+      contextPromiseRef.current = null
+      contextResolveRef.current = null
+      contextRejectRef.current = null
+    }
+  }, [sessionId, reconnectToken])
+
   useEffect(() => {
     const canvas = canvasRef.current
     const scrollEl = scrollRef.current
@@ -972,6 +1037,10 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     eraseScrollbackBufRef.current = ''
     pendingClearsRef.current = 0
     clearDropModeRef.current = null
+    // A new connection must not briefly show the previous connection's context
+    // (the chips/headers) until its own `updateContext` arrives.
+    currentContextRef.current = null
+    setCurrentContext(null)
     window.clearTimeout(retryTimerRef.current)
     const sessionKey = sessionId
     if (lastSessionKeyRef.current !== sessionKey) {
@@ -1026,8 +1095,13 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       if (wsRef.current === ws) wsRef.current = null
     }
   }, [sessionId, reconnectToken])
-  const runDraft = useCallback(() => {
-    const command = draft
+  // `submitCommand` is the single send path shared by the interactive editor
+  // (`runDraft`) and the controller (`run`). It mirrors the pre-existing
+  // runDraft behavior: an empty command is ignored, a running command block
+  // receives the newline-joined continuation, `clear` resets the transcript,
+  // and the payload is sent with bracketed-paste wrapping when the shell's
+  // line editor enabled mode ?2004.
+  const submitCommand = useCallback((command: string) => {
     if (command.trim().length === 0) return
     const ws = wsRef.current
     if (ws === null || ws.readyState !== WebSocket.OPEN) return
@@ -1101,7 +1175,49 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     ws.send(JSON.stringify(message))
     rebuildDoc()
     schedulePaint()
-  }, [draft, rebuildDoc, schedulePaint, clearTranscript])
+  }, [rebuildDoc, schedulePaint, clearTranscript, newGrid])
+  submitCommandRef.current = submitCommand
+
+  const runDraft = useCallback(() => {
+    submitCommand(draft)
+  }, [draft, submitCommand])
+
+  // Register this terminal's controller once the store and id are provided.
+  // A controller-driven run waits for the PTY to be OPEN + `ready` (the ready
+  // gate above) before dispatching through `submitCommand`. It only promises
+  // that the submission went out — it does not await block-end, so launching
+  // `pnpm dev` through the controller does not serialize on the command result.
+  // A rejected gate (view unmounted, or the connection replaced mid-run) is
+  // NOT swallowed here: it propagates to the quick-action caller so a run that
+  // could not be submitted surfaces as a failure instead of returning silently.
+  useEffect(() => {
+    if (controllerStore === undefined || controllerId === undefined) return
+    const run = async (command: string): Promise<void> => {
+      // Wait for both gates: the PTY is OPEN and has delivered `ready`, and the
+      // host has reported its current `context`. Only then is a submitted block
+      // guaranteed to render headers identically to a manually opened tab. A
+      // rejected gate (view unmounted, or the connection replaced mid-run) is
+      // NOT swallowed here: it propagates to the quick-action caller so a run
+      // that could not be submitted surfaces as a failure instead of returning
+      // silently.
+      const gates = [readyPromiseRef.current, contextPromiseRef.current].filter((p): p is Promise<void> => p !== null)
+      if (gates.length > 0) {
+        await Promise.all(gates)
+      }
+      // The gates only prove messages were delivered at some point, not that
+      // the socket is still OPEN. In the reconnect delay window the socket has
+      // dropped (readyState CLOSING/CLOSED) while the host keeps the PTY alive,
+      // so a submission here would silently vanish. Fail fast so the
+      // quick-action surfaces the run as failed instead of reporting success
+      // into a dead socket.
+      const ws = wsRef.current
+      if (ws === null || ws.readyState !== WebSocket.OPEN) {
+        throw new Error('warp-terminal socket is not open')
+      }
+      await submitCommandRef.current?.(command)
+    }
+    return controllerStore.register(controllerId, { run })
+  }, [controllerStore, controllerId])
 
   const killRunning = useCallback(() => {
     const ws = wsRef.current

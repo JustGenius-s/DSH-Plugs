@@ -29,6 +29,8 @@ import { resolvePanelIcon } from './icons'
 import { launcherVisible, type LauncherStore } from './launcher-store'
 import type { SidePanelInstance, SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
+import { QuickActionsControls } from '../quick-actions/controls'
+import type { QuickAction, QuickActionsStore } from '../quick-actions/store'
 
 ensureSidePanelStyles()
 
@@ -100,19 +102,21 @@ export interface PanelTabInfo {
 interface ShellProps {
   renderSlot: (
     key: 'side.panel',
-    owner: { sessionId: string; cwd?: string; instanceKey?: string },
+    owner: { sessionId: string; cwd?: string; instanceKey?: string; state?: SidePanelInstance['state'] },
     opts?: { only?: string },
   ) => unknown
   useSessions: (selector: (state: never) => unknown) => unknown
   store: SidePanelsStore
   launcher: LauncherStore
   entries: PanelEntriesApi
+  quickActions: QuickActionsStore
+  executeQuickAction: (action: QuickAction) => Promise<void>
   scope?: SettingsScope<DshCodexConfig>
   t: (key: string) => string
 }
 
 export function SidePanelsShell(props: ShellProps) {
-  const { renderSlot, useSessions, store, launcher, entries, scope, t } = props
+  const { renderSlot, useSessions, store, launcher, entries, quickActions, executeQuickAction, scope, t } = props
 
   const sessionId = useSessions((state) => {
     const s = state as { current?: string } | undefined
@@ -164,6 +168,8 @@ export function SidePanelsShell(props: ShellProps) {
   const activeKey = live.some(i => i.key === snapshot.activeKey)
     ? snapshot.activeKey
     : live[0]?.key ?? null
+  const activeInstance = activeKey === null ? undefined : live.find(i => i.key === activeKey)
+  const terminalActive = activeInstance?.panelId === 'terminal'
 
   const open = snapshot.open && live.length > 0
 
@@ -228,7 +234,7 @@ export function SidePanelsShell(props: ShellProps) {
   // the conversation out from under it auto-shows it again.
   const launcherRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    if (open || tabs.length === 0) {
+    if (open) {
       launcher.setOccluded(false)
       launcher.setChatView(true)
       return undefined
@@ -548,6 +554,7 @@ export function SidePanelsShell(props: ShellProps) {
                 sessionId: session.sessionId,
                 cwd: sessionsById?.[session.sessionId]?.cwd,
                 instanceKey: instance.key,
+                state: instance.state,
               },
               { only: instance.panelId },
             ) as ReactNode}
@@ -578,6 +585,7 @@ export function SidePanelsShell(props: ShellProps) {
       {tabs.map((tab) => {
         const existing = live.filter(instance => instance.panelId === tab.id)
         const expanded = expandedLauncherId === tab.id && existing.length > 0
+        const isTerminal = tab.id === 'terminal'
         return (
           <div key={tab.id} className="dsh-side-panels-launcher-group">
             <div className="dsh-side-panels-launcher-row">
@@ -599,6 +607,9 @@ export function SidePanelsShell(props: ShellProps) {
                 </span>
                 <span className="dsh-side-panels-launcher-label">{tab.label}</span>
               </button>
+              {isTerminal && (
+                <QuickActionsControls variant="launcher" store={quickActions} execute={executeQuickAction} t={t} />
+              )}
               {existing.length > 0 && (
                 <button
                   type="button"
@@ -776,6 +787,9 @@ export function SidePanelsShell(props: ShellProps) {
             </div>
           )}
         </div>
+        {terminalActive && (
+          <QuickActionsControls variant="header" store={quickActions} execute={executeQuickAction} t={t} />
+        )}
         <Tooltip label={t('aria.close')} delayMs={500} side="bottom">
           <button
             type="button"
