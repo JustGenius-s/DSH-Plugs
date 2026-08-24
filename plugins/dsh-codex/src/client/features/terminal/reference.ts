@@ -38,6 +38,7 @@ export const TERMINAL_REFERENCE_SOURCE = 'terminal'
 interface TerminalSelectionEntry {
   readonly ref: string
   readonly text: string
+  readonly label: string
 }
 
 /** Module-level registry: ref → captured text, readable by the codec later. */
@@ -49,14 +50,18 @@ function mintRef(): string {
   return 'terminal:' + refSeq.toString(36)
 }
 
-/** Model form of one terminal reference: the captured text as a fenced block. */
+/**
+ * Model form of one terminal reference: the captured text as plain text. No
+ * fenced block — the user bubble renders text verbatim (MessageText, no
+ * markdown parsing), so a ``` fence would show up as literal noise instead
+ * of a code block.
+ */
 function serializeTerminalReference(ref: string): Promise<string> {
   const entry = entries.get(ref)
   if (entry === undefined) {
     return Promise.reject(new Error(`terminal reference "${ref}" is no longer available`))
   }
-  const body = entry.text.replace(/```/g, '\\`\\`\\`')
-  return Promise.resolve('\n```\n' + body + '\n```\n')
+  return Promise.resolve('\n' + entry.text + '\n')
 }
 
 /**
@@ -133,7 +138,7 @@ export function createTerminalReference(ctx: ClientContext): TerminalReferenceAp
       const snapshot = input.state.getSnapshot()
 
       const ref = mintRef()
-      entries.set(ref, { ref, text: trimmed })
+      entries.set(ref, { ref, text: trimmed, label })
 
       const reference: ReferenceInsert = {
         source: TERMINAL_REFERENCE_SOURCE,
