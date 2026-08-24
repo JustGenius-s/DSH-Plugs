@@ -8,9 +8,11 @@
  * tokenization through shiki's dual-theme mode: each token carries its light
  * color as `var(--shiki-light)` plus a `--shiki-dark` custom property, and
  * the panel stylesheet flips on `body[data-ds-dark-theme]` — the same marker
- * the app's ui-theme package uses. Grammars are bundled eagerly — the plugin
- * ships a single client file and cannot lazy `import()` chunks — so the list
- * covers common languages without shipping shiki's full catalog.
+ * the app's ui-theme package uses. Grammar *modules* are still bundled (one
+ * client file, no async chunks), but registration mirrors VS Code: the
+ * highlighter starts with zero langs and `loadLanguageSync`s only the grammar
+ * needed for the open file. Eagerly registering ~90 grammars cost ~0.8–1.3s
+ * on createHighlighter; empty create is ~0ms and a single load is a few ms.
  */
 import type { CSSProperties } from 'react'
 import { createHighlighterCoreSync } from 'shiki/core'
@@ -109,96 +111,101 @@ import langFsharp from '@shikijs/langs/fsharp'
 import langVb from '@shikijs/langs/vb'
 import langGdscript from '@shikijs/langs/gdscript'
 
-const LANGS = [
-  langTs,
-  langJavascript,
-  langJsx,
-  langTsx,
-  langBash,
-  langJson,
-  langJsonc,
-  langJson5,
-  langPython,
-  langGo,
-  langRust,
-  langJava,
-  langC,
-  langCpp,
-  langCsharp,
-  langRuby,
-  langPhp,
-  langYaml,
-  langToml,
-  langMarkdown,
-  langHtml,
-  langCss,
-  langScss,
-  langSql,
-  langXml,
-  langVue,
-  langSvelte,
-  langAstro,
-  langMdx,
-  langLess,
-  langSass,
-  langStylus,
-  langPostcss,
-  langHandlebars,
-  langPug,
-  langJinja,
-  langTwig,
-  langErb,
-  langRazor,
-  langDart,
-  langSwift,
-  langKotlin,
-  langObjectiveC,
-  langScala,
-  langGroovy,
-  langLua,
-  langPerl,
-  langR,
-  langJulia,
-  langPowershell,
-  langBat,
-  langCoffeescript,
-  langDockerfile,
-  langMakefile,
-  langCmake,
-  langNginx,
-  langHcl,
-  langTerraform,
-  langIni,
-  langReg,
-  langDiff,
-  langGraphql,
-  langPrisma,
-  langProtobuf,
-  langCsv,
-  langVim,
-  langSolidity,
-  langWasm,
-  langTex,
-  langLatex,
-  langBibtex,
-  langHaskell,
-  langOcaml,
-  langElixir,
-  langErlang,
-  langClojure,
-  langElm,
-  langNix,
-  langLisp,
-  langScheme,
-  langRacket,
-  langZig,
-  langNim,
-  langCrystal,
-  langV,
-  langFsharp,
-  langVb,
-  langGdscript,
-]
+/**
+ * Grammar id → TextMate registration (often an array that already embeds
+ * nested languages, e.g. vue ships html/js/css/ts). Keys match the values of
+ * {@link LANG_ALIASES}.
+ */
+const LANG_BY_ID = new Map([
+  ['typescript', langTs],
+  ['javascript', langJavascript],
+  ['jsx', langJsx],
+  ['tsx', langTsx],
+  ['shellscript', langBash],
+  ['json', langJson],
+  ['jsonc', langJsonc],
+  ['json5', langJson5],
+  ['python', langPython],
+  ['go', langGo],
+  ['rust', langRust],
+  ['java', langJava],
+  ['c', langC],
+  ['cpp', langCpp],
+  ['csharp', langCsharp],
+  ['ruby', langRuby],
+  ['php', langPhp],
+  ['yaml', langYaml],
+  ['toml', langToml],
+  ['markdown', langMarkdown],
+  ['html', langHtml],
+  ['css', langCss],
+  ['scss', langScss],
+  ['sql', langSql],
+  ['xml', langXml],
+  ['vue', langVue],
+  ['svelte', langSvelte],
+  ['astro', langAstro],
+  ['mdx', langMdx],
+  ['less', langLess],
+  ['sass', langSass],
+  ['stylus', langStylus],
+  ['postcss', langPostcss],
+  ['handlebars', langHandlebars],
+  ['pug', langPug],
+  ['jinja', langJinja],
+  ['twig', langTwig],
+  ['erb', langErb],
+  ['razor', langRazor],
+  ['dart', langDart],
+  ['swift', langSwift],
+  ['kotlin', langKotlin],
+  ['objective-c', langObjectiveC],
+  ['scala', langScala],
+  ['groovy', langGroovy],
+  ['lua', langLua],
+  ['perl', langPerl],
+  ['r', langR],
+  ['julia', langJulia],
+  ['powershell', langPowershell],
+  ['bat', langBat],
+  ['coffee', langCoffeescript],
+  ['docker', langDockerfile],
+  ['make', langMakefile],
+  ['cmake', langCmake],
+  ['nginx', langNginx],
+  ['hcl', langHcl],
+  ['terraform', langTerraform],
+  ['ini', langIni],
+  ['reg', langReg],
+  ['diff', langDiff],
+  ['graphql', langGraphql],
+  ['prisma', langPrisma],
+  ['proto', langProtobuf],
+  ['csv', langCsv],
+  ['viml', langVim],
+  ['solidity', langSolidity],
+  ['wasm', langWasm],
+  ['tex', langTex],
+  ['latex', langLatex],
+  ['bibtex', langBibtex],
+  ['haskell', langHaskell],
+  ['ocaml', langOcaml],
+  ['elixir', langElixir],
+  ['erlang', langErlang],
+  ['clojure', langClojure],
+  ['elm', langElm],
+  ['nix', langNix],
+  ['common-lisp', langLisp],
+  ['scheme', langScheme],
+  ['racket', langRacket],
+  ['zig', langZig],
+  ['nim', langNim],
+  ['crystal', langCrystal],
+  ['v', langV],
+  ['fsharp', langFsharp],
+  ['vb', langVb],
+  ['gdscript', langGdscript],
+])
 
 /**
  * Language hints (file-extension ids) → registered grammar ids. A Map, not an
@@ -358,10 +365,14 @@ const regexEngine = createJavaScriptRegexEngine({
 
 let singleton: ReturnType<typeof createHighlighter> | undefined
 
+/**
+ * Themes only — no grammars. VS Code loads TextMate grammars when a document
+ * of that language opens; we do the same via {@link ensureLanguage}.
+ */
 function createHighlighter() {
   return createHighlighterCoreSync({
     themes: [themeLightPlus, themeDarkPlus],
-    langs: LANGS,
+    langs: [],
     engine: regexEngine,
   })
 }
@@ -369,6 +380,19 @@ function createHighlighter() {
 function highlighter() {
   singleton ??= createHighlighter()
   return singleton
+}
+
+/**
+ * Register `grammarId` (and its embedded deps from the module) if missing.
+ * Returns false when we have no bundled registration for that id.
+ */
+function ensureLanguage(grammarId: string): boolean {
+  const hl = highlighter()
+  if (hl.getLoadedLanguages().includes(grammarId)) return true
+  const grammar = LANG_BY_ID.get(grammarId)
+  if (grammar === undefined) return false
+  hl.loadLanguageSync(grammar)
+  return true
 }
 
 /**
@@ -380,11 +404,13 @@ function highlighter() {
  */
 export const MAX_TOKENIZATION_LINE_LENGTH = 4_000
 /**
- * When a large file already has several overlong lines, skip highlighting
- * the whole buffer. Per-line blanking alone still leaves Shiki chewing on
- * many kilobyte-scale neighbours (measured ~0.5–1s on icon data maps).
+ * Skip whole-buffer highlighting past these sizes. Measured: pnpm-lock.yaml
+ * (591 KB / 6.6k lines) took ~2.4s on the main thread; a 20 KB TS file ~0.6s.
+ * Sidebar preview prefers plain text over a multi-second stall. Byte and
+ * line caps apply independently of overlong-line blanking.
  */
-const SKIP_ALL_HIGHLIGHT_BYTES = 200_000
+const SKIP_ALL_HIGHLIGHT_BYTES = 100_000
+const SKIP_ALL_HIGHLIGHT_LINES = 500
 const SKIP_ALL_HIGHLIGHT_OVERLONG = 10
 
 /** One highlighted run of a line: text plus the inline style shiki assigned. */
@@ -428,6 +454,17 @@ export function highlightLines(
   // before Shiki sees them. Trailing empty segment from a final `\n` is kept
   // so the massaged string still ends with `\n` when the source did.
   const rawLines = code.split('\n')
+  // Cap before Shiki: large buffers stall the main thread regardless of
+  // per-line length (lockfiles, generated dumps). Measured 2.4s on a 591 KB
+  // YAML with no overlong lines — the old gate required overlong>0 first.
+  if (
+    code.length >= SKIP_ALL_HIGHLIGHT_BYTES
+    || rawLines.length >= SKIP_ALL_HIGHLIGHT_LINES
+  ) {
+    return undefined
+  }
+  // VS Code: grammar loads with the document, not at editor boot.
+  if (!ensureLanguage(resolved)) return undefined
   const overlong = new Set<number>()
   const massagedLines: string[] = []
   for (let index = 0; index < rawLines.length; index += 1) {
@@ -449,12 +486,9 @@ export function highlightLines(
     // HTML block ends on one) never see it and swallow the rest of the file.
     massagedLines.push(/^[^\S\n]*$/.test(line) ? ' ' : line)
   }
-  // Generated dumps (icon SVGs-in-TS, …): many overlong neighbours in a big
-  // buffer — fall back to plain text for the whole file.
-  if (
-    overlong.size > 0
-    && (overlong.size >= SKIP_ALL_HIGHLIGHT_OVERLONG || code.length >= SKIP_ALL_HIGHLIGHT_BYTES)
-  ) {
+  // Generated dumps (icon SVGs-in-TS, …): many overlong neighbours — fall
+  // back to plain text for the whole file.
+  if (overlong.size >= SKIP_ALL_HIGHLIGHT_OVERLONG) {
     return undefined
   }
   const massaged = massagedLines.join('\n')
@@ -511,6 +545,7 @@ export function highlightToHtml(
       ? undefined
       : LANG_ALIASES.get(lang.toLowerCase())
   if (resolved === undefined) return undefined
+  if (!ensureLanguage(resolved)) return undefined
   try {
     return highlighter().codeToHtml(code, {
       lang: resolved,

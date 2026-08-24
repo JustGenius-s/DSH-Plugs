@@ -60,13 +60,28 @@ export function FileCodeView(props: {
 }) {
   const { content, lang, labels } = props
   const lines = useMemo(() => splitLines(content), [content])
-  const highlighted = useMemo(
-    () => highlightLines(content, lang),
-    [content, lang],
-  )
   const [expanded, setExpanded] = useState(false)
   const capped = !expanded && lines.length > MAX_PREVIEW_LINES
-  const list = capped ? lines.slice(0, MAX_PREVIEW_LINES) : lines
+  const list = useMemo(
+    () => (capped ? lines.slice(0, MAX_PREVIEW_LINES) : lines),
+    [capped, lines],
+  )
+  // Highlight only the painted slice (not the whole buffer), and after the
+  // first plain-text paint — sync Shiki on render blocked open for 0.5–2s+.
+  const [highlighted, setHighlighted] = useState<HighlightSpan[][] | undefined>(undefined)
+  useEffect(() => {
+    let cancelled = false
+    setHighlighted(undefined)
+    const slice = list.join('\n')
+    const handle = window.setTimeout(() => {
+      const result = highlightLines(slice, lang)
+      if (!cancelled) setHighlighted(result)
+    }, 0)
+    return () => {
+      cancelled = true
+      window.clearTimeout(handle)
+    }
+  }, [lang, list])
   const gutterWidth = String(lines.length).length
   const { start, end, onScroll, totalHeight, offsetY, scrollerRef } = useVirtualWindow(list.length)
 
