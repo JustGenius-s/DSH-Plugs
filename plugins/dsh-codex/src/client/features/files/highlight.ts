@@ -492,35 +492,40 @@ export function highlightLines(
     return undefined
   }
   const massaged = massagedLines.join('\n')
-  const { tokens } = highlighter().codeToTokens(massaged, {
-    lang: resolved,
-    themes: { light: 'light-plus', dark: 'dark-plus' },
-    cssVariablePrefix: '--shiki-',
-  })
-  // The phantom line after a trailing newline now tokenizes to a real
-  // (space) row, so drop it based on the source, not on row emptiness.
-  const rows =
-    tokens.length > 1 && code.endsWith('\n') ? tokens.slice(0, -1) : tokens
-  return rows.map((line, lineIndex) => {
-    // Overlong source lines: pretend there were no tokens so the view falls
-    // back to plain text (then truncates for DOM via stopRenderingLineAfter).
-    if (overlong.has(lineIndex)) return []
-    return line.map((token) => {
-      const style: CSSProperties = {}
-      if (token.color !== undefined) style.color = token.color
-      const extra = token.htmlStyle
-      if (extra !== undefined && typeof extra !== 'string') {
-        Object.assign(style, extra)
-        const fontWeight = extra['--shiki-light-font-weight'] ?? extra['--shiki-dark-font-weight']
-        if (fontWeight !== undefined) style.fontWeight = fontWeight
-        const fontStyle = extra['--shiki-light-font-style'] ?? extra['--shiki-dark-font-style']
-        if (fontStyle !== undefined) style.fontStyle = fontStyle
-        const textDecoration = extra['--shiki-light-text-decoration'] ?? extra['--shiki-dark-text-decoration']
-        if (textDecoration !== undefined) style.textDecoration = textDecoration
-      }
-      return { text: token.content, style }
+  try {
+    const { tokens } = highlighter().codeToTokens(massaged, {
+      lang: resolved,
+      themes: { light: 'light-plus', dark: 'dark-plus' },
+      cssVariablePrefix: '--shiki-',
     })
-  })
+    // The phantom line after a trailing newline now tokenizes to a real
+    // (space) row, so drop it based on the source, not on row emptiness.
+    const rows =
+      tokens.length > 1 && code.endsWith('\n') ? tokens.slice(0, -1) : tokens
+    return rows.map((line, lineIndex) => {
+      // Overlong source lines: pretend there were no tokens so the view falls
+      // back to plain text (then truncates for DOM via stopRenderingLineAfter).
+      if (overlong.has(lineIndex)) return []
+      return line.map((token) => {
+        const style: CSSProperties = {}
+        if (token.color !== undefined) style.color = token.color
+        const extra = token.htmlStyle
+        if (extra !== undefined && typeof extra !== 'string') {
+          Object.assign(style, extra)
+          const fontWeight = extra['--shiki-light-font-weight'] ?? extra['--shiki-dark-font-weight']
+          if (fontWeight !== undefined) style.fontWeight = fontWeight
+          const fontStyle = extra['--shiki-light-font-style'] ?? extra['--shiki-dark-font-style']
+          if (fontStyle !== undefined) style.fontStyle = fontStyle
+          const textDecoration = extra['--shiki-light-text-decoration'] ?? extra['--shiki-dark-text-decoration']
+          if (textDecoration !== undefined) style.textDecoration = textDecoration
+        }
+        return { text: token.content, style }
+      })
+    })
+  } catch {
+    // Grammar edge cases must not blank the preview — plain text fallback.
+    return undefined
+  }
 }
 
 /**

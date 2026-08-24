@@ -74,7 +74,12 @@ export function FileCodeView(props: {
     setHighlighted(undefined)
     const slice = list.join('\n')
     const handle = window.setTimeout(() => {
-      const result = highlightLines(slice, lang)
+      let result: HighlightSpan[][] | undefined
+      try {
+        result = highlightLines(slice, lang)
+      } catch {
+        result = undefined
+      }
       if (!cancelled) setHighlighted(result)
     }, 0)
     return () => {

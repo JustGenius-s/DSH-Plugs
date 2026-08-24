@@ -156,6 +156,10 @@ function FilesTree(props: {
     setChildrenByDir((current) => {
       const next = new Map(current)
       next.set(dir, entries)
+      // Keep the ref in sync inside the updater so callers that await loadDir
+      // (expand-after-fetch) see the cache before the next paint. Reading the
+      // ref right after applyDir used to miss and abort the expand.
+      childrenRef.current = next
       return next
     })
   }, [])
@@ -271,6 +275,7 @@ function FilesTree(props: {
       return
     }
     void loadDir(dir, { silent: true }).then((ok) => {
+      // applyDir already wrote childrenRef; only bail on fetch failure.
       if (!ok || !childrenRef.current.has(dir)) return
       setExpanded((current) => {
         const next = new Set(current)
@@ -507,11 +512,13 @@ function FileLoader(props: {
     let cancelled = false
     setBusy(true)
     setError(undefined)
+    setData(null)
     void fetchFile(cwd, file, sha).then((value) => {
       if (cancelled) return
       setBusy(false)
       if (!value.ok) {
         setError(value.message)
+        setData(null)
         return
       }
       setData(value)
