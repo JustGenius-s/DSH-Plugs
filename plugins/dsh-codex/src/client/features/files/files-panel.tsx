@@ -9,7 +9,6 @@ import {
   GIT_GRAPH_DIFF_PATH,
   GIT_GRAPH_FILE_PATH,
   GIT_GRAPH_TREE_PATH,
-  GIT_GRAPH_WATCH_PATH,
   type GitChangeStatus,
   type GitFileDiff,
   type GitGraphDiffResponse,
@@ -20,6 +19,7 @@ import {
 } from '../../../shared/git-graph'
 import type { PanelNavState } from '../side-panels/service'
 import { fileIconSvg, folderIconSvg } from './file-icons'
+import { subscribeRepoWatch } from '../repo-watch'
 import { FileCodeView, FileDiffView, FileMarkdownView, type ViewLabels } from './file-views'
 import { isMarkdownFile } from './markdown'
 import { ensureFilesStyles } from './styles'
@@ -50,6 +50,12 @@ export interface FilesPanelProps {
    * Defaults to true (VS Code Explorer default).
    */
   showIgnored?: boolean
+  /**
+   * Whether this pane is the active visible tab. Hidden retained panes skip
+   * the repo-watch SSE so many sessions cannot exhaust the connection pool.
+   * Defaults to true.
+   */
+  visible?: boolean
 }
 
 /**
@@ -70,13 +76,20 @@ export function FilesPanel(props: FilesPanelProps) {
   const file = navState?.file
   const sha = navState?.sha
   const showIgnored = props.showIgnored !== false
+  const visible = props.visible !== false
 
   return (
     <div className="dsh-files">
       {cwd === undefined ? (
         <div className="dsh-files-status">{t('files.noCwd')}</div>
       ) : mode === 'tree' ? (
-        <FilesTree cwd={cwd} t={t} onOpen={props.onOpen} showIgnored={showIgnored} />
+        <FilesTree
+          cwd={cwd}
+          t={t}
+          onOpen={props.onOpen}
+          showIgnored={showIgnored}
+          visible={visible}
+        />
       ) : file === undefined ? (
         <div className="dsh-files-status">{t('files.noCwd')}</div>
       ) : mode === 'preview' ? (
@@ -132,8 +145,9 @@ function FilesTree(props: {
   t: (key: string) => string
   onOpen: (state: PanelNavState) => void
   showIgnored: boolean
+  visible: boolean
 }) {
-  const { cwd, t, onOpen, showIgnored } = props
+  const { cwd, t, onOpen, showIgnored, visible } = props
   /** Children keyed by parent dir path (`''` = workspace root). */
   const [childrenByDir, setChildrenByDir] = useState<ReadonlyMap<string, readonly GitTreeEntry[]>>(
     () => new Map(),
@@ -210,10 +224,12 @@ function FilesTree(props: {
     return () => { cancelled = true }
   }, [cwd, loadDir])
 
-  // Live refresh: watch SSE + focus/visibility, debounced, silent re-fetch of
-  // root and every expanded directory (keeps open folders in sync).
+  // Live refresh only while this pane is visible: shared watch SSE (one
+  // EventSource per cwd) + focus/visibility as a backstop. Hidden retained
+  // panes unsubscribe so multi-session workspaces cannot exhaust the ~6
+  // HTTP/1.1 connections to this origin.
   useEffect(() => {
-    let source: EventSource | undefined
+    if (!visible) return
     let debounce: ReturnType<typeof setTimeout> | undefined
     let cancelled = false
 
@@ -227,12 +243,9 @@ function FilesTree(props: {
       debounce = setTimeout(refreshOpen, TREE_REFRESH_DEBOUNCE_MS)
     }
 
-    if (typeof EventSource !== 'undefined') {
-      source = new EventSource(
-        `${GIT_GRAPH_WATCH_PATH}?cwd=${encodeURIComponent(cwd)}`,
-      )
-      source.addEventListener('change', schedule)
-    }
+    const unsubscribe = subscribeRepoWatch(cwd, schedule)
+    // Catch up after the pane was hidden (missed watch events).
+    schedule()
     const onFocus = (): void => schedule()
     const onVisibility = (): void => {
       if (document.visibilityState === 'visible') schedule()
@@ -242,11 +255,11 @@ function FilesTree(props: {
     return () => {
       cancelled = true
       clearTimeout(debounce)
-      source?.close()
+      unsubscribe()
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [cwd, loadDir])
+  }, [cwd, loadDir, visible])
 
   /** Warm a collapsed folder so the next expand paints with children ready. */
   const prefetchDir = useCallback((dir: string): void => {

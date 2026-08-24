@@ -3,6 +3,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createCodexFeatureManager } from './core/feature-manager'
 import { createCodexSettingsStore } from './config/codex-settings-store'
@@ -26,7 +27,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 const NS = 'settings.codex'
 
-export const inject = ['slots', 'locale', 'connection', 'remote', 'sessions', 'workspaces', 'conversationEvents'] as const
+export const inject = [
+  'slots',
+  'locale',
+  'connection',
+  'remote',
+  'sessions',
+  'workspaces',
+  'conversationEvents',
+  // Terminal "Add selection as context" registers an `@` reference codec here.
+  'inputTriggers',
+] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-codex: dictionaries')

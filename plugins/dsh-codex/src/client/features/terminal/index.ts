@@ -7,6 +7,7 @@ import type {} from '../side-panels/contract'
 import type { PanelNavState } from '../side-panels/service'
 import { WarpTerminalView } from './warp-terminal-view'
 import type { TerminalControllerStore } from './controller'
+import { createTerminalReference, type TerminalReferenceApi } from './reference'
 
 const PANEL_SLOT = 'side.panel'
 const NS = 'settings.codex'
@@ -19,7 +20,7 @@ interface TerminalPanelProps {
   t: (key: string) => string
 }
 
-function createTerminalPanel(scope: SettingsScope<DshCodexConfig>, controllerStore: TerminalControllerStore) {
+function createTerminalPanel(scope: SettingsScope<DshCodexConfig>, controllerStore: TerminalControllerStore, terminalReference: TerminalReferenceApi) {
   return function TerminalPanel({ sessionId, cwd, instanceKey, state, t }: TerminalPanelProps) {
     const subscribe = (listener: () => void) => scope.subscribe(listener)
     const getSnapshot = () => scope.getSnapshot()
@@ -38,6 +39,8 @@ function createTerminalPanel(scope: SettingsScope<DshCodexConfig>, controllerSto
       controllerStore,
       controllerId: terminalId,
       t,
+      onAddToContext: (text: string): boolean =>
+        terminalReference.insert(sessionId, text, t('context.chipLabel')),
     })
   }
 }
@@ -51,7 +54,8 @@ export function createTerminalFeature(
   return {
     id: 'terminal',
     activate() {
-      const TerminalPanel = createTerminalPanel(scope, controllerStore)
+      const terminalReference = createTerminalReference(ctx)
+      const TerminalPanel = createTerminalPanel(scope, controllerStore, terminalReference)
       const disposeDescriptor = ctx.sidePanels.describe('terminal', { icon: 'terminal', multi: true })
       const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => {
         let disposeEntry: (() => void) | undefined
@@ -83,6 +87,7 @@ export function createTerminalFeature(
       })
 
       return () => {
+        terminalReference.dispose()
         disposeDescriptor()
         disposeInjection()
       }

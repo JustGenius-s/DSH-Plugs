@@ -27,6 +27,12 @@ export interface SidePanelOwnerProps {
   instanceKey?: string
   /** Navigation payload stored on this panel instance. */
   state?: PanelNavState
+  /**
+   * Whether this pane is the visible active tab. Hidden retained panes stay
+   * mounted (terminal PTY / scroll state) but must not hold long-lived
+   * browser connections (repo-watch SSE). Defaults to true when omitted.
+   */
+  visible?: boolean
 }
 
 

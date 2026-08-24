@@ -48,6 +48,7 @@ export function createFilesFeature(
               sessionId: string
               cwd?: string
               instanceKey?: string
+              visible?: boolean
               t: (key: string) => string
             }) {
               // Each instance reads its OWN navigation state off the store by
@@ -75,6 +76,7 @@ export function createFilesFeature(
                 navState,
                 onOpen: open,
                 showIgnored,
+                visible: props.visible !== false,
               }
               return createElement(FilesPanel, panelProps)
             } as never,

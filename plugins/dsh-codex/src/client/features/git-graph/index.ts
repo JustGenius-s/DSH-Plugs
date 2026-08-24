@@ -68,6 +68,7 @@ export function createGitGraphFeature(
             function GitPanelSlot(props: {
               cwd?: string
               instanceKey?: string
+              visible?: boolean
               t: (key: string) => string
             }) {
               // Each instance reads its OWN navigation state off the store by
@@ -80,10 +81,12 @@ export function createGitGraphFeature(
               const instance = snapshot.instances.find(
                 (item) => item.panelId === PANEL_ID && item.key === props.instanceKey,
               )
+              const visible = props.visible !== false
               if (instance?.state?.view === 'graph') {
                 return createElement(GitGraphView, {
                   cwd: props.cwd,
                   t: props.t,
+                  visible,
                   onOpenFile: openFile,
                   onOpenPreview: openPreview,
                 })
@@ -91,6 +94,7 @@ export function createGitGraphFeature(
               return createElement(GitChangesView, {
                 cwd: props.cwd,
                 t: props.t,
+                visible,
                 onOpenFile: openFile,
                 onOpenPreview: openPreview,
                 onOpenGraph: openGraph,

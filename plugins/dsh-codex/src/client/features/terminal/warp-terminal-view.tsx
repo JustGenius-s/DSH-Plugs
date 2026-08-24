@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent, ClipboardEvent as ReactClipboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { Terminal } from '@xterm/xterm'
 import type {
   BlockContext,
@@ -246,10 +247,17 @@ export interface WarpTerminalViewProps {
   controllerStore?: TerminalControllerStore
   controllerId?: string
   t: (key: string) => string
+  /**
+   * Insert the selected terminal text into the conversation as a `@终端`
+   * reference chip. Called with the selected text when the user picks "Add
+   * as context" from the selection context menu; returns whether the
+   * composer applied the insertion.
+   */
+  onAddToContext?: (text: string) => boolean
 }
 
 export function WarpTerminalView(props: WarpTerminalViewProps) {
-  const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t, controllerStore, controllerId } = props
+  const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t, controllerStore, controllerId, onAddToContext } = props
   const sessionCwd = cwd
 
   const [blocks, setBlocks] = useState<Block[]>([])
@@ -266,6 +274,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const [metrics, setMetrics] = useState<CellMetrics>({ cellWidth: 8, cellHeight: 14 })
   const [scrollTop, setScrollTop] = useState(0)
   const selectionRef = useRef<SelectionRange | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [cursorVisible, setCursorVisible] = useState(true)
   const [darkMode, setDarkMode] = useState(isDarkTheme)
   const terminalShellRef = useRef<TerminalShell>(terminalShell)
@@ -1351,6 +1360,66 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     return true
   }, [])
 
+  // Right-click on the terminal opens a small context menu whenever there is
+  // an active text selection: "Copy" and "Add selection as context" (the
+  // latter only when the caller wired onAddToContext). Without a selection
+  // the browser's default context menu is left alone.
+  const onCanvasContextMenu = useCallback((event: ReactMouseEvent) => {
+    if (selectionRef.current === null) return
+    event.preventDefault()
+    setContextMenu({ x: event.clientX, y: event.clientY })
+  }, [])
+
+  // Close the context menu on outside click, Escape, scroll, or a selection
+  // change (the selection it acted on is gone, so the menu must not linger).
+  useEffect(() => {
+    if (contextMenu === null) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target
+      if (target instanceof Element && target.closest('.dsh-warp-terminal-context-menu') !== null) return
+      setContextMenu(null)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextMenu(null)
+    }
+    const onScroll = () => setContextMenu(null)
+    window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [contextMenu])
+
+  // Add the current selection to the conversation as a @终端 chip; clears the
+  // selection when the composer applied it.
+  const addSelectionToContext = useCallback((): void => {
+    if (onAddToContext === undefined) return
+    const d = docRef.current
+    const sel = selectionRef.current
+    if (d === null || sel === null) return
+    const text = extractSelection(sel, d.rowAt, colsRef.current)
+    if (text.trim().length === 0) return
+    const applied = onAddToContext(text)
+    setContextMenu(null)
+    if (applied) {
+      selectionRef.current = null
+      schedulePaint()
+    }
+  }, [onAddToContext, schedulePaint])
+
+  // Copy the current selection from the context menu, then drop the selection
+  // the way Cmd/Ctrl+C does.
+  const copySelectionFromMenu = useCallback((): void => {
+    void copySelection().then(() => {
+      selectionRef.current = null
+      schedulePaint()
+    })
+    setContextMenu(null)
+  }, [copySelection, schedulePaint])
+
   // Copy on Cmd/Ctrl+C when there is a selection (then clear it). Without a
   // selection the key falls through so Ctrl+C still reaches a running command.
   useEffect(() => {
@@ -1495,6 +1564,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
               ref={canvasRef}
               className="dsh-warp-canvas"
               onMouseDown={onMouseDown}
+              onContextMenu={onCanvasContextMenu}
             />
 
             <div className="dsh-warp-overlay-layer" ref={overlayLayerRef}>
@@ -1779,6 +1849,19 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       )}
         </div>
       </div>
+      {contextMenu !== null && createPortal(
+        <div className="dsh-warp-terminal-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <button type="button" className="dsh-warp-terminal-context-item" onClick={copySelectionFromMenu}>
+            {t('context.copy')}
+          </button>
+          {onAddToContext !== undefined && (
+            <button type="button" className="dsh-warp-terminal-context-item" onClick={addSelectionToContext}>
+              {t('context.addToChat')}
+            </button>
+          )}
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }

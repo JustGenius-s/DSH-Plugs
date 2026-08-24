@@ -102,7 +102,13 @@ export interface PanelTabInfo {
 interface ShellProps {
   renderSlot: (
     key: 'side.panel',
-    owner: { sessionId: string; cwd?: string; instanceKey?: string; state?: SidePanelInstance['state'] },
+    owner: {
+      sessionId: string
+      cwd?: string
+      instanceKey?: string
+      state?: SidePanelInstance['state']
+      visible?: boolean
+    },
     opts?: { only?: string },
   ) => unknown
   useSessions: (selector: (state: never) => unknown) => unknown
@@ -555,6 +561,8 @@ export function SidePanelsShell(props: ShellProps) {
                 cwd: sessionsById?.[session.sessionId]?.cwd,
                 instanceKey: instance.key,
                 state: instance.state,
+                // Hidden retained panes stay mounted but must not hold SSE.
+                visible,
               },
               { only: instance.panelId },
             ) as ReactNode}

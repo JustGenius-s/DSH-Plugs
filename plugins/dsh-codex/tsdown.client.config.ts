@@ -15,7 +15,20 @@ export default defineConfig({
   // alwaysBundle inlines the shared UI package (never a runtime dep) beside
   // the terminal/shiki stacks. markdown-it is a production dependency, which
   // tsdown externalizes by default — so it must be inlined here too.
-  deps: { alwaysBundle: ['@just-genius/dsh-plugin-ui', /^@xterm\//, 'shiki', /^shiki\//, /^@shikijs\//, 'markdown-it', 'dompurify'] },
+  // clsx rides in with dsh-plugin-ui (UI leaves it external); without inlining
+  // it, the client module table misses require("clsx") at load.
+  deps: {
+    alwaysBundle: [
+      '@just-genius/dsh-plugin-ui',
+      'clsx',
+      /^@xterm\//,
+      'shiki',
+      /^shiki\//,
+      /^@shikijs\//,
+      'markdown-it',
+      'dompurify',
+    ],
+  },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: 'window.__ModuleLoader__.load({ id: ' + JSON.stringify(id) + ', factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;',

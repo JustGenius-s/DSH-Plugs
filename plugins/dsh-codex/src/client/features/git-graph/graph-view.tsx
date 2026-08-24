@@ -8,12 +8,12 @@ import {
 import {
   DEFAULT_GRAPH_LIMIT,
   GIT_GRAPH_PATH,
-  GIT_GRAPH_WATCH_PATH,
   type GitGraphRef,
   type GitGraphResponse,
   type GitGraphRow,
   type GitGraphScopeRef,
 } from '../../../shared/git-graph'
+import { subscribeRepoWatch } from '../repo-watch'
 import {
   BranchFilter,
   scopeFallback,
@@ -43,6 +43,11 @@ const LANE_COLORS = [
 export interface GitGraphViewProps {
   cwd?: string
   t: (key: string) => string
+  /**
+   * Whether this pane is the active visible tab. Hidden retained panes skip
+   * the repo-watch SSE. Defaults to true.
+   */
+  visible?: boolean
   /** Open the `files` panel on a file; sha undefined = working tree. */
   onOpenFile?: (file: string, sha?: string) => void
   /** Open the `files` panel on the file itself (preview, not its diff). */
@@ -71,6 +76,7 @@ const EMPTY: GraphState = {
 
 export function GitGraphView(props: GitGraphViewProps) {
   const { cwd, t, onOpenFile, onOpenPreview } = props
+  const visible = props.visible !== false
   const [state, setState] = useState<GraphState>(EMPTY)
   const [selected, setSelected] = useState<string | undefined>()
   const [detail, setDetail] = useState<{
@@ -168,24 +174,22 @@ export function GitGraphView(props: GitGraphViewProps) {
     }
   }, [load])
 
-  // Auto-refresh on repo movement: reload the rows but keep the selection
-  // (the detail effect re-resolves it against the new rows; a vanished sha
-  // simply closes the detail). detailSeq re-fetches an open file list in
+  // Auto-refresh on repo movement only while this pane is visible. Hidden
+  // retained panes unsubscribe so multi-session workspaces share the
+  // connection pool with chat. detailSeq re-fetches an open file list in
   // place so a workdir detail picks up the new changes too.
   const [detailSeq, setDetailSeq] = useState(0)
   useEffect(() => {
+    if (!visible) return
     if (cwd === undefined || cwd.length === 0) return
-    if (typeof EventSource === 'undefined') return
-    const source = new EventSource(
-      `${GIT_GRAPH_WATCH_PATH}?cwd=${encodeURIComponent(cwd)}`,
-    )
     const onChange = (): void => {
       setDetailSeq((seq) => seq + 1)
       void load(true, 0, userScopeRef.current, true)
     }
-    source.addEventListener('change', onChange)
-    return () => source.close()
-  }, [cwd, load])
+    const unsubscribe = subscribeRepoWatch(cwd, onChange)
+    onChange()
+    return unsubscribe
+  }, [cwd, load, visible])
 
   useEffect(() => {
     if (selected === undefined) {

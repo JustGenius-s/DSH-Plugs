@@ -18,18 +18,23 @@ import { PanelIconGraph } from '../side-panels/icons'
 import {
   GIT_GRAPH_ACTION_PATH,
   GIT_GRAPH_MESSAGE_PATH,
-  GIT_GRAPH_WATCH_PATH,
   type GitChangeFile,
   type GitGraphActionName,
   type GitGraphActionRequest,
   type GitGraphActionResponse,
   type GitGraphMessageResponse,
 } from '../../../shared/git-graph'
+import { subscribeRepoWatch } from '../repo-watch'
 import { GitGraphDetail } from './detail-files'
 
 export interface GitChangesViewProps {
   cwd?: string
   t: (key: string) => string
+  /**
+   * Whether this pane is the active visible tab. Hidden retained panes skip
+   * the repo-watch SSE. Defaults to true.
+   */
+  visible?: boolean
   /** Open the `files` panel on a file's working-tree diff. */
   onOpenFile?: (file: string, sha?: string) => void
   /** Open the `files` panel on the file itself (preview, not its diff). */
@@ -61,6 +66,7 @@ const MESSAGE_MAX_HEIGHT = 110
  */
 export function GitChangesView(props: GitChangesViewProps) {
   const { cwd, t, onOpenFile, onOpenPreview, onOpenGraph } = props
+  const visible = props.visible !== false
   const [refreshSeq, setRefreshSeq] = useState(0)
   const [display, setDisplay] = useState<'flat' | 'tree'>('flat')
   const [busyAction, setBusyAction] = useState<GitGraphActionName | null>(null)
@@ -102,19 +108,14 @@ export function GitChangesView(props: GitChangesViewProps) {
     refresh()
   }, [refresh])
 
-  // Auto-refresh, VSCode-style: the host's repo watcher pushes a `change`
-  // event over SSE whenever the worktree, index, or refs move. Window focus
-  // and tab visibility backstop environments where EventSource cannot
-  // connect (Electron's fetch bridge) or a watch event was missed.
+  // Auto-refresh only while visible: shared repo watch SSE (one EventSource
+  // per cwd) plus focus/visibility as a backstop. Hidden panes unsubscribe
+  // so multi-session workspaces cannot exhaust the connection pool.
   useEffect(() => {
+    if (!visible) return
     if (cwd === undefined || cwd.length === 0) return
-    let source: EventSource | undefined
-    if (typeof EventSource !== 'undefined') {
-      source = new EventSource(
-        `${GIT_GRAPH_WATCH_PATH}?cwd=${encodeURIComponent(cwd)}`,
-      )
-      source.addEventListener('change', requestRefresh)
-    }
+    const unsubscribe = subscribeRepoWatch(cwd, requestRefresh)
+    requestRefresh()
     const onFocus = (): void => requestRefresh()
     const onVisibility = (): void => {
       if (document.visibilityState === 'visible') requestRefresh()
@@ -122,11 +123,11 @@ export function GitChangesView(props: GitChangesViewProps) {
     window.addEventListener('focus', onFocus)
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
-      source?.close()
+      unsubscribe()
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [cwd, requestRefresh])
+  }, [cwd, requestRefresh, visible])
 
   useEffect(() => () => {
     generateAbortRef.current?.abort()
