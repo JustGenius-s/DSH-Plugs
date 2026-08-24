@@ -53,6 +53,7 @@ export function createTerminalFeature(
 ): CodexFeature {
   return {
     id: 'terminal',
+    requires: ['sidePanels'],
     activate() {
       const terminalReference = createTerminalReference(ctx)
       const TerminalPanel = createTerminalPanel(scope, controllerStore, terminalReference)

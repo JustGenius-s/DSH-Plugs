@@ -1,11 +1,6 @@
 # Bundle patch for @just-genius/dsh-codex.
 # Remove the three legacy loader rows before enabling this replacement owner.
 
-# The built-in Session log export (header download button + /export command)
-# is not wanted on this surface.
-- id: session-log-download
-  disabled: true
-
 - insert:
     - id: dsh-codex
       name: '@just-genius/dsh-codex'

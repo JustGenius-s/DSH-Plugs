@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { errorMessage, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
 import { DEBUG_POLICY } from './policy.ts'
 import {
   DEBUG_LOG,
@@ -542,46 +543,4 @@ async function handleRepro(
 function parseReproAction(value: unknown): DebugReproAction | undefined {
   if (value === 'proceed' || value === 'fixed' || value === 'cancel') return value
   return undefined
-}
-
-function json(res: ServerResponse, status: number, value: DebugHttpResult<unknown> | { ok: false; message: string }): void {
-  const body = JSON.stringify(value)
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-  })
-  res.end(body)
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return String(error)
-}
-
-function readJsonBody(req: IncomingMessage, limit = 64 * 1024): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let size = 0
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > limit) {
-        reject(new Error('body too large'))
-        req.destroy()
-        return
-      }
-      chunks.push(chunk)
-    })
-    req.on('end', () => {
-      if (chunks.length === 0) {
-        resolve({})
-        return
-      }
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
-      } catch (error) {
-        reject(error)
-      }
-    })
-    req.on('error', reject)
-  })
 }

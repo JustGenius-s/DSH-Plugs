@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-sync",
-  "description": "Sync DSH settings.yaml and web plugin list via GitHub OAuth Device Flow + secret Gist — no self-hosted sync server",
+  "description": "Sync registered DSH plugin settings and the web plugin list via GitHub OAuth Device Flow + secret Gist",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public"
@@ -46,9 +46,12 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf lib"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@just-genius/dsh-plugin-runtime": "workspace:*"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.7",
@@ -59,7 +62,9 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@just-genius/dsh-plugin-runtime": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.7",

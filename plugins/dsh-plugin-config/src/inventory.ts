@@ -1,5 +1,6 @@
-import type { Context } from '@deepseek-ai/cordis'
-import type { HostContext } from './host-context.ts'
+import { symbols, type Context } from '@deepseek-ai/cordis'
+import type { Entry } from '@deepseek-ai/cordis-plugin-loader'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { catalogNames, matchCatalogLabel } from './catalog.ts'
 import {
   PROTECTED_IDS,
@@ -18,35 +19,15 @@ import {
   type ManagedPlugin,
 } from './types.ts'
 
-const FIBER_STATE = {
-  PENDING: 0,
-  LOADING: 1,
-  ACTIVE: 2,
-  FAILED: 3,
-  DISPOSED: 4,
-  UNLOADING: 5,
-} as const
-
-const FIBER_PHASE: Record<number, FiberPhase> = {
-  [FIBER_STATE.PENDING]: 'pending',
-  [FIBER_STATE.LOADING]: 'loading',
-  [FIBER_STATE.ACTIVE]: 'active',
-  [FIBER_STATE.FAILED]: 'failed',
-  [FIBER_STATE.DISPOSED]: null,
-  [FIBER_STATE.UNLOADING]: 'unloading',
-}
-
-interface LoaderEntryLike {
-  id: string
-  disabled: boolean
-  fiber?: { state: number }
-  options: {
-    id: string
-    name: string
-    group?: boolean | null
-    isolate?: Record<string, unknown> | null
+function fiberPhase(state: number): FiberPhase {
+  switch (state) {
+    case 0: return 'pending'
+    case 1: return 'loading'
+    case 2: return 'active'
+    case 3: return 'failed'
+    case 5: return 'unloading'
+    default: return null
   }
-  parent?: { ctx?: { fiber?: { entry?: LoaderEntryLike } } }
 }
 
 export function collectInventory(ctx: Context): InventorySnapshot {
@@ -58,7 +39,7 @@ export function collectInventory(ctx: Context): InventorySnapshot {
   const seenPackages = new Set<string>()
   const builtinShort = new Map<string, string>()
 
-  const entries = [...(ctx as HostContext).loader.entries()] as LoaderEntryLike[]
+  const entries = [...ctx.loader.entries()]
   for (const entry of entries) {
     if (entry.options.group) continue
     const moduleName = String(entry.options.name ?? '')
@@ -83,7 +64,7 @@ export function collectInventory(ctx: Context): InventorySnapshot {
 }
 
 function projectEntry(
-  entry: LoaderEntryLike,
+  entry: Entry,
   deps: Record<string, string>,
   userDisabled: Set<string>,
   names: Set<string>,
@@ -93,7 +74,7 @@ function projectEntry(
   const localId = localEntryId(entryId)
   const moduleName = String(entry.options.name ?? '')
   const shortName = moduleShortName(moduleName)
-  const isolate = Boolean(entry.options.isolate && Object.keys(entry.options.isolate).length > 0)
+  const isolate = Object.keys(entry.ctx[symbols.isolate]).length > 0
   const ancestorIsolate = hasAncestorIsolate(entry)
   const plane = classifyPlane({ localId, isolate, ancestorIsolate })
   const packageName = resolvePackageName(moduleName, localId, deps)
@@ -110,7 +91,7 @@ function projectEntry(
     moduleName,
     shortName,
     enabled,
-    fiberPhase: entry.fiber === undefined ? null : FIBER_PHASE[entry.fiber.state] ?? null,
+    fiberPhase: entry.fiber === undefined ? null : fiberPhase(entry.fiber.state),
     plane,
     origin,
     packageName,
@@ -184,17 +165,17 @@ function isBuiltinModuleName(moduleName: string): boolean {
   return moduleName.startsWith('@deepseek-ai/') || moduleName.startsWith('cordis:')
 }
 
-function hasAncestorIsolate(entry: LoaderEntryLike): boolean {
-  let current = entry.parent?.ctx?.fiber?.entry
+function hasAncestorIsolate(entry: Entry): boolean {
+  let current = entry.parent.ctx.fiber?.entry
   while (current) {
-    if (current.options.isolate && Object.keys(current.options.isolate).length > 0) return true
+    if (Object.keys(current.ctx[symbols.isolate]).length > 0) return true
     if (SESSION_PLANE_IDS.has(current.options.id)) return true
-    current = current.parent?.ctx?.fiber?.entry
+    current = current.parent.ctx.fiber?.entry
   }
   return false
 }
 
-function parentIdOf(entry: LoaderEntryLike): string | null {
-  const parent = entry.parent?.ctx?.fiber?.entry
+function parentIdOf(entry: Entry): string | null {
+  const parent = entry.parent.ctx.fiber?.entry
   return parent ? String(parent.id) : null
 }

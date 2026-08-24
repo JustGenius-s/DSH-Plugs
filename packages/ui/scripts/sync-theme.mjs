@@ -14,13 +14,10 @@ const here = dirname(fileURLToPath(import.meta.url))
 const pkgRoot = resolve(here, '..')
 const outDir = join(pkgRoot, 'src', 'theme')
 
-const defaultSrc = resolve(
-  pkgRoot,
-  '../../../../Ops/deepseek-harness/packages/client/ui-theme/src/styles',
-)
-const srcDir = process.env.DSH_THEME_SRC
-  ? resolve(process.env.DSH_THEME_SRC)
-  : defaultSrc
+if (!process.env.DSH_THEME_SRC) {
+  throw new Error('DSH_THEME_SRC must point to deepseek-harness/packages/client/ui-theme/src/styles')
+}
+const srcDir = resolve(process.env.DSH_THEME_SRC)
 
 const SHEETS = [
   ['base.css', 'BASE_CSS'],

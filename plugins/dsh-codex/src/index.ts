@@ -11,7 +11,6 @@ import {
   type DshCodexConfig,
 } from './shared/config'
 import { createDshCodexGitGraphServer } from './host/git-graph/server'
-import { createDshCodexSettingsServer } from './host/settings/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
@@ -56,22 +55,6 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
     setSource: (nextSource) => { source = nextSource },
     onChange: () => { currentConfig = source() },
   })
-
-  const applyPatch = async (patch: Partial<DshCodexConfig>): Promise<DshCodexConfig> => {
-    const settings = ctx.get('settings')
-    if (settings === undefined) {
-      throw new Error('settings service is unavailable')
-    }
-    const next = { ...currentConfig, ...patch }
-    await settings.update(SETTINGS_NAMESPACE as never, patch)
-    currentConfig = next
-    return next
-  }
-
-  ctx.effect(() => {
-    const server = createDshCodexSettingsServer(ctx, () => currentConfig, applyPatch)
-    return () => server.dispose()
-  }, 'dsh-codex: settings route')
 
   ctx.effect(() => {
     const server = createDshCodexTerminalServer(ctx, () => currentConfig)

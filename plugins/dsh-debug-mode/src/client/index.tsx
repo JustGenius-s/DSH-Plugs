@@ -5,7 +5,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { DebugChip } from './DebugChip.tsx'
 import { DebugDock } from './DebugDock.tsx'
 import { en, zh, type DebugKey } from './locales.ts'
-import { REPRO_PATH, type DebugHttpResult, type DebugReproAction } from '../shared.ts'
+import { REPRO_PATH, type DebugReproAction } from '../shared.ts'
+import { postResult } from '@just-genius/dsh-plugin-runtime/client'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -49,17 +50,10 @@ export function apply(ctx: ClientContext): void {
 }
 
 async function postJson(path: string, body: unknown): Promise<string | null> {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify(body),
-  })
-  let value: DebugHttpResult<unknown>
   try {
-    value = await response.json() as DebugHttpResult<unknown>
-  } catch {
-    return `request failed (${response.status})`
+    await postResult(path, body)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
   }
-  if (value.ok) return null
-  return value.message
 }

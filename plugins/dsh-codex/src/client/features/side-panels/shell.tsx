@@ -29,13 +29,11 @@ import { resolvePanelIcon } from './icons'
 import { launcherVisible, type LauncherStore } from './launcher-store'
 import type { SidePanelInstance, SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
-import { QuickActionsControls } from '../quick-actions/controls'
-import type { QuickAction } from '../../../shared/config'
-import type { QuickActionsStore } from '../quick-actions/store'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { sessionCwd } from '../../host-adapters/sessions'
 import { useSidePanelLayout } from './layout-controller'
+import type { SidePanelActionsContribution } from './actions'
 
 ensureSidePanelStyles()
 
@@ -46,7 +44,7 @@ const LAUNCHER_HEADER_GAP = 20
  * Tab caption: a lone instance keeps the panel label ("终端"); duplicates
  * pick up a 1-based ordinal so two terminals read "终端 1" / "终端 2".
  */
-function instanceCaption(
+function defaultInstanceCaption(
   instance: SidePanelInstance,
   siblings: readonly SidePanelInstance[],
   label: string,
@@ -54,16 +52,19 @@ function instanceCaption(
   // An explicit caption override wins — the git graph tab reads "Graph".
   const title = instance.state?.title
   if (title !== undefined && title.length > 0) return title
-  // A `files` instance focused on a file reads as the file's name —
-  // "index.ts" distinguishes two file tabs far better than "文件 1".
-  const file = instance.state?.file
-  if (instance.panelId === 'files' && file !== undefined && file.length > 0) {
-    const slash = file.lastIndexOf('/')
-    return slash === -1 ? file : file.slice(slash + 1)
-  }
   if (siblings.length < 2) return label
   const ordinal = siblings.findIndex(item => item.key === instance.key) + 1
   return ordinal > 0 ? label + ' ' + String(ordinal) : label
+}
+
+function instanceCaption(
+  store: SidePanelsStore,
+  instance: SidePanelInstance,
+  siblings: readonly SidePanelInstance[],
+  label: string,
+): string {
+  return store.descriptor(instance.panelId)?.caption?.(instance, siblings, label)
+    ?? defaultInstanceCaption(instance, siblings, label)
 }
 
 /** Reactive read face over the slot ledger for `side.panel`. */
@@ -95,14 +96,13 @@ interface ShellProps {
   store: SidePanelsStore
   launcher: LauncherStore
   entries: PanelEntriesApi
-  quickActions: QuickActionsStore
-  executeQuickAction: (action: QuickAction) => Promise<void>
+  actions?: SidePanelActionsContribution
   scope?: SettingsScope<DshCodexConfig>
   t: (key: string) => string
 }
 
 export function SidePanelsShell(props: ShellProps) {
-  const { renderSlot, useSessions, store, launcher, entries, quickActions, executeQuickAction, scope, t } = props
+  const { renderSlot, useSessions, store, launcher, entries, actions, scope, t } = props
 
   const sessionId = useSessions(state => state.current)
   const sessionsById = useSessions(state => state.byId)
@@ -456,9 +456,7 @@ export function SidePanelsShell(props: ShellProps) {
                 </span>
                 <span className="dsh-side-panels-launcher-label">{tab.label}</span>
               </button>
-              {isTerminal && (
-                <QuickActionsControls variant="launcher" store={quickActions} execute={executeQuickAction} t={t} />
-              )}
+              {isTerminal && actions?.render('launcher')}
               {existing.length > 0 && (
                 <button
                   type="button"
@@ -489,7 +487,7 @@ export function SidePanelsShell(props: ShellProps) {
                       tabIndex={expanded ? 0 : -1}
                       onClick={() => store.activateInstance(instance.key)}
                     >
-                      {instanceCaption(instance, existing, tab.label)}
+                      {instanceCaption(store, instance, existing, tab.label)}
                     </button>
                   ))}
                 </div>
@@ -530,7 +528,7 @@ export function SidePanelsShell(props: ShellProps) {
             const info = panelById.get(instance.panelId)
             const isActive = instance.key === activeKey
             const siblings = live.filter(i => i.panelId === instance.panelId)
-            const caption = instanceCaption(instance, siblings, info?.label ?? instance.panelId)
+            const caption = instanceCaption(store, instance, siblings, info?.label ?? instance.panelId)
             return (
               <div
                 key={instance.key}
@@ -636,9 +634,7 @@ export function SidePanelsShell(props: ShellProps) {
             </div>
           )}
         </div>
-        {terminalActive && (
-          <QuickActionsControls variant="header" store={quickActions} execute={executeQuickAction} t={t} />
-        )}
+        {terminalActive && actions?.render('header')}
         <Tooltip label={t('aria.close')} delayMs={500} side="bottom">
           <button
             type="button"

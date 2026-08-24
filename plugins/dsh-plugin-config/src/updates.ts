@@ -1,18 +1,14 @@
-import { spawn } from 'node:child_process'
+import type { PluginProfileManager } from '@just-genius/dsh-plugin-runtime'
 import { isNpmRegistrySpec } from './npm-deps.ts'
 import { readProfilePackage } from './profile.ts'
-import { resolveDshBin } from './actions.ts'
 import { moduleShortName } from './classify.ts'
 import type { OutdatedSnapshot, PluginUpdate, UpdateOutcome } from './types.ts'
-
-const OUTDATED_MS = 120_000
-const UPDATE_MS = 180_000
 
 /**
  * List npm-registry profile deps that pnpm reports as outdated.
  * GitHub / link / tarball installs are excluded — only registry specs update.
  */
-export async function collectOutdated(): Promise<OutdatedSnapshot> {
+export async function collectOutdated(profileManager: PluginProfileManager): Promise<OutdatedSnapshot> {
   const deps = readProfilePackage().dependencies ?? {}
   const npmNames = Object.entries(deps)
     .filter(([, spec]) => isNpmRegistrySpec(spec))
@@ -22,24 +18,7 @@ export async function collectOutdated(): Promise<OutdatedSnapshot> {
     return { updates: [], checkedAt: new Date().toISOString() }
   }
 
-  const bin = resolveDshBin()
-  // Limit the check to registry deps — link/github/tarball never appear as updatable.
-  const { code, stdout, stderr } = await run(
-    bin,
-    ['plugin', '--profile', 'web', 'outdated', ...npmNames, '--format', 'json'],
-    OUTDATED_MS,
-  )
-  // pnpm outdated exits 1 when anything is outdated; still parse stdout.
-  const raw = stdout.trim() || ''
-  let parsed: unknown
-  try {
-    parsed = raw === '' ? {} : JSON.parse(raw)
-  } catch {
-    if (code !== 0 && code !== 1) {
-      throw new Error(stderr.trim() || `dsh plugin outdated exited ${code}`)
-    }
-    throw new Error('Could not parse pnpm outdated JSON.')
-  }
+  const parsed = await profileManager.outdated(npmNames)
 
   const updates: PluginUpdate[] = []
   if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -67,7 +46,10 @@ export async function collectOutdated(): Promise<OutdatedSnapshot> {
 }
 
 /** Bump one npm-registry profile dep to latest via `dsh plugin update --latest`. */
-export async function updateNpmPackage(packageName: string): Promise<UpdateOutcome> {
+export async function updateNpmPackage(
+  profileManager: PluginProfileManager,
+  packageName: string,
+): Promise<UpdateOutcome> {
   const trimmed = packageName.trim()
   if (trimmed === '') return { ok: false, error: 'Missing package name.' }
 
@@ -85,26 +67,12 @@ export async function updateNpmPackage(packageName: string): Promise<UpdateOutco
     }
   }
 
-  const bin = resolveDshBin()
   try {
-    const { code, stdout, stderr } = await run(
-      bin,
-      ['plugin', '--profile', 'web', 'update', resolvedName, '--latest'],
-      UPDATE_MS,
-    )
-    const detail = [stdout, stderr].filter(Boolean).join('\n').trim().slice(0, 4000)
-    if (code !== 0) {
-      return {
-        ok: false,
-        packageName: resolvedName,
-        error: `dsh plugin update exited ${code}.`,
-        detail,
-      }
-    }
+    const { detail, needsRestart } = await profileManager.update(resolvedName)
     return {
       ok: true,
       packageName: resolvedName,
-      needsRestart: true,
+      needsRestart,
       detail,
     }
   } catch (error) {
@@ -115,37 +83,4 @@ export async function updateNpmPackage(packageName: string): Promise<UpdateOutco
       detail: String(error),
     }
   }
-}
-
-function run(
-  command: string,
-  args: string[],
-  timeoutMs: number,
-): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    child.stdout.on('data', (chunk) => stdout.push(chunk))
-    child.stderr.on('data', (chunk) => stderr.push(chunk))
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM')
-      reject(new Error(`timed out after ${timeoutMs}ms`))
-    }, timeoutMs)
-    child.on('error', (error) => {
-      clearTimeout(timer)
-      reject(error)
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({
-        code: code ?? 1,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-      })
-    })
-  })
 }

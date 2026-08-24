@@ -21,7 +21,6 @@
   ],
   "scripts": {
     "sync-theme": "node scripts/sync-theme.mjs",
-    "prebuild": "node scripts/sync-theme.mjs",
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf lib"

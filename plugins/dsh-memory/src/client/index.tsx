@@ -7,7 +7,9 @@ import { MemorySection } from './MemorySection.tsx'
 import type { MemorySectionInjected } from './MemorySection.tsx'
 import { installMemorySettingsIcon } from './memory-settings-icon.ts'
 import { en, zh, type MemoryKey } from './locales.ts'
-import { PROPOSE_PATH, type MemoryHttpResult, type MemoryProposeAction } from '../shared.ts'
+import { PROPOSE_PATH, type MemoryProposeAction } from '../shared.ts'
+import { postResult } from '@just-genius/dsh-plugin-runtime/client'
+import { MemoryController } from './memory-controller.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -23,13 +25,15 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-memory: dictionaries')
 
   const t = ctx.locale.bind(NS) as MemorySectionInjected['t']
+  const controller = new MemoryController()
+  ctx.effect(() => () => controller.dispose(), 'dsh-memory: controller')
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'memory',
     order: 45,
     label: () => t('nav'),
-    inject: () => ({ t }),
+    inject: () => ({ t, controller }),
   }, MemorySection))
   ctx.effect(() => installMemorySettingsIcon(() => t('nav')), 'dsh-memory: settings icon')
 
@@ -41,23 +45,16 @@ export function apply(ctx: ClientContext): void {
     inject: (sessionId) => ({
       sessionId: String(sessionId),
       resolvePropose: (action: MemoryProposeAction, title: string, content: string) =>
-        postJson(PROPOSE_PATH, { sessionId, action, title, content }),
+        postPropose(PROPOSE_PATH, { sessionId, action, title, content }),
     }),
   }, MemoryDock as never))
 }
 
-async function postJson(path: string, body: unknown): Promise<string | null> {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify(body),
-  })
-  let value: MemoryHttpResult<unknown>
+async function postPropose(path: string, body: unknown): Promise<string | null> {
   try {
-    value = await response.json() as MemoryHttpResult<unknown>
-  } catch {
-    return `request failed (${response.status})`
+    await postResult<unknown>(path, body)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
   }
-  if (value.ok) return null
-  return value.message
 }

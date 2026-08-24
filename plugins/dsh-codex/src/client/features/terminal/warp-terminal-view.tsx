@@ -9,7 +9,7 @@
 // with raw keystroke forwarding; the canvas switches to that surface while
 // active, matching Warp's AltScreen.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent, ClipboardEvent as ReactClipboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Terminal } from '@xterm/xterm'
@@ -24,7 +24,7 @@ import type { TerminalControllerStore } from './controller'
 import { ensureWarpTerminalStyles } from './styles'
 import { createBlockGrid, writeToGrid, disposeGrid, resizeGrid, type StoreOptions, type BlockGrid } from './block-store'
 import { composeDoc, type DocBlock, type ComposedDoc } from './doc-model'
-import { buildPalette, measureCells, paintVisible, extractSelection, type RenderTheme, type CellMetrics, type SelectionRange } from './cell-render'
+import { measureCells, paintVisible, extractSelection, type CellMetrics, type SelectionRange } from './cell-render'
 import {
   TerminalConnectionController,
   type TerminalConnectionState,
@@ -43,58 +43,12 @@ import {
   wordCaret,
   type CompletionMenu,
 } from './input-model'
+import { useCursorBlink, useTerminalTheme } from './browser-lifecycle'
 
 ensureWarpTerminalStyles()
 
 const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const LINE_HEIGHT = 1.2
-
-// Canvas themes: the dark palette is the panel's original One Dark flavor,
-// the light palette is VSCode's Light+ terminal. Background/foreground/cursor
-// resolve through the app's design tokens at theme-switch time (these hex
-// values are only fallbacks), so the canvas always blends into the side
-// panel's surface instead of carrying a hardcoded dark box into light mode.
-const THEME_DARK: RenderTheme = {
-  background: '#151517',
-  foreground: '#e6e6e8',
-  cursor: '#e6e6e8',
-  selectionBackground: '#4176e6',
-  palette16: [
-    '#1e1e22', '#e06c75', '#98c379', '#e5c07b', '#61afef', '#c678dd', '#56b6c2', '#dcdfe4',
-    '#5c6370', '#e06c75', '#98c379', '#e5c07b', '#61afef', '#c678dd', '#56b6c2', '#ffffff',
-  ],
-}
-const THEME_LIGHT: RenderTheme = {
-  background: '#ffffff',
-  foreground: '#3b3b3b',
-  cursor: '#3b3b3b',
-  selectionBackground: '#4176e6',
-  palette16: [
-    '#000000', '#cd3131', '#00bc00', '#949800', '#0451a5', '#bc05bc', '#0598bc', '#555555',
-    '#666666', '#cd3131', '#14ce14', '#b5ba00', '#0451a5', '#bc05bc', '#0598bc', '#a5a5a5',
-  ],
-}
-const PALETTE_DARK = buildPalette(THEME_DARK.palette16)
-const PALETTE_LIGHT = buildPalette(THEME_LIGHT.palette16)
-
-/** The ui-theme plugin marks dark mode with a body attribute. */
-function isDarkTheme(): boolean {
-  return document.body.hasAttribute('data-ds-dark-theme')
-}
-
-function resolveTerminalTheme(dark: boolean): RenderTheme {
-  const base = dark ? THEME_DARK : THEME_LIGHT
-  const styles = getComputedStyle(document.body)
-  const bg = styles.getPropertyValue('--dsw-specific-sidebar-fill').trim()
-  const fg = styles.getPropertyValue('--dsw-alias-label-primary').trim()
-  if (bg === '' && fg === '') return base
-  return {
-    ...base,
-    background: bg === '' ? base.background : bg,
-    foreground: fg === '' ? base.foreground : fg,
-    cursor: fg === '' ? base.cursor : fg,
-  }
-}
 
 interface Block {
   id: string
@@ -250,8 +204,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const [scrollTop, setScrollTop] = useState(0)
   const selectionRef = useRef<SelectionRange | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
-  const [cursorVisible, setCursorVisible] = useState(true)
-  const [darkMode, setDarkMode] = useState(isDarkTheme)
   const terminalShellRef = useRef<TerminalShell>(terminalShell)
   const terminalScrollbackRef = useRef(terminalScrollback)
   const terminalFontSizeRef = useRef(terminalFontSize)
@@ -379,15 +331,8 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     setDoc(composeDoc(model, colsRef.current))
   }, [])
 
-  // Follow the app theme: re-resolve the canvas theme when the ui-theme
-  // plugin flips its body attribute, then repaint with the new palette.
-  useEffect(() => {
-    const observer = new MutationObserver(() => setDarkMode(isDarkTheme()))
-    observer.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
-    return () => observer.disconnect()
-  }, [])
-  const theme = useMemo(() => resolveTerminalTheme(darkMode), [darkMode])
-  const palette = darkMode ? PALETTE_DARK : PALETTE_LIGHT
+  const { theme, palette } = useTerminalTheme()
+  const cursorVisible = useCursorBlink(altActive)
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current
@@ -819,12 +764,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     observer.observe(scrollEl)
     return () => observer.disconnect()
   }, [rebuildDoc, schedulePaint, terminalFontSize])
-
-  useEffect(() => {
-    if (!altActive) return
-    const id = window.setInterval(() => setCursorVisible((v) => !v), 530)
-    return () => window.clearInterval(id)
-  }, [altActive])
 
   useEffect(() => {
     if (altActive) schedulePaint()

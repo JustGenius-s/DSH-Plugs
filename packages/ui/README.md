@@ -35,11 +35,11 @@ Tokens live on `body` / `body[data-ds-dark-theme]`. Dark mode is toggled by `ins
 ## Sync theme from deepseek-harness
 
 ```sh
-pnpm --filter @just-genius/dsh-plugin-ui sync-theme
-# or: DSH_THEME_SRC=/path/to/ui-theme/src/styles pnpm sync-theme
+DSH_THEME_SRC=/path/to/ui-theme/src/styles pnpm --filter @just-genius/dsh-plugin-ui sync-theme
 ```
 
-`prebuild` runs the same sync. Source default: `~/Ops/deepseek-harness/packages/client/ui-theme/src/styles`.
+Normal builds use the committed snapshot under `src/theme` and never read another checkout.
+Refreshing that snapshot is an explicit maintainer operation requiring `DSH_THEME_SRC`.
 
 ## Local link (before npm publish)
 

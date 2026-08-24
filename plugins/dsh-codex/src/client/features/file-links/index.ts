@@ -28,6 +28,7 @@ export function createFileLinksFeature(
 ): CodexFeature {
   return {
     id: 'file-links',
+    requires: ['sidePanels', 'files'],
     activate() {
       const workspaces = ctx.workspaces
       const store = ctx.sidePanels as SidePanelsStore

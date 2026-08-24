@@ -65,10 +65,11 @@ export interface SyncPluginsSnapshot {
   cordisPatchYml: string
 }
 
-export interface SyncPayloadV1 {
-  version: 1
+export interface SyncPayloadV2 {
+  version: 2
   updatedAt: string
-  settingsYaml: string
+  /** Raw user layers, keyed by registered settings namespace. */
+  settings: Record<string, Record<string, unknown>>
   /** Reserved; always null while memory sync is disabled. */
   memory: null
   /** Plugin manifest + cord. Absent on legacy gists. */

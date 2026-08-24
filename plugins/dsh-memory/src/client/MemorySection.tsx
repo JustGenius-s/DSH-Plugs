@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import {
   Button,
   IconPlusOutline16,
@@ -18,63 +18,41 @@ import {
   Tag,
 } from '@just-genius/dsh-plugin-ui'
 import {
-  ENTRY_PATH,
-  LIST_PATH,
   summarize,
   type MemoryEntry,
   type MemoryEntryAction,
-  type MemoryHttpResult,
 } from '../shared.ts'
 import type { MemoryKey } from './locales.ts'
+import type { MemoryController } from './memory-controller.ts'
 import styles from './MemorySection.module.css'
 
 export interface MemorySectionInjected {
   t: (key: MemoryKey) => string
+  controller: MemoryController
 }
 
 export type MemorySectionProps = Partial<InjectFace<MemorySectionInjected>>
-
-interface ListPayload {
-  root: string
-  entries: MemoryEntry[]
-}
 
 type EditorMode =
   | { kind: 'create' }
   | { kind: 'edit'; id: string }
   | null
 
-export function MemorySection({ t }: MemorySectionProps) {
+export function MemorySection({ t, controller }: MemorySectionProps) {
   const translate = t ?? ((key: MemoryKey) => key)
-  const [root, setRoot] = useState('')
-  const [entries, setEntries] = useState<MemoryEntry[]>([])
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [error, setError] = useState<string | null>(null)
+  if (controller === undefined) throw new Error('MemorySection requires MemoryController')
+  const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
+  const { root, entries, status, error, busy } = snapshot
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorMode>(null)
   const [draftTitle, setDraftTitle] = useState('')
   const [draftContent, setDraftContent] = useState('')
-  const [busy, setBusy] = useState(false)
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
-  const reload = useCallback(async () => {
-    setStatus('loading')
-    setError(null)
-    try {
-      const list = await getJson<ListPayload>(LIST_PATH)
-      setRoot(list.root)
-      setEntries(list.entries)
-      setStatus('ready')
-    } catch (err) {
-      setStatus('error')
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }, [])
-
   useEffect(() => {
-    void reload()
-  }, [reload])
+    void controller.reload()
+  }, [controller])
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -90,7 +68,7 @@ export function MemorySection({ t }: MemorySectionProps) {
     setDraftTitle('')
     setDraftContent('')
     setConfirmId(null)
-    setError(null)
+    controller.clearError()
     setExpanded(null)
   }
 
@@ -99,7 +77,7 @@ export function MemorySection({ t }: MemorySectionProps) {
     setDraftTitle(entry.title)
     setDraftContent(entry.content)
     setConfirmId(null)
-    setError(null)
+    controller.clearError()
     setExpanded(entry.id)
   }
 
@@ -114,50 +92,29 @@ export function MemorySection({ t }: MemorySectionProps) {
     const title = draftTitle.trim()
     const content = draftContent.trim()
     if (title === '' || content === '') return
-    setBusy(true)
-    setError(null)
     try {
       const action: MemoryEntryAction = editor.kind === 'create'
         ? { action: 'create', title, content, enabled: true }
         : { action: 'update', id: editor.id, title, content }
-      const saved = await postJson<MemoryEntry>(ENTRY_PATH, action)
+      const saved = await controller.save(action)
       closeEditor()
       setExpanded(saved.id)
-      await reload()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : translate('saveFailed'))
-    } finally {
-      setBusy(false)
-    }
+    } catch { /* controller publishes the failure */ }
   }
 
   const toggleEnabled = async (id: string, enabled: boolean) => {
-    setBusy(true)
-    setError(null)
     try {
-      await postJson<MemoryEntry>(ENTRY_PATH, { action: 'toggle', id, enabled })
-      await reload()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : translate('saveFailed'))
-    } finally {
-      setBusy(false)
-    }
+      await controller.toggle(id, enabled)
+    } catch { /* controller publishes the failure */ }
   }
 
   const remove = async (id: string) => {
-    setBusy(true)
-    setError(null)
     try {
-      await postJson<{ deleted: true; id: string }>(ENTRY_PATH, { action: 'delete', id })
+      await controller.remove(id)
       setConfirmId(null)
       if (editor?.kind === 'edit' && editor.id === id) closeEditor()
       if (expanded === id) setExpanded(null)
-      await reload()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : translate('saveFailed'))
-    } finally {
-      setBusy(false)
-    }
+    } catch { /* controller publishes the failure */ }
   }
 
   return (
@@ -166,7 +123,7 @@ export function MemorySection({ t }: MemorySectionProps) {
       {status === 'error' ? (
         <FailureRow>
           <p role="alert">{error ?? translate('loadFailed')}</p>
-          <Button size="sm" variant="outline" onClick={() => void reload()}>
+          <Button size="sm" variant="outline" onClick={() => void controller.reload()}>
             {translate('retry')}
           </Button>
         </FailureRow>
@@ -401,26 +358,4 @@ function MemoryEditor(props: {
       {error !== null ? <InlineNotice kind="error" role="alert">{error}</InlineNotice> : null}
     </section>
   )
-}
-
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
-    method: 'GET',
-    headers: { accept: 'application/json' },
-    cache: 'no-store',
-  })
-  const value = await response.json() as MemoryHttpResult<T>
-  if (!value.ok) throw new Error(value.message)
-  return value.value
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const value = await response.json() as MemoryHttpResult<T>
-  if (!value.ok) throw new Error(value.message)
-  return value.value
 }

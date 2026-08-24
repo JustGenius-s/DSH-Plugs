@@ -41,19 +41,7 @@ export interface SidePanelInstance {
  * `mode`/`file`/`sha`; the git panel uses `view`/`title`. Other panels may
  * add their own shapes over time.
  */
-export interface PanelNavState {
-  mode?: 'tree' | 'preview' | 'diff'
-  /** Absolute or relative file path the instance focuses on. */
-  file?: string
-  /** A commit the file is shown against (diff mode); absent = working tree. */
-  sha?: string
-  /** Git panel: which view the instance shows (default = changes). */
-  view?: 'changes' | 'graph'
-  /** Tab caption override (the git graph tab reads "Graph", not "Git 2"). */
-  title?: string
-  /** Initial working directory for terminal instances. */
-  cwd?: string
-}
+export type PanelNavState = Readonly<Record<string, string | undefined>>
 
 export interface SidePanelSessionSnapshot {
   /** Session owning these panel instances. */
@@ -108,6 +96,12 @@ export interface SidePanelDescriptor {
    * resource has to be keyed off that rather than off the session alone.
    */
   multi?: boolean
+  /** Optional product-owned caption policy; keeps panel semantics out of the shell. */
+  caption?: (
+    instance: SidePanelInstance,
+    siblings: readonly SidePanelInstance[],
+    defaultLabel: string,
+  ) => string
 }
 
 export interface SidePanelsService {

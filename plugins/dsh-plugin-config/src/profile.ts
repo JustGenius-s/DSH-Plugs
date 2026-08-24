@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -43,6 +43,23 @@ export function readUserDisabledIds(text = readPatchText()): Set<string> {
 export function readPatchText(): string {
   const file = profilePatchPath()
   return existsSync(file) ? readFileSync(file, 'utf8') : ''
+}
+
+export function writePatchText(text: string): void {
+  const body = text === '' || text.endsWith('\n') ? text : `${text}\n`
+  writeFileSync(profilePatchPath(), body)
+}
+
+export function profileModifiedAt(): number | null {
+  const values: number[] = []
+  for (const file of [profilePackagePath(), profilePatchPath()]) {
+    try {
+      values.push(statSync(file).mtimeMs)
+    } catch {
+      // A missing profile artifact contributes no timestamp.
+    }
+  }
+  return values.length === 0 ? null : Math.max(...values)
 }
 
 export function writeDisablePatch(id: string, disabled: boolean): void {

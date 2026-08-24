@@ -19,6 +19,7 @@ export function createGitGraphFeature(
 ): CodexFeature {
   return {
     id: 'git-graph',
+    requires: ['sidePanels'],
     activate() {
       const store = ctx.sidePanels as SidePanelsStore
 

@@ -47,7 +47,9 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf lib"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@just-genius/dsh-plugin-runtime": "workspace:*"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.7",
@@ -63,6 +65,7 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@just-genius/dsh-plugin-runtime": "workspace:*",
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.7",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.7",

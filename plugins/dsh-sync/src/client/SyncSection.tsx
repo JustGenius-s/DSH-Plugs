@@ -1,45 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import {
-  AUTH_LOGOUT_PATH,
-  AUTH_POLL_PATH,
-  AUTH_START_PATH,
-  CONFIG_PATH,
-  PULL_PATH,
-  PUSH_PATH,
-  STATUS_PATH,
-  type DevicePollResult,
-  type DeviceStart,
-  type PullResult,
-  type PushResult,
-  type SyncHttpResult,
-  type SyncStatus,
-} from '../shared.ts'
 import type { SyncKey } from './locales.ts'
+import type { SyncController } from './sync-controller.ts'
 import styles from './SyncSection.module.css'
 
 export interface SyncSectionInjected {
   t: (key: SyncKey) => string
+  controller: SyncController
 }
 
 export type SyncSectionProps = Partial<InjectFace<SyncSectionInjected>>
 
-interface AuthSession {
-  deviceCode: string
-  userCode: string
-  verificationUri: string
-  verificationUriComplete: string | null
-  interval: number
-}
-
-interface SyncProgress {
-  mode: 'push' | 'pull'
-  percent: number
-  label: string
-  detail: string | null
-  done: boolean
-}
 
 function FieldRow(props: { label: string; children: ReactNode }) {
   return (
@@ -59,251 +31,32 @@ function Group(props: { title: string; children: ReactNode }) {
   )
 }
 
-export function SyncSection({ t }: SyncSectionProps) {
+export function SyncSection({ t, controller }: SyncSectionProps) {
   const translate = t ?? ((key: SyncKey) => key)
-  const [status, setStatus] = useState<SyncStatus | null>(null)
+  if (controller === undefined) throw new Error('SyncSection requires SyncController')
+  const snapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot,
+  )
+  const { status, loading, busy, error, auth, conflict, progress } = snapshot
   const [draftClientId, setDraftClientId] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [auth, setAuth] = useState<AuthSession | null>(null)
   const [copied, setCopied] = useState(false)
-  const [conflict, setConflict] = useState<PullResult | null>(null)
-  const [progress, setProgress] = useState<SyncProgress | null>(null)
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null)
-  const cancelled = useRef(false)
-
-  const stopProgressTicker = () => {
-    if (progressTimer.current !== null) {
-      clearInterval(progressTimer.current)
-      progressTimer.current = null
-    }
-  }
-
-  const startProgress = (mode: 'push' | 'pull', label: string) => {
-    stopProgressTicker()
-    setProgress({
-      mode,
-      percent: 8,
-      label,
-      detail: null,
-      done: false,
-    })
-    progressTimer.current = setInterval(() => {
-      setProgress((prev) => {
-        if (prev === null || prev.done) return prev
-        const cap = mode === 'push' ? 88 : 92
-        if (prev.percent >= cap) return prev
-        const step = prev.percent < 40 ? 6 : prev.percent < 70 ? 3 : 1
-        return { ...prev, percent: Math.min(cap, prev.percent + step) }
-      })
-    }, 420)
-  }
-
-  const finishProgress = (label: string, detail: string | null) => {
-    stopProgressTicker()
-    setProgress((prev) => ({
-      mode: prev?.mode ?? 'push',
-      percent: 100,
-      label,
-      detail,
-      done: true,
-    }))
-  }
-
-  const clearProgress = () => {
-    stopProgressTicker()
-    setProgress(null)
-  }
-
-  const reload = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const next = await getJson<SyncStatus>(STATUS_PATH)
-      setStatus(next)
-      setDraftClientId(next.clientId)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : translate('loading'))
-    } finally {
-      setLoading(false)
-    }
-  }, [translate])
 
   useEffect(() => {
-    cancelled.current = false
-    void reload()
-    return () => {
-      cancelled.current = true
-      if (pollTimer.current !== null) clearTimeout(pollTimer.current)
-      stopProgressTicker()
-    }
-  }, [reload])
+    void controller.reload()
+  }, [controller])
 
-  const stopPolling = () => {
-    if (pollTimer.current !== null) {
-      clearTimeout(pollTimer.current)
-      pollTimer.current = null
-    }
-    setAuth(null)
-  }
+  useEffect(() => {
+    if (status !== null) setDraftClientId(status.clientId)
+  }, [status?.clientId])
 
-  const saveClientId = async () => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const next = await postJson<SyncStatus>(CONFIG_PATH, { clientId: draftClientId.trim() })
-      setStatus(next)
-      setDraftClientId(next.clientId)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const schedulePoll = (session: AuthSession, intervalSec: number) => {
-    if (pollTimer.current !== null) clearTimeout(pollTimer.current)
-    pollTimer.current = setTimeout(() => {
-      void pollOnce(session, intervalSec)
-    }, Math.max(1, intervalSec) * 1000)
-  }
-
-  const pollOnce = async (session: AuthSession, intervalSec: number) => {
-    if (cancelled.current) return
-    try {
-      const result = await postJson<DevicePollResult>(AUTH_POLL_PATH, {
-        deviceCode: session.deviceCode,
-      })
-      if (result.status === 'pending') {
-        schedulePoll(session, intervalSec)
-        return
-      }
-      if (result.status === 'slow_down') {
-        schedulePoll(session, result.interval || intervalSec + 5)
-        return
-      }
-      if (result.status === 'success') {
-        stopPolling()
-        await reload()
-        return
-      }
-      stopPolling()
-      setError(result.message)
-    } catch (err) {
-      stopPolling()
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  const startLogin = async () => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    setConflict(null)
-    clearProgress()
-    try {
-      if (draftClientId.trim() !== '' && draftClientId.trim() !== (status?.clientId ?? '')) {
-        await postJson<SyncStatus>(CONFIG_PATH, { clientId: draftClientId.trim() })
-      }
-      const started = await postJson<DeviceStart>(AUTH_START_PATH, {})
-      const session: AuthSession = {
-        deviceCode: started.deviceCode,
-        userCode: started.userCode,
-        verificationUri: started.verificationUri,
-        verificationUriComplete: started.verificationUriComplete,
-        interval: started.interval,
-      }
-      setAuth(session)
-      schedulePoll(session, started.interval)
-      const openUrl = started.verificationUriComplete || started.verificationUri
-      window.open(openUrl, '_blank', 'noopener,noreferrer')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const logout = async () => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    stopPolling()
-    clearProgress()
-    try {
-      const next = await postJson<SyncStatus>(AUTH_LOGOUT_PATH, {})
-      setStatus(next)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const push = async () => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    setConflict(null)
-    startProgress('push', translate('progressCollect'))
-    window.setTimeout(() => {
-      setProgress((prev) => {
-        if (prev === null || prev.done || prev.mode !== 'push') return prev
-        return { ...prev, label: translate('progressUpload') }
-      })
-    }, 700)
-    try {
-      const result = await postJson<PushResult>(PUSH_PATH, {})
-      const details = [
-        formatTime(result.updatedAt, result.updatedAt),
-        fill(translate('pluginCount'), { count: String(result.pluginCount) }),
-      ]
-      if (result.pluginsSkipped.length > 0) {
-        details.push(
-          `${translate('pluginsSkipped')}: ${result.pluginsSkipped.map((row) => row.name).join(', ')}`,
-        )
-      }
-      finishProgress(translate('pushOk'), details.join(translate('detailSep')))
-      await reload()
-    } catch (err) {
-      clearProgress()
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const pull = async (force = false) => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    startProgress('pull', translate('progressDownload'))
-    window.setTimeout(() => {
-      setProgress((prev) => {
-        if (prev === null || prev.done || prev.mode !== 'pull') return prev
-        return { ...prev, label: translate('progressApply') }
-      })
-    }, 900)
-    try {
-      const result = await postJson<PullResult>(PULL_PATH, { force })
-      if (result.conflict) {
-        clearProgress()
-        setConflict(result)
-      } else {
-        setConflict(null)
-        finishProgress(translate('pullOk'), formatPullDetails(result, translate))
-        await reload()
-      }
-    } catch (err) {
-      clearProgress()
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const saveClientId = () => controller.saveClientId(draftClientId)
+  const startLogin = () => controller.startLogin(draftClientId)
+  const stopPolling = () => controller.cancelAuth()
+  const logout = () => controller.logout()
+  const push = () => controller.push()
+  const pull = (force = false) => controller.pull(force)
 
   const copyCode = async () => {
     if (auth === null) return
@@ -312,7 +65,7 @@ export function SyncSection({ t }: SyncSectionProps) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1200)
     } catch {
-      setError('clipboard unavailable')
+      // Clipboard availability is presentation-only; login polling continues.
     }
   }
 
@@ -480,7 +233,7 @@ export function SyncSection({ t }: SyncSectionProps) {
             <div className={styles.conflictTitle}>{translate('conflictTitle')}</div>
             <p className={styles.hint}>{translate('conflictBody')}</p>
             <div className={styles.inline}>
-              <Button type="button" size="sm" variant="toolbar" disabled={busy} onClick={() => setConflict(null)}>
+              <Button type="button" size="sm" variant="toolbar" disabled={busy} onClick={() => controller.dismissConflict()}>
                 {translate('cancelAuth')}
               </Button>
               <Button type="button" size="sm" variant="primary" disabled={busy} onClick={() => void pull(true)}>
@@ -522,75 +275,4 @@ function formatTime(value: string | null | undefined, fallback: string): string 
   const ms = Date.parse(value)
   if (Number.isNaN(ms)) return value
   return new Date(ms).toLocaleString()
-}
-
-function fill(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? '')
-}
-
-function shortPluginName(name: string): string {
-  const slash = name.lastIndexOf('/')
-  return slash >= 0 ? name.slice(slash + 1) : name
-}
-
-function joinNames(names: string[], sep: string): string {
-  return names.map(shortPluginName).join(sep)
-}
-
-function formatPullDetails(
-  result: PullResult,
-  translate: (key: SyncKey) => string,
-): string {
-  const parts = [translate('pulledSettings')]
-  const added = result.pluginsAdded ?? []
-  const removed = result.pluginsRemoved ?? []
-  const failed = result.pluginsFailed ?? []
-  const hasPluginReport = result.pluginsAdded !== undefined
-    || result.pluginsRemoved !== undefined
-    || result.pluginsFailed !== undefined
-  const listSep = translate('listSep')
-
-  if (hasPluginReport) {
-    if (added.length === 0 && removed.length === 0 && failed.length === 0) {
-      parts.push(translate('pluginsUnchanged'))
-    } else {
-      if (added.length > 0) {
-        parts.push(fill(translate('pluginsAdded'), { names: joinNames(added, listSep) }))
-      }
-      if (removed.length > 0) {
-        parts.push(fill(translate('pluginsRemoved'), { names: joinNames(removed, listSep) }))
-      }
-      if (failed.length > 0) {
-        const names = failed
-          .map((row) => `${shortPluginName(row.name)} (${row.error})`)
-          .join(listSep)
-        parts.push(fill(translate('pluginsFailed'), { names }))
-      }
-    }
-  }
-
-  if (result.needsRestart === true) parts.push(translate('needsRestart'))
-  return parts.join(translate('detailSep'))
-}
-
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
-    method: 'GET',
-    headers: { accept: 'application/json' },
-    cache: 'no-store',
-  })
-  const value = await response.json() as SyncHttpResult<T>
-  if (!value.ok) throw new Error(value.message)
-  return value.value
-}
-
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const value = await response.json() as SyncHttpResult<T>
-  if (!value.ok) throw new Error(value.message)
-  return value.value
 }

@@ -7,8 +7,8 @@
 - **Settings → 同步**：填写 OAuth Client ID、登录 GitHub、Push / Pull
 - **存储落点**：用户自己的 secret Gist（文件名 `dsh-config.json`）
 - **同步内容**：
-  - `~/.dsh/settings.yaml`（含各插件在 settings 里的配置段）
-  - web profile 插件清单（`dependencies` → 可移植的 `github:` / 版本号）+ `cordis.patch.yml`
+  - 通过 DSH Settings 服务注册的插件配置段
+  - 通过统一 profile 管理服务维护的 web 插件清单（转换为可移植的 `github:` / 版本号）
 - **冲突**：本地与云端都改过时提示，可强制用云端覆盖
 
 ## Install
@@ -39,10 +39,11 @@ dsh plugin --profile web add ./plugins/dsh-sync
 | 路径 | 用途 |
 |------|------|
 | `~/.dsh/sync/state.json` | Client ID、token、gistId、上次同步时间 |
-| Gist `dsh-config.json` | 云端快照（settings + plugins） |
+| Gist `dsh-config.json` | 云端快照（已注册插件设置 + 可移植插件清单） |
 
 ## 注意
 
 - Secret Gist ≠ 加密；不要把明文密钥塞进会同步的配置里
-- Pull 会覆盖本机 `settings.yaml` 与可移植插件清单；改完后建议先 Push
+- Pull 会通过官方 Settings API 覆盖本机已注册的插件设置，并协调可移植插件清单；改完后建议先 Push
+- 旧版以原始 `settings.yaml` 为载荷的 Gist 不会直接写回；请先在升级后的源设备 Push 一次完成迁移
 - 多机首次：一机 Push，另一机登录同一 GitHub 账号后 Pull

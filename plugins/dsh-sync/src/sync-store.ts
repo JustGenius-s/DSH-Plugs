@@ -10,6 +10,7 @@ export interface SyncState {
   avatarUrl: string | null
   gistId: string | null
   lastSyncedAt: string | null
+  lastSyncedHash: string | null
 }
 
 function dshHome(): string {
@@ -44,6 +45,7 @@ function emptyState(): SyncState {
     avatarUrl: null,
     gistId: null,
     lastSyncedAt: null,
+    lastSyncedHash: null,
   }
 }
 
@@ -60,6 +62,7 @@ export function loadState(): SyncState {
       avatarUrl: storedAvatar ?? (login !== null ? `https://github.com/${login}.png` : null),
       gistId: typeof raw.gistId === 'string' && raw.gistId !== '' ? raw.gistId : null,
       lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : null,
+      lastSyncedHash: typeof raw.lastSyncedHash === 'string' ? raw.lastSyncedHash : null,
     }
   } catch {
     return emptyState()
@@ -88,10 +91,6 @@ export function clearAuth(): SyncState {
   })
 }
 
-export function settingsYamlPath(): string {
-  return join(dshHome(), 'settings.yaml')
-}
-
 export function readTextIfExists(file: string): string | null {
   try {
     if (!existsSync(file)) return null
@@ -115,5 +114,3 @@ export function removeFile(file: string): void {
     // ignore
   }
 }
-
-export { dshHome }

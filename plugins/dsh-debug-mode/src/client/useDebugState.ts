@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { STATE_PATH, type DebugHttpResult } from '../shared.ts'
+import { STATE_PATH } from '../shared.ts'
+import { getResult } from '@just-genius/dsh-plugin-runtime/client'
 import type { DebugProjection } from '../types.ts'
 
 const POLL_MS = 500
@@ -22,14 +23,9 @@ export function useDebugState(sessionId: string): DebugProjection {
 
     const pull = async () => {
       try {
-        const response = await fetch(`${STATE_PATH}?sessionId=${encodeURIComponent(sessionId)}`, {
-          method: 'GET',
-          headers: { accept: 'application/json' },
-          cache: 'no-store',
-        })
-        const value = await response.json() as DebugHttpResult<DebugProjection>
+        const value = await getResult<DebugProjection>(`${STATE_PATH}?sessionId=${encodeURIComponent(sessionId)}`)
         if (!aliveRef.current) return
-        if (value.ok) setState(value.value)
+        setState(value)
       } catch {
         // Keep the last good snapshot; the next tick retries.
       }

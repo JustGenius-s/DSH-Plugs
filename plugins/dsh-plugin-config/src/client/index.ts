@@ -19,6 +19,7 @@ import { emptyCatalog, parseCatalog } from '../market/catalog.ts'
 import { PluginsTab, type PluginsTabInjected } from './PluginsTab.tsx'
 import { en, zh, type PluginsKey } from './locales.ts'
 import type { InventoryEntry } from './match.ts'
+import { requestJson, postJson } from '@just-genius/dsh-plugin-runtime/client'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -35,31 +36,21 @@ export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
 
   const loadInventory = async (): Promise<InventorySnapshot> => {
-    const response = await fetch(INVENTORY_PATH, {
-      cache: 'no-store',
-      headers: { accept: 'application/json' },
-    })
-    if (!response.ok) throw new Error(`inventory failed: ${response.status}`)
-    const value = await response.json() as InventorySnapshot
+    const value = await requestJson<InventorySnapshot>(INVENTORY_PATH)
     if (!Array.isArray(value.plugins)) throw new Error('inventory failed: bad payload')
     return value
   }
 
   const runAction = async (action: PluginAction, plugin: ManagedPlugin): Promise<ActionResult> => {
-    const response = await fetch(ACTION_PATH, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({
+    try {
+      return await postJson<ActionResult>(ACTION_PATH, {
         action,
         entryId: plugin.entryId,
         packageName: plugin.packageName,
-      }),
-    })
-    const value = await response.json() as ActionResult
-    if (typeof value.ok !== 'boolean') {
-      return { ok: false, error: `${t('actionFail')}: ${response.status}` }
+      })
+    } catch (error) {
+      return { ok: false, error: `${t('actionFail')}: ${error instanceof Error ? error.message : String(error)}` }
     }
-    return value
   }
 
   const loadCatalog = async (): Promise<Catalog> => {
@@ -95,50 +86,25 @@ export function apply(ctx: ClientContext): void {
   }
 
   const installPlugin = async (spec: string): Promise<InstallOutcome> => {
-    const response = await fetch(INSTALL_PATH, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ spec }),
-    })
-    const value = await response.json() as InstallOutcome
-    if (typeof value.ok !== 'boolean') {
-      return { ok: false, error: `install failed: ${response.status}` }
+    try {
+      return await postJson<InstallOutcome>(INSTALL_PATH, { spec })
+    } catch (error) {
+      return { ok: false, error: `install failed: ${error instanceof Error ? error.message : String(error)}` }
     }
-    return value
   }
 
   const loadOutdated = async (): Promise<OutdatedSnapshot> => {
-    const response = await fetch(OUTDATED_PATH, {
-      cache: 'no-store',
-      headers: { accept: 'application/json' },
-    })
-    if (!response.ok) {
-      let detail = `outdated failed: ${response.status}`
-      try {
-        const body = await response.json() as { detail?: unknown; error?: unknown }
-        const parts = [body.error, body.detail].filter((value) => typeof value === 'string')
-        if (parts.length > 0) detail = parts.join('\n')
-      } catch {
-        // keep status text
-      }
-      throw new Error(detail)
-    }
-    const value = await response.json() as OutdatedSnapshot
+    const value = await requestJson<OutdatedSnapshot>(OUTDATED_PATH)
     if (!Array.isArray(value.updates)) throw new Error('outdated failed: bad payload')
     return value
   }
 
   const updatePackage = async (packageName: string): Promise<UpdateOutcome> => {
-    const response = await fetch(UPDATE_PATH, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ packageName }),
-    })
-    const value = await response.json() as UpdateOutcome
-    if (typeof value.ok !== 'boolean') {
-      return { ok: false, error: `update failed: ${response.status}` }
+    try {
+      return await postJson<UpdateOutcome>(UPDATE_PATH, { packageName })
+    } catch (error) {
+      return { ok: false, error: `update failed: ${error instanceof Error ? error.message : String(error)}` }
     }
-    return value
   }
 
   const injected = (): PluginsTabInjected => ({

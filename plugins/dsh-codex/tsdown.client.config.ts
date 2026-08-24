@@ -18,6 +18,7 @@ export default defineConfig({
   deps: {
     alwaysBundle: [
       '@just-genius/dsh-plugin-ui',
+      /^@just-genius\/dsh-plugin-runtime(?:\/|$)/,
       /^@xterm\//,
       'shiki',
       /^shiki\//,

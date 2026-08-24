@@ -11,10 +11,7 @@ import { LauncherToggle } from './launcher-toggle'
 import { createSidePanelsStore } from './service'
 import { SidePanelsShell } from './shell'
 import type { PanelEntriesApi, PanelTabInfo } from './shell'
-import { createQuickActionsStore } from '../quick-actions/store'
-import type { QuickAction } from '../../../shared/config'
-import type { TerminalControllerStore } from '../terminal/controller'
-import { currentSessionLocation } from '../../host-adapters/sessions'
+import type { SidePanelActionsContribution } from './actions'
 
 const PANEL_SLOT = 'side.panel'
 const NS = 'settings.codex'
@@ -23,10 +20,11 @@ export function createSidePanelsFeature(
   ctx: ClientContext,
   scope: SettingsScope<DshCodexConfig>,
   t: (key: CodexKey) => string,
-  controllerStore: TerminalControllerStore,
+  actions?: SidePanelActionsContribution,
 ): CodexFeature {
   return {
     id: 'side-panels',
+    provides: ['sidePanels'],
     activate() {
       const config = { ...DEFAULT_CONFIG, ...scope.getSnapshot().value }
       const store = createSidePanelsStore({
@@ -36,72 +34,6 @@ export function createSidePanelsFeature(
       })
       ctx.provide('sidePanels', store)
       const launcher = createLauncherStore()
-      const quickActions = createQuickActionsStore(scope)
-
-      // Run a stored quick action, step by step. Each step is `{ command, target }`:
-      // a `current` step runs the command in the currently active terminal; a `new`
-      // step opens a fresh terminal tab (seeded with the active terminal's cwd, else
-      // the session cwd) and runs the command there. Every command is trimmed and
-      // must be non-empty; any failure rejects the whole action.
-      const executeQuickAction = async (action: QuickAction): Promise<void> => {
-        const { sessionId, cwd: sessionCwd } = currentSessionLocation(ctx.sessions)
-
-        // The active terminal instance for the current session, if any. The
-        // `current` target runs in it; a `new` target seeds its cwd from it.
-        // Mutable so a successful `new` step can retarget it to the terminal
-        // it just opened, making a following `current` step run in that tab.
-        const snapshot = store.getSnapshot()
-        let activeTerminal = snapshot.activeKey === null
-          ? undefined
-          : snapshot.instances.find(i => i.key === snapshot.activeKey && i.panelId === 'terminal')
-
-        for (const step of action.steps) {
-          const command = step.command.trim()
-          if (command === '') {
-            throw new Error('quick action requires a non-empty command')
-          }
-          if (step.target === 'current') {
-            if (activeTerminal === undefined) {
-              throw new Error('quick action current-target requires an active terminal')
-            }
-            if (sessionId === undefined || sessionId === '') {
-              throw new Error('quick action current-target requires a current session')
-            }
-            // The terminal is registered under `{sessionId}:{instanceKey}` — the
-            // side-panel instance key is only session-scoped, so compose the
-            // controller id from the current session before waiting on it.
-            const controllerId = `${sessionId}:${activeTerminal.key}`
-            const controller = await controllerStore.waitFor(controllerId)
-            await controller.run(command)
-          } else {
-            const rawCwd = activeTerminal?.state?.cwd ?? sessionCwd
-            const cwd = rawCwd?.trim() ?? ''
-            if (cwd === '') {
-              throw new Error('quick action new-target requires a cwd')
-            }
-            if (sessionId === undefined || sessionId === '') {
-              throw new Error('quick action new-target requires a current session')
-            }
-            // No title: keep the default tab caption for a fresh terminal.
-            const key = ctx.sidePanels.open('terminal', { cwd })
-            if (key === undefined) {
-              throw new Error('quick action failed to open a terminal')
-            }
-            // The new tab is now the active terminal, so a following `current`
-            // step runs in the terminal we just opened. Re-read the snapshot to
-            // resolve the instance backing that key.
-            const created = store.getSnapshot().instances.find(
-              i => i.key === key && i.panelId === 'terminal',
-            )
-            if (created !== undefined) {
-              activeTerminal = created
-            }
-            const controllerId = `${sessionId}:${key}`
-            const controller = await controllerStore.waitFor(controllerId)
-            await controller.run(command)
-          }
-        }
-      }
 
       let cachedVersion = -1
       let cachedList: PanelTabInfo[] = []
@@ -148,7 +80,7 @@ export function createSidePanelsFeature(
                 owner: {},
               },
             } as never,
-            inject: () => ({ store, launcher, entries, scope, t, quickActions, executeQuickAction }),
+            inject: () => ({ store, launcher, entries, scope, t, actions }),
           },
           SidePanelsShell as never,
         ),
@@ -173,7 +105,6 @@ export function createSidePanelsFeature(
         unsubscribeSettings()
         disposeShell()
         disposeLauncherToggle()
-        quickActions.dispose()
         launcher.dispose()
         store.dispose()
       }

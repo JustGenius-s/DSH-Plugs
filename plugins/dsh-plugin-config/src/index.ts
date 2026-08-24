@@ -1,13 +1,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { runAction } from './actions.ts'
 import { collectInventory } from './inventory.ts'
-import { json, readJsonBody } from './http.ts'
+import { readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
 import { CATALOG_PATH, INSTALL_PATH } from './market/types.ts'
 import { loadMarketplaceCatalog } from './market/host-catalog.ts'
 import { installCatalogSpec } from './market/install.ts'
 import { collectOutdated, updateNpmPackage } from './updates.ts'
+import { createPluginProfileManager } from './profile-manager.ts'
 import {
   ACTION_PATH,
   INVENTORY_PATH,
@@ -21,6 +23,9 @@ export const name = 'dsh-plugin-config'
 export const inject = ['webServer', 'loader'] as const
 
 export function apply(ctx: Context) {
+  const profile = createPluginProfileManager(ctx)
+  ctx.provide('pluginProfile', profile)
+
   ctx.effect(
     () => ctx.webServer.register({
       kind: 'exact',
@@ -33,7 +38,7 @@ export function apply(ctx: Context) {
     () => ctx.webServer.register({
       kind: 'exact',
       path: ACTION_PATH,
-      handler: (req, res) => handleAction(ctx, req, res),
+      handler: (req, res) => handleAction(ctx, profile, req, res),
     }),
     'dsh-plugin-config: action route',
   )
@@ -49,7 +54,7 @@ export function apply(ctx: Context) {
     () => ctx.webServer.register({
       kind: 'exact',
       path: INSTALL_PATH,
-      handler: handleInstall,
+      handler: (req, res) => handleInstall(profile, req, res),
     }),
     'dsh-plugin-config: install route',
   )
@@ -57,7 +62,7 @@ export function apply(ctx: Context) {
     () => ctx.webServer.register({
       kind: 'exact',
       path: OUTDATED_PATH,
-      handler: handleOutdated,
+      handler: (req, res) => handleOutdated(profile, req, res),
     }),
     'dsh-plugin-config: outdated route',
   )
@@ -65,7 +70,7 @@ export function apply(ctx: Context) {
     () => ctx.webServer.register({
       kind: 'exact',
       path: UPDATE_PATH,
-      handler: handleUpdate,
+      handler: (req, res) => handleUpdate(profile, req, res),
     }),
     'dsh-plugin-config: update route',
   )
@@ -83,7 +88,12 @@ function handleInventory(ctx: Context, req: IncomingMessage, res: ServerResponse
   }
 }
 
-async function handleAction(ctx: Context, req: IncomingMessage, res: ServerResponse) {
+async function handleAction(
+  ctx: Context,
+  profile: import('@just-genius/dsh-plugin-runtime').PluginProfileManager,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
   if (req.method !== 'POST') {
     json(res, 405, { ok: false, error: 'method not allowed' })
     return
@@ -100,7 +110,7 @@ async function handleAction(ctx: Context, req: IncomingMessage, res: ServerRespo
     json(res, 400, { ok: false, error: 'action, and entryId or packageName, are required.' })
     return
   }
-  const result = await runAction(ctx, request)
+  const result = await runAction(ctx, profile, request)
   json(res, result.ok ? 200 : 400, result)
 }
 
@@ -117,7 +127,11 @@ async function handleCatalog(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-async function handleInstall(req: IncomingMessage, res: ServerResponse) {
+async function handleInstall(
+  profile: import('@just-genius/dsh-plugin-runtime').PluginProfileManager,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
   if (req.method !== 'POST') {
     json(res, 405, { ok: false, error: 'method not allowed' })
     return
@@ -132,23 +146,31 @@ async function handleInstall(req: IncomingMessage, res: ServerResponse) {
   const spec = body !== null && typeof body === 'object' && 'spec' in body
     ? String((body as { spec: unknown }).spec ?? '')
     : ''
-  const result = await installCatalogSpec(spec)
+  const result = await installCatalogSpec(profile, spec)
   json(res, result.ok ? 200 : 400, result)
 }
 
-async function handleOutdated(req: IncomingMessage, res: ServerResponse) {
+async function handleOutdated(
+  profile: import('@just-genius/dsh-plugin-runtime').PluginProfileManager,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     json(res, 405, { ok: false, error: 'method not allowed' })
     return
   }
   try {
-    json(res, 200, await collectOutdated())
+    json(res, 200, await collectOutdated(profile))
   } catch (error) {
     json(res, 502, { ok: false, error: 'outdated check failed', detail: String(error) })
   }
 }
 
-async function handleUpdate(req: IncomingMessage, res: ServerResponse) {
+async function handleUpdate(
+  profile: import('@just-genius/dsh-plugin-runtime').PluginProfileManager,
+  req: IncomingMessage,
+  res: ServerResponse,
+) {
   if (req.method !== 'POST') {
     json(res, 405, { ok: false, error: 'method not allowed' })
     return
@@ -163,7 +185,7 @@ async function handleUpdate(req: IncomingMessage, res: ServerResponse) {
   const packageName = body !== null && typeof body === 'object' && 'packageName' in body
     ? String((body as { packageName: unknown }).packageName ?? '')
     : ''
-  const result = await updateNpmPackage(packageName)
+  const result = await updateNpmPackage(profile, packageName)
   json(res, result.ok ? 200 : 400, result)
 }
 

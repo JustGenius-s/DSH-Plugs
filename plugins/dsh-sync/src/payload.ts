@@ -1,107 +1,112 @@
 import { createHash } from 'node:crypto'
-import { existsSync, statSync } from 'node:fs'
-import type { SyncPayloadV1, SyncPluginsSnapshot } from './shared.ts'
-import { collectPlugins, profileContentMtimes } from './profile-sync.ts'
-import {
-  readTextIfExists,
-  settingsYamlPath,
-  writeText,
-} from './sync-store.ts'
+import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings'
+import type { PluginProfileManager } from '@just-genius/dsh-plugin-runtime'
+import type { SyncPayloadV2, SyncPluginsSnapshot } from './shared.ts'
+import { collectPlugins } from './profile-sync.ts'
 
-export function collectPayload(): SyncPayloadV1 {
-  const settingsYaml = readTextIfExists(settingsYamlPath()) ?? ''
-  const { snapshot } = collectPlugins()
+export interface ApplySettingsResult {
+  applied: string[]
+  skipped: string[]
+}
+
+export function collectPayload(
+  settings: SettingsProvider,
+  profile: PluginProfileManager,
+): SyncPayloadV2 {
+  const sections: Record<string, Record<string, unknown>> = {}
+  for (const descriptor of settings.describe()) {
+    sections[String(descriptor.ns)] = isRecord(descriptor.user) ? descriptor.user : {}
+  }
   return {
-    version: 1,
+    version: 2,
     updatedAt: new Date().toISOString(),
-    settingsYaml,
+    settings: sections,
     memory: null,
-    plugins: snapshot,
+    plugins: collectPlugins(profile).snapshot,
   }
 }
 
-export function serializePayload(payload: SyncPayloadV1): string {
+export function serializePayload(payload: SyncPayloadV2): string {
   return `${JSON.stringify(payload, null, 2)}\n`
 }
 
-export function parsePayload(raw: string): SyncPayloadV1 {
+export function parsePayload(raw: string): SyncPayloadV2 {
   let json: unknown
   try {
     json = JSON.parse(raw) as unknown
   } catch {
     throw new Error('Cloud config is not valid JSON')
   }
-  if (json === null || typeof json !== 'object') {
-    throw new Error('Cloud config has an invalid shape')
+  if (!isRecord(json)) throw new Error('Cloud config has an invalid shape')
+  if (json.version === 1) {
+    throw new Error('This Gist uses legacy settings.yaml sync. Push once from the upgraded device to migrate it.')
   }
-  const row = json as Record<string, unknown>
-  if (row.version !== 1) throw new Error('Unsupported sync payload version')
-  if (typeof row.updatedAt !== 'string' || row.updatedAt === '') {
+  if (json.version !== 2) throw new Error('Unsupported sync payload version')
+  if (typeof json.updatedAt !== 'string' || json.updatedAt === '') {
     throw new Error('Cloud config is missing updatedAt')
   }
-  if (typeof row.settingsYaml !== 'string') {
-    throw new Error('Cloud config is missing settingsYaml')
+  if (!isRecord(json.settings)) throw new Error('Cloud config is missing settings')
+
+  const sections: Record<string, Record<string, unknown>> = {}
+  for (const [namespace, section] of Object.entries(json.settings)) {
+    if (!isRecord(section)) throw new Error(`Cloud settings section "${namespace}" is invalid`)
+    sections[namespace] = section
   }
   return {
-    version: 1,
-    updatedAt: row.updatedAt,
-    settingsYaml: row.settingsYaml,
-    // Memory sync is disabled for now; ignore any legacy cloud field.
+    version: 2,
+    updatedAt: json.updatedAt,
+    settings: sections,
     memory: null,
-    plugins: normalizePlugins(row.plugins),
+    plugins: normalizePlugins(json.plugins),
   }
 }
 
-export function applySettings(payload: SyncPayloadV1): void {
-  writeText(settingsYamlPath(), payload.settingsYaml.endsWith('\n')
-    ? payload.settingsYaml
-    : `${payload.settingsYaml}\n`)
-}
-
-/** @deprecated use applySettings — kept name for call sites during transition */
-export function applyPayload(payload: SyncPayloadV1): void {
-  applySettings(payload)
-}
-
-export function localContentUpdatedAt(): string | null {
-  const times: number[] = [...profileContentMtimes()]
-  const settings = settingsYamlPath()
-  if (existsSync(settings)) {
-    try {
-      times.push(statSync(settings).mtimeMs)
-    } catch {
-      // ignore
+export async function applySettings(
+  settings: SettingsProvider,
+  payload: SyncPayloadV2,
+): Promise<ApplySettingsResult> {
+  const registered = new Map(settings.describe().map(item => [String(item.ns), item]))
+  const applied: string[] = []
+  const skipped: string[] = []
+  for (const [namespace, section] of Object.entries(payload.settings)) {
+    const descriptor = registered.get(namespace)
+    if (descriptor === undefined) {
+      skipped.push(namespace)
+      continue
     }
+    await settings.replace(settingsNamespace(namespace), section, descriptor.revision)
+    applied.push(namespace)
   }
-  if (times.length === 0) return null
-  return new Date(Math.max(...times)).toISOString()
+  return { applied, skipped }
 }
 
-export function contentHash(payload: SyncPayloadV1): string {
-  return createHash('sha256').update(serializePayload({
-    ...payload,
-    updatedAt: '',
-  })).digest('hex').slice(0, 16)
+export function localContentUpdatedAt(
+  profile: PluginProfileManager,
+  settingsChangedAt: number | null,
+): string | null {
+  const profileTime = profile.snapshot().modifiedAt
+  const latest = Math.max(profileTime ?? 0, settingsChangedAt ?? 0)
+  return latest === 0 ? null : new Date(latest).toISOString()
+}
+
+export function contentHash(payload: SyncPayloadV2): string {
+  return createHash('sha256').update(serializePayload({ ...payload, updatedAt: '' })).digest('hex').slice(0, 16)
 }
 
 function normalizePlugins(raw: unknown): SyncPluginsSnapshot | null {
   if (raw === null || raw === undefined) return null
-  if (typeof raw !== 'object') {
-    throw new Error('Cloud plugins snapshot is invalid')
-  }
-  const row = raw as Record<string, unknown>
-  if (typeof row.cordisPatchYml !== 'string') {
+  if (!isRecord(raw)) throw new Error('Cloud plugins snapshot is invalid')
+  if (typeof raw.cordisPatchYml !== 'string') {
     throw new Error('Cloud plugins snapshot is missing cordisPatchYml')
   }
-  if (row.dependencies === null || typeof row.dependencies !== 'object') {
-    throw new Error('Cloud plugins snapshot is missing dependencies')
-  }
+  if (!isRecord(raw.dependencies)) throw new Error('Cloud plugins snapshot is missing dependencies')
   const dependencies: Record<string, string> = {}
-  for (const [key, value] of Object.entries(row.dependencies as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(raw.dependencies)) {
     if (typeof value === 'string' && value.trim() !== '') dependencies[key] = value.trim()
   }
-  return {
-    dependencies,
-    cordisPatchYml: row.cordisPatchYml,
-  }
+  return { dependencies, cordisPatchYml: raw.cordisPatchYml }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }

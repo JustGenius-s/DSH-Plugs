@@ -1,12 +1,17 @@
-import { homedir } from 'node:os'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-jobs'
+import type { Session } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-title'
+import type {} from '@deepseek-ai/dsh-storage-domain'
 import Schema from '@deepseek-ai/schemastery'
 import { installSettingsSection } from '@deepseek-ai/dsh-settings'
+import { HttpInputError, readJsonBody, sendJson } from '@just-genius/dsh-plugin-runtime/host'
 import {
   BODY_LIMIT,
   DEFAULTS,
@@ -15,15 +20,11 @@ import {
   type WhaleGirlConfig,
 } from './shared/config.ts'
 import {
-  INITIAL_STATE,
-  normalizeState,
   recordActive,
   recordFailure,
   recordSession,
   recordSessionResume,
   recordTaskCompleted,
-  serializeState,
-  type PetState,
 } from './shared/pet-state.ts'
 import {
   SNAPSHOT_API_VERSION,
@@ -47,9 +48,19 @@ import {
   SESSIONS_PATH,
   STATE_PATH,
 } from './shared/routes.ts'
+import { collectTasks } from './host-services.ts'
+import { openPetStore } from './pet-store.ts'
 
 export const name = 'dsh-whale-girl'
-export const inject = ['webServer', 'settings'] as const
+export const inject = [
+  'webServer',
+  'settings',
+  'storageDomain',
+  'jobs',
+  'agents',
+  'sessions',
+  'sessionTitle',
+] as const
 
 const ConfigSchema = Schema.object({
   enabled: Schema.boolean().default(DEFAULTS.enabled),
@@ -81,83 +92,27 @@ const ASSETS_DIR = join(HERE, '..', 'assets')
 const OVERLAY_HTML = join(HERE, 'overlay.html')
 const OVERLAY_JS = join(HERE, 'overlay.js')
 
-function dshHome(): string {
-  return process.env.DSH_HOME || join(homedir(), '.dsh')
-}
-
-function stateFile(): string {
-  return join(dshHome(), 'data', 'whale-girl', 'state.json')
-}
-
-function loadState(): PetState | null {
-  try {
-    return normalizeState(JSON.parse(readFileSync(stateFile(), 'utf8')))
-  } catch {
-    return null
-  }
-}
-
-function saveState(next: PetState): void {
-  try {
-    const file = stateFile()
-    mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.tmp`
-    writeFileSync(tmp, serializeState(next))
-    renameSync(tmp, file)
-  } catch {
-    // persistence is best-effort
-  }
-}
-
-function json(res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...extra })
-  res.end(JSON.stringify(body))
-}
-
-async function readBody(req: IncomingMessage, limit = BODY_LIMIT): Promise<string | null> {
-  let data = ''
-  for await (const chunk of req) {
-    data += chunk
-    if (data.length > limit) return null
-  }
-  return data
-}
-
 function headerMap(headers: IncomingMessage['headers']): Record<string, string | string[] | undefined> {
   return headers as Record<string, string | string[] | undefined>
 }
 
-function optionalService<T>(ctx: Context, name: string): T | undefined {
+async function readObjectBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<Record<string, unknown> | null> {
   try {
-    return ctx.get(name) as T | undefined
-  } catch {
-    return undefined
-  }
-}
-
-function collectTasks(ctx: Context): Array<{ id: string; status: string; label?: string }> {
-  const jobs = optionalService<{ list: (agent?: unknown) => Array<{ id: string; status: string; label?: string }> }>(ctx, 'jobs')
-  const agents = optionalService<{ list: () => unknown[] }>(ctx, 'agents')
-  if (jobs === undefined || typeof jobs.list !== 'function') return []
-  const seen = new Set<string>()
-  const out: Array<{ id: string; status: string; label?: string }> = []
-  try {
-    for (const agent of agents?.list?.() ?? []) {
-      for (const snapshot of jobs.list(agent)) {
-        if (seen.has(snapshot.id)) continue
-        seen.add(snapshot.id)
-        out.push({ id: snapshot.id, status: snapshot.status, label: snapshot.label })
-      }
+    const body = await readJsonBody(req, BODY_LIMIT)
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      sendJson(res, 400, { error: 'body must be a JSON object' })
+      return null
     }
-    for (const snapshot of jobs.list()) {
-      if (seen.has(snapshot.id)) continue
-      seen.add(snapshot.id)
-      out.push({ id: snapshot.id, status: snapshot.status, label: snapshot.label })
-    }
-  } catch {
-    return out
+    return body as Record<string, unknown>
+  } catch (error) {
+    sendJson(res, error instanceof HttpInputError ? error.status : 400, {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
   }
-  return out
 }
 
 function sendFile(res: ServerResponse, file: string, type: string): void {
@@ -170,8 +125,10 @@ function sendFile(res: ServerResponse, file: string, type: string): void {
   res.end(readFileSync(file))
 }
 
-export function apply(ctx: Context): void {
-  let state = loadState() ?? { ...INITIAL_STATE, updatedAt: Date.now() }
+export async function apply(ctx: Context): Promise<void> {
+  const store = await openPetStore(ctx)
+  ctx.effect(() => () => store.close(), 'dsh-whale-girl: pet store')
+  let state = store.load()
   let configRef: WhaleGirlConfig = { ...DEFAULTS, walk: { ...DEFAULTS.walk }, replies: { feed: [...DEFAULTS.replies.feed], play: [...DEFAULTS.replies.play] } }
   let configRevision = 0
   const applyConfig = (next: WhaleGirlConfig) => {
@@ -196,7 +153,7 @@ export function apply(ctx: Context): void {
   let saveTimer: ReturnType<typeof setTimeout> | null = null
   const scheduleSave = () => {
     if (saveTimer !== null) clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => saveState(state), 1000)
+    saveTimer = setTimeout(() => void store.save(state).catch(() => undefined), 1000)
   }
 
   const sseClients = new Set<ServerResponse>()
@@ -221,14 +178,11 @@ export function apply(ctx: Context): void {
   const activeTurns = new Map<string, number>()
   const sessionViews = new Map<string, SessionView>()
 
-  const sessionsSvc = optionalService<{ list: () => unknown[] }>(ctx, 'sessions')
-  const sessionTitleSvc = optionalService<{ get: (s: unknown) => { title?: string } }>(ctx, 'sessionTitle')
-
-  const resolveSessionTitle = (s: { events?: unknown[]; id?: string }): string | null => {
+  const resolveSessionTitle = (s: Session): string | null => {
     const fromLog = titleFromLog(Array.isArray(s.events) ? s.events : [])
     if (fromLog !== null) return fromLog
     try {
-      const snapshot = sessionTitleSvc?.get?.(s)
+      const snapshot = ctx.sessionTitle.get(s)
       return typeof snapshot?.title === 'string' && snapshot.title !== '' ? snapshot.title : null
     } catch {
       return null
@@ -236,13 +190,10 @@ export function apply(ctx: Context): void {
   }
 
   const sessionUpdate = () => {
-    if (sessionsSvc === undefined || typeof sessionsSvc.list !== 'function') return
     try {
       let thinking = false
-      for (const s of sessionsSvc.list()) {
-        if (s === null || typeof s !== 'object') continue
-        const id = typeof (s as { id?: unknown }).id === 'string' ? (s as { id: string }).id : null
-        if (id !== null && (activeTurns.get(id) ?? 0) > 0) thinking = true
+      for (const session of ctx.sessions.list()) {
+        if ((activeTurns.get(session.id) ?? 0) > 0) thinking = true
       }
       sessionThink = thinking
     } catch {
@@ -251,32 +202,27 @@ export function apply(ctx: Context): void {
   }
 
   const sessionsSnapshot = (): SessionView[] => {
-    if (sessionsSvc !== undefined && typeof sessionsSvc.list === 'function') {
-      try {
+    try {
         const live = new Set<string>()
-        for (const s of sessionsSvc.list()) {
-          if (s === null || typeof s !== 'object') continue
-          const rec = s as { id?: unknown; header?: { createdAt?: number }; events?: unknown[] }
-          const id = typeof rec.id === 'string' ? rec.id : null
-          if (id === null) continue
+        for (const session of ctx.sessions.list()) {
+          const id = session.id
           live.add(id)
-          const since = typeof rec.header?.createdAt === 'number' ? rec.header.createdAt : Date.now()
-          const title = resolveSessionTitle({ id, events: rec.events })
+          const since = session.header.createdAt
+          const title = resolveSessionTitle(session)
           const knownView = sessionViews.get(id)
           if (knownView === undefined) sessionViews.set(id, { id, title, activity: 'done', since })
           else if (knownView.title === null && title !== null) sessionViews.set(id, { ...knownView, title })
         }
         for (const id of sessionViews.keys()) if (!live.has(id)) sessionViews.delete(id)
-      } catch {
-        // keep event views
-      }
+    } catch {
+      // keep event views
     }
     return [...sessionViews.values()]
   }
 
   const activity = () => {
     const now = Date.now()
-    const tasks = collectTasks(ctx)
+    const tasks = collectTasks(ctx.jobs, ctx.agents)
     const derived = deriveActivity({ tasks, nowMs: now, known, wasWorking, errorMs: configRef.errorMs })
     wasWorking = derived.wasWorking
     if (derived.working) {
@@ -316,9 +262,7 @@ export function apply(ctx: Context): void {
     }
   }
 
-  const jobs = optionalService<{ onJobDone?: (fn: (snapshot: { status: string; label?: string }) => void) => () => void }>(ctx, 'jobs')
-  if (jobs !== undefined && typeof jobs.onJobDone === 'function') {
-    ctx.effect(() => jobs.onJobDone!((snapshot) => {
+  ctx.effect(() => ctx.jobs.onJobDone((snapshot) => {
       const now = Date.now()
       if (snapshot.status === 'completed') {
         const result = recordTaskCompleted(state, snapshot.label ?? '未命名任务', now)
@@ -331,17 +275,16 @@ export function apply(ctx: Context): void {
       }
       broadcastEvent()
     }), 'dsh-whale-girl: job done')
-  }
 
-  const on = (ctx.on as unknown as (name: string, fn: (...args: unknown[]) => void) => void).bind(ctx)
-  on('agent/request-error', () => {
+  ctx.on('agent/request-error', (_payload, next) => {
     const now = Date.now()
     errorUntil = Math.max(errorUntil, now + configRef.errorMs)
     disappointedUntil = Math.max(disappointedUntil, now + configRef.errorMs + configRef.disappointedMs)
     broadcastEvent()
+    return next()
   })
 
-  on('agent/session-start', (payload) => {
+  ctx.on('agent/session-start', (payload) => {
     const now = Date.now()
     const sourceKind = payload !== null && typeof payload === 'object' && typeof (payload as { source?: unknown }).source === 'string'
       ? (payload as { source: string }).source
@@ -356,12 +299,10 @@ export function apply(ctx: Context): void {
     broadcastEvent()
   })
 
-  on('session/event', (session, event) => {
-    const rec = (session ?? {}) as { id?: string; header?: { createdAt?: number } }
-    const id = typeof rec.id === 'string' ? rec.id : null
-    if (id === null) return
+  ctx.on('session/event', (session, event) => {
+    const id = session.id
     const knownView = sessionViews.get(id)
-    const since = knownView?.since ?? (typeof rec.header?.createdAt === 'number' ? rec.header.createdAt : Date.now())
+    const since = knownView?.since ?? session.header.createdAt
     const base = knownView ?? { ...createSessionView(id, since), title: null }
     const view = applySessionView(base, event)
     if (knownView === undefined || view !== knownView) sessionViews.set(id, view)
@@ -389,11 +330,11 @@ export function apply(ctx: Context): void {
         path: STATE_PATH,
         handler: async (req, res) => {
           if (req.method !== 'GET') {
-            json(res, 405, { error: 'method not allowed; use GET' }, { allow: 'GET' })
+            sendJson(res, 405, { error: 'method not allowed; use GET' }, { allow: 'GET' })
             return
           }
           const act = activity()
-          json(res, 200, {
+          sendJson(res, 200, {
             apiVersion: SNAPSHOT_API_VERSION,
             pet: state,
             activity: act,
@@ -407,10 +348,10 @@ export function apply(ctx: Context): void {
         path: CONFIG_PATH,
         handler: async (req, res) => {
           if (req.method !== 'GET') {
-            json(res, 405, { error: 'method not allowed; use GET' }, { allow: 'GET' })
+            sendJson(res, 405, { error: 'method not allowed; use GET' }, { allow: 'GET' })
             return
           }
-          json(res, 200, { config: configRef, revision: configRevision }, { 'cache-control': 'no-store' })
+          sendJson(res, 200, { config: configRef, revision: configRevision }, { 'cache-control': 'no-store' })
         },
       }),
       ctx.webServer.register({
@@ -418,29 +359,17 @@ export function apply(ctx: Context): void {
         path: INTERACT_PATH,
         handler: async (req, res) => {
           if (req.method !== 'POST') {
-            json(res, 405, { error: 'method not allowed; use POST' }, { allow: 'POST' })
+            sendJson(res, 405, { error: 'method not allowed; use POST' }, { allow: 'POST' })
             return
           }
           if (isCrossOrigin(headerMap(req.headers), req.headers.host)) {
-            json(res, 403, { error: 'cross-origin request rejected' })
+            sendJson(res, 403, { error: 'cross-origin request rejected' })
             return
           }
-          const raw = await readBody(req)
-          if (raw === null) {
-            json(res, 413, { error: 'request body too large' })
-            return
-          }
-          let body: unknown
-          try { body = JSON.parse(raw || '{}') } catch {
-            json(res, 400, { error: 'invalid JSON body' })
-            return
-          }
-          if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-            json(res, 400, { error: 'body must be a JSON object' })
-            return
-          }
-          const result = applyAction(state, (body as { action?: unknown }).action, configRef.replies)
-          json(res, result.status, result.body, { 'cache-control': 'no-store' })
+          const body = await readObjectBody(req, res)
+          if (body === null) return
+          const result = applyAction(state, body.action, configRef.replies)
+          sendJson(res, result.status, result.body, { 'cache-control': 'no-store' })
         },
       }),
       ctx.webServer.register({
@@ -448,30 +377,18 @@ export function apply(ctx: Context): void {
         path: PRESENCE_PATH,
         handler: async (req, res) => {
           if (req.method !== 'POST') {
-            json(res, 405, { error: 'method not allowed; use POST' }, { allow: 'POST' })
+            sendJson(res, 405, { error: 'method not allowed; use POST' }, { allow: 'POST' })
             return
           }
           if (isCrossOrigin(headerMap(req.headers), req.headers.host)) {
-            json(res, 403, { error: 'cross-origin request rejected' })
+            sendJson(res, 403, { error: 'cross-origin request rejected' })
             return
           }
-          const raw = await readBody(req)
-          if (raw === null) {
-            json(res, 413, { error: 'request body too large' })
-            return
-          }
-          let body: unknown
-          try { body = JSON.parse(raw || '{}') } catch {
-            json(res, 400, { error: 'invalid JSON body' })
-            return
-          }
-          if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-            json(res, 400, { error: 'body must be a JSON object' })
-            return
-          }
-          const online = (body as { online?: unknown }).online !== false
+          const body = await readObjectBody(req, res)
+          if (body === null) return
+          const online = body.online !== false
           companionUntil = pokePresence(companionUntil, Date.now(), online)
-          json(res, 200, { online: companionOnline(companionUntil, Date.now()) }, { 'cache-control': 'no-store' })
+          sendJson(res, 200, { online: companionOnline(companionUntil, Date.now()) }, { 'cache-control': 'no-store' })
         },
       }),
       ctx.webServer.register({
@@ -479,10 +396,10 @@ export function apply(ctx: Context): void {
         path: SESSIONS_PATH,
         handler: async (req, res) => {
           if (req.method !== 'GET') {
-            json(res, 405, { error: 'method not allowed; use GET' }, { allow: 'GET' })
+            sendJson(res, 405, { error: 'method not allowed; use GET' }, { allow: 'GET' })
             return
           }
-          json(res, 200, sessionsSnapshot(), { 'cache-control': 'no-store' })
+          sendJson(res, 200, sessionsSnapshot(), { 'cache-control': 'no-store' })
         },
       }),
       ctx.webServer.register({
@@ -576,7 +493,7 @@ export function apply(ctx: Context): void {
     ]
     return () => {
       if (saveTimer !== null) clearTimeout(saveTimer)
-      saveState(state)
+      void store.save(state).catch(() => undefined)
       for (const dispose of disposers) dispose()
     }
   }, 'dsh-whale-girl: routes')

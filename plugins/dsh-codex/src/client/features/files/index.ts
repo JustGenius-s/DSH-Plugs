@@ -18,12 +18,23 @@ export function createFilesFeature(
 ): CodexFeature {
   return {
     id: 'files',
+    requires: ['sidePanels'],
     activate() {
       const store = ctx.sidePanels as SidePanelsStore
 
       // `multi`: every open is a NEW instance (tab). One form per instance —
       // switching form or opening a file opens another `files` tab.
-      const disposeDescriptor = ctx.sidePanels.describe('files', { icon: 'files', multi: true })
+      const disposeDescriptor = ctx.sidePanels.describe('files', {
+        icon: 'files',
+        multi: true,
+        caption: (instance, siblings, label) => {
+          const file = instance.state?.file
+          if (file) return file.slice(file.lastIndexOf('/') + 1)
+          if (siblings.length < 2) return label
+          const ordinal = siblings.findIndex(item => item.key === instance.key) + 1
+          return ordinal > 0 ? `${label} ${ordinal}` : label
+        },
+      })
 
       const open = (state: import('../side-panels/service').PanelNavState): void => {
         ctx.sidePanels.open('files', state)
