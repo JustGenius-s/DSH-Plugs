@@ -13,8 +13,9 @@ export default defineConfig({
   clean: false,
   platform: 'browser',
   // alwaysBundle inlines the shared UI package (never a runtime dep) beside
-  // the terminal/shiki stacks.
-  deps: { alwaysBundle: ['@just-genius/dsh-plugin-ui', /^@xterm\//, 'shiki', /^shiki\//, /^@shikijs\//] },
+  // the terminal/shiki stacks. markdown-it is a production dependency, which
+  // tsdown externalizes by default — so it must be inlined here too.
+  deps: { alwaysBundle: ['@just-genius/dsh-plugin-ui', /^@xterm\//, 'shiki', /^shiki\//, /^@shikijs\//, 'markdown-it', 'dompurify'] },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: 'window.__ModuleLoader__.load({ id: ' + JSON.stringify(id) + ', factory: (require) => {\nvar module = { exports: {} };\nvar exports = module.exports;',

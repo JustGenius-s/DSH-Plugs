@@ -30,6 +30,7 @@ import {
   highlightLines,
   type HighlightSpan,
 } from './highlight'
+import { renderMarkdown } from './markdown'
 
 /** Lines shown before a long file collapses behind an expand row. */
 const MAX_PREVIEW_LINES = 400
@@ -196,6 +197,24 @@ export function FileDiffView(props: {
         ) : null}
       </div>
     </div>
+  )
+}
+
+/**
+ * One markdown file rendered for preview. `renderMarkdown` is memoized so
+ * re-renders of the same mounted preview (e.g. a parent state change) don't
+ * re-parse the source; the toggle-back to preview re-parses once, which is
+ * cheap for typical documents. The container scrolls (no virtualization —
+ * markdown blocks have no fixed row height) and `.dsh-files-md-body` carries
+ * the prose styling.
+ */
+export function FileMarkdownView(props: { content: string }) {
+  const html = useMemo(() => renderMarkdown(props.content), [props.content])
+  return (
+    <div
+      className="dsh-files-md-body"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
 

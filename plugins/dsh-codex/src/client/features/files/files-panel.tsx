@@ -19,7 +19,8 @@ import {
 } from '../../../shared/git-graph'
 import type { PanelNavState } from '../side-panels/service'
 import { fileIconSvg, folderIconSvg } from './file-icons'
-import { FileCodeView, FileDiffView, type ViewLabels } from './file-views'
+import { FileCodeView, FileDiffView, FileMarkdownView, type ViewLabels } from './file-views'
+import { isMarkdownFile } from './markdown'
 import { ensureFilesStyles } from './styles'
 
 ensureFilesStyles()
@@ -512,11 +513,87 @@ function FilesPreview(props: {
   }
   return (
     <div className="dsh-files-preview">
+      <FilesTextPreview file={props.file} content={data.content} t={t} />
+    </div>
+  )
+}
+
+type TextView = 'preview' | 'source'
+
+/**
+ * One text file's contents. Markdown documents get a two-way toggle between
+ * the rendered preview and the raw source (VS Code's preview/editor split);
+ * every other text file is the single highlighted source view.
+ */
+function FilesTextPreview(props: {
+  file: string
+  content: string
+  t: (key: string) => string
+}) {
+  const { file, content, t } = props
+  const markdown = isMarkdownFile(file)
+  const [view, setView] = useState<TextView>(() => (markdown ? 'preview' : 'source'))
+  // A new file/instance (or a different file in the same instance) resets to
+  // the default view so the toggle never carries stale state across files.
+  useEffect(() => {
+    setView(markdown ? 'preview' : 'source')
+  }, [file, markdown])
+
+  if (!markdown) {
+    return (
       <FileCodeView
-        content={data.content}
-        lang={langHintOf(props.file)}
+        content={content}
+        lang={langHintOf(file)}
         labels={viewLabels(t)}
       />
+    )
+  }
+
+  return (
+    <div className="dsh-files-md">
+      <div className="dsh-files-md-bar">
+        <MarkdownToggle view={view} t={t} onSelect={setView} />
+      </div>
+      {view === 'preview' ? (
+        <FileMarkdownView content={content} />
+      ) : (
+        <FileCodeView
+          content={content}
+          lang={langHintOf(file)}
+          labels={viewLabels(t)}
+        />
+      )}
+    </div>
+  )
+}
+
+/** Segmented control switching a markdown file between preview and source. */
+function MarkdownToggle(props: {
+  view: TextView
+  t: (key: string) => string
+  onSelect: (view: TextView) => void
+}) {
+  const { view, t, onSelect } = props
+  return (
+    <div className="dsh-files-md-toggle" role="tablist" aria-label={t('files.markdownAria')}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === 'preview'}
+        className={view === 'preview' ? 'is-active' : ''}
+        onClick={() => onSelect('preview')}
+      >
+        {t('files.preview')}
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === 'source'}
+        className={view === 'source' ? 'is-active' : ''}
+        onClick={() => onSelect('source')}
+      >
+        {t('files.markdown')}
+      </button>
     </div>
   )
 }

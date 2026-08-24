@@ -488,3 +488,36 @@ export function highlightLines(
     })
   })
 }
+
+/**
+ * Render `code` to a full Shiki `<pre class="shiki">` block for a markdown
+ * preview fence, sharing the single highlighter and lang aliases used by
+ * `highlightLines` (one grammar/theme setup for the whole panel). Returns
+ * `undefined` when `lang` maps to no registered grammar, or when shiki errors
+ * on an edge grammar — the caller then lets markdown-it escape the block as
+ * plain text instead of breaking the whole preview.
+ *
+ * Dual-theme output: the `<pre>` carries the light/dark background values as
+ * `--shiki-dark-bg` and each token span carries a light `color` plus a
+ * `--shiki-dark` custom property; the markdown preview CSS flips to the dark
+ * value under `body[data-ds-dark-theme]`, matching the code/diff views.
+ */
+export function highlightToHtml(
+  code: string,
+  lang: string | undefined,
+): string | undefined {
+  const resolved =
+    lang === undefined || lang === ''
+      ? undefined
+      : LANG_ALIASES.get(lang.toLowerCase())
+  if (resolved === undefined) return undefined
+  try {
+    return highlighter().codeToHtml(code, {
+      lang: resolved,
+      themes: { light: 'light-plus', dark: 'dark-plus' },
+      cssVariablePrefix: '--shiki-',
+    })
+  } catch {
+    return undefined
+  }
+}

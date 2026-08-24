@@ -89,6 +89,65 @@ body[data-ds-dark-theme] .dsh-files-diff-row.is-add{color:#98c379;background:rgb
 body[data-ds-dark-theme] .dsh-files-diff-row.is-del{color:#e06c75;background:rgba(224,108,117,.12)}
 body[data-ds-dark-theme] .dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(152,195,121,.12),rgba(152,195,121,.12)),var(--dsw-specific-sidebar-fill)}
 body[data-ds-dark-theme] .dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(224,108,117,.12),rgba(224,108,117,.12)),var(--dsw-specific-sidebar-fill)}
+
+/* Markdown file: a two-way toggle between the rendered preview and the raw
+   source, above the pane. The toggle is a compact segmented control. */
+.dsh-files-md{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column}
+.dsh-files-md-bar{flex:none;display:flex;align-items:center;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l,rgba(128,128,128,.16))}
+.dsh-files-md-toggle{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.1))}
+.dsh-files-md-toggle button{display:inline-flex;align-items:center;height:24px;padding:0 10px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);font:inherit;font-size:12px;line-height:24px;cursor:pointer}
+.dsh-files-md-toggle button:hover{color:var(--dsw-alias-label-primary,#e6e6e8)}
+.dsh-files-md-toggle button.is-active{background:var(--dsw-alias-bg-overlay,#ffffff);color:var(--dsw-alias-label-primary,#e6e6e8);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+/* Rendered markdown pane — aligned to DSH's markdown stylesheet
+   (._markdown_1r4m5_5 for prose, .ydkMvW_code for code blocks and
+   ._tableScroll_1r4m5_174 for tables), so sizes, the DeepSeek link blue and
+   the code/table shapes match the conversation. */
+.dsh-files-md-body{flex:1;min-height:0;overflow:auto;padding:12px 20px 24px;min-width:0;overflow-wrap:anywhere;font-family:var(--dsw-font-family,Inter,sans-serif);font-size:16px;line-height:28px;color:var(--dsw-alias-label-primary,#e6e6e8)}
+.dsh-files-md-body>*:first-child,.dsh-files-md-body p:first-child{margin-top:0}
+.dsh-files-md-body>*:last-child,.dsh-files-md-body p:last-child{margin-bottom:0}
+.dsh-files-md-body strong{font-weight:600}
+.dsh-files-md-body h1,.dsh-files-md-body h2,.dsh-files-md-body h3,.dsh-files-md-body h4,.dsh-files-md-body h5,.dsh-files-md-body h6{font-family:var(--dsw-font-family,Inter,sans-serif);color:var(--dsw-alias-label-primary,#e6e6e8)}
+.dsh-files-md-body h1{font-size:24px;line-height:34px;font-weight:700;margin:32px 0 16px}
+.dsh-files-md-body h2{font-size:22px;line-height:32px;font-weight:700;margin:32px 0 16px}
+.dsh-files-md-body h3{font-size:20px;line-height:30px;font-weight:700;margin:32px 0 16px}
+.dsh-files-md-body h4{font-size:16px;line-height:28px;font-weight:600;margin:16px 0}
+.dsh-files-md-body h5,.dsh-files-md-body h6{font-size:16px;line-height:28px;font-weight:600;margin:16px 0}
+.dsh-files-md-body p{margin:16px 0}
+.dsh-files-md-body a{color:var(--dsw-alias-state-business-primary,#4176e6);text-decoration:none;border-left:3px solid rgb(255 255 255 / 0);border-right:3px solid rgb(255 255 255 / 0);border-top:2px solid rgb(255 255 255 / 0);border-bottom:2px solid rgb(255 255 255 / 0);margin-left:-3px;margin-right:-3px}
+.dsh-files-md-body a:hover,.dsh-files-md-body a:focus{outline:none;text-decoration:underline var(--dsw-alias-state-business-primary,#4176e6)}
+.dsh-files-md-body a:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-state-business-primary,#4176e6)}
+.dsh-files-md-body :where(ul,ol){margin:16px 0;padding-left:18px}
+.dsh-files-md-body li:not(:first-child){margin-top:6px}
+.dsh-files-md-body li>:where(ul,ol){margin-top:4px}
+.dsh-files-md-body li::marker{line-height:28px;color:var(--dsw-alias-label-secondary,#b0b0b5)}
+.dsh-files-md-body hr{display:block;border:none;height:1px;margin:32px 0;background:var(--dsw-alias-border-l2,rgba(128,128,128,.1))}
+.dsh-files-md-body blockquote{border-left:2px solid var(--dsw-alias-label-caption,#8b8b90);margin:16px 0 0;padding-left:14px}
+.dsh-files-md-body img,.dsh-files-md-body video{max-width:100%;height:auto;border-radius:3px}
+
+/* Inline code — DSH pill: markdown-inline-code background, monospace .875em. */
+.dsh-files-md-body :not(pre)>code{display:inline-flex;align-items:center;box-sizing:border-box;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:.875em!important;background-color:var(--dsw-alias-markdown-inline-code,rgba(128,128,128,.1));border-radius:6px;padding:0 5px}
+.dsh-files-md-body :where(h1,h2,h3,h4,h5,h6) code{font:inherit;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace)}
+
+/* Tables — DSH horizontal-rule style: header bottom rule + row rules, packed
+   cells, wide tables scroll horizontally inside the pane. */
+.dsh-files-md-body table{border-collapse:collapse;width:max-content;max-width:max-content}
+.dsh-files-md-body th{text-align:start;padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l3,rgba(128,128,128,.16));border-top:none;font-family:var(--dsw-font-family,Inter,sans-serif);font-size:15px;line-height:25px;font-weight:500;max-width:min(30vw,320px);min-width:100px}
+.dsh-files-md-body td{padding:10px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.1));font-family:var(--dsw-font-family,Inter,sans-serif);font-size:15px;line-height:25px;font-weight:400;max-width:min(30vw,320px);min-width:100px}
+.dsh-files-md-body th:first-child,.dsh-files-md-body td:first-child{padding-left:0}
+.dsh-files-md-body td:last-child{padding-right:0}
+.dsh-files-md-body table code{font-size:13px}
+
+/* Code blocks — DSH .ydkMvW_code: markdown-code-block background, 12px radius,
+   16px padding, app code font, 13px/22px, pre-wrap, no border. The Shiki inline
+   background is overridden so every block takes the app token; the dark block
+   re-declares the token (with a dark fallback) and flips the token colors. */
+.dsh-files-md-body pre{margin:16px 0;padding:16px;border-radius:12px;background-color:var(--dsw-alias-markdown-code-block,#f9fafb);color:var(--dsw-alias-label-primary,#e6e6e8);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:13px;line-height:22px;white-space:pre-wrap;word-break:break-word;overflow:auto}
+.dsh-files-md-body pre code{background:none;padding:0}
+.dsh-files-md-body pre.shiki{background-color:var(--dsw-alias-markdown-code-block,#f9fafb)!important}
+body[data-ds-dark-theme] .dsh-files-md-body pre{background-color:var(--dsw-alias-markdown-code-block,#1a1d24)!important}
+body[data-ds-dark-theme] .dsh-files-md-body pre.shiki{background-color:var(--dsw-alias-markdown-code-block,#1a1d24)!important;color:var(--shiki-dark)!important}
+body[data-ds-dark-theme] .dsh-files-md pre.shiki span{color:var(--shiki-dark)!important}
 `
 
 export function ensureFilesStyles(): void {
