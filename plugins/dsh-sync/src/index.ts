@@ -1,6 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@just-genius/dsh-plugin-runtime'
 import {
   AUTH_LOGOUT_PATH,
@@ -14,10 +16,11 @@ import {
 import { SyncRuntime } from './sync-runtime.ts'
 
 export const name = 'dsh-sync'
-export const inject = ['webServer', 'settings', 'pluginProfile'] as const
+export const inject = ['webServer', 'settings', 'pluginProfile', 'credentials', 'storageDomain'] as const
 
 export function apply(ctx: Context): void {
   const runtime = new SyncRuntime(ctx)
+  ctx.effect(() => () => { void runtime.close() }, 'dsh-sync: close domain')
   const routes = [
     [STATUS_PATH, runtime.status, 'status'],
     [CONFIG_PATH, runtime.config, 'config'],

@@ -1,11 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-storage-domain'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { defineDomain, type Domain } from '@deepseek-ai/dsh-storage-domain'
+import { z } from 'zod'
 
-export interface SyncState {
-  version: 1
+/** Non-secret sync metadata. The GitHub token lives in ctx.credentials. */
+export interface SyncMetadata {
   clientId: string
-  accessToken: string | null
   login: string | null
   avatarUrl: string | null
   gistId: string | null
@@ -13,104 +15,88 @@ export interface SyncState {
   lastSyncedHash: string | null
 }
 
-function dshHome(): string {
-  return process.env.DSH_HOME || join(homedir(), '.dsh')
+const metadataSchema = z.object({
+  clientId: z.string(),
+  login: z.string().nullable(),
+  avatarUrl: z.string().nullable(),
+  gistId: z.string().nullable(),
+  lastSyncedAt: z.string().nullable(),
+  lastSyncedHash: z.string().nullable(),
+})
+
+const EMPTY_METADATA: SyncMetadata = {
+  clientId: '',
+  login: null,
+  avatarUrl: null,
+  gistId: null,
+  lastSyncedAt: null,
+  lastSyncedHash: null,
 }
 
-export function syncRoot(): string {
-  return join(dshHome(), 'sync')
-}
+/** One singleton domain holding the non-secret sync state on ctx.storageDomain. */
+const syncDomainSpec = defineDomain({
+  name: 'sync',
+  version: 1,
+  global: {
+    schema: metadataSchema,
+    initial: EMPTY_METADATA,
+  },
+  tables: {},
+})
 
-function statePath(): string {
-  return join(syncRoot(), 'state.json')
-}
+type SyncDomain = Domain<typeof syncDomainSpec>
 
-function ensureDir(): void {
-  mkdirSync(syncRoot(), { recursive: true })
-}
+/**
+ * Credential reference under which the GitHub OAuth token is stored. The
+ * provider-managed writable source keeps the secret out of state.json; the
+ * `DSH_SYNC_` prefix keeps it from colliding with a real ambient
+ * `GITHUB_TOKEN`.
+ */
+const githubTokenRef = credentialRef('DSH_SYNC_GITHUB_TOKEN')
 
-function atomicWrite(file: string, body: string): void {
-  ensureDir()
-  const tmp = `${file}.tmp`
-  writeFileSync(tmp, body, 'utf8')
-  renameSync(tmp, file)
-}
+/**
+ * One sync store spanning the two official seams:
+ *
+ * - ctx.credentials holds the GitHub access token as a credential reference
+ *   (`DSH_SYNC_GITHUB_TOKEN`), so the secret never sits in a plaintext
+ *   JSON file. `resolve` re-reads it per operation and `unset` logs out.
+ * - ctx.storageDomain holds the non-secret metadata (client id, login,
+ *   gist id, last-sync facts) as a validated singleton on the storage hub.
+ */
+export class SyncStore {
+  private readonly domain: Promise<SyncDomain>
 
-function emptyState(): SyncState {
-  return {
-    version: 1,
-    clientId: '',
-    accessToken: null,
-    login: null,
-    avatarUrl: null,
-    gistId: null,
-    lastSyncedAt: null,
-    lastSyncedHash: null,
+  constructor(private readonly ctx: Context) {
+    this.domain = ctx.storageDomain.open(syncDomainSpec)
   }
-}
 
-export function loadState(): SyncState {
-  try {
-    const raw = JSON.parse(readFileSync(statePath(), 'utf8')) as Record<string, unknown>
-    const login = typeof raw.login === 'string' && raw.login !== '' ? raw.login : null
-    const storedAvatar = typeof raw.avatarUrl === 'string' && raw.avatarUrl !== '' ? raw.avatarUrl : null
-    return {
-      version: 1,
-      clientId: typeof raw.clientId === 'string' ? raw.clientId.trim() : '',
-      accessToken: typeof raw.accessToken === 'string' && raw.accessToken !== '' ? raw.accessToken : null,
-      login,
-      avatarUrl: storedAvatar ?? (login !== null ? `https://github.com/${login}.png` : null),
-      gistId: typeof raw.gistId === 'string' && raw.gistId !== '' ? raw.gistId : null,
-      lastSyncedAt: typeof raw.lastSyncedAt === 'string' ? raw.lastSyncedAt : null,
-      lastSyncedHash: typeof raw.lastSyncedHash === 'string' ? raw.lastSyncedHash : null,
-    }
-  } catch {
-    return emptyState()
+  /** Close the open domain (idempotent); the facility also closes on unmount. */
+  close(): Promise<void> {
+    return this.domain.then((domain) => domain.close())
   }
-}
 
-export function saveState(state: SyncState): void {
-  atomicWrite(statePath(), `${JSON.stringify(state, null, 2)}\n`)
-}
-
-export function patchState(patch: Partial<SyncState>): SyncState {
-  const prev = loadState()
-  const next: SyncState = { ...prev, version: 1 }
-  for (const [key, value] of Object.entries(patch) as Array<[keyof SyncState, SyncState[keyof SyncState]]>) {
-    if (value !== undefined) next[key] = value as never
+  async metadata(): Promise<SyncMetadata> {
+    const domain = await this.domain
+    return domain.global.get()
   }
-  saveState(next)
-  return next
-}
 
-export function clearAuth(): SyncState {
-  return patchState({
-    accessToken: null,
-    login: null,
-    avatarUrl: null,
-  })
-}
-
-export function readTextIfExists(file: string): string | null {
-  try {
-    if (!existsSync(file)) return null
-    return readFileSync(file, 'utf8')
-  } catch {
-    return null
+  async patchMetadata(patch: Partial<SyncMetadata>): Promise<SyncMetadata> {
+    const domain = await this.domain
+    const next: SyncMetadata = { ...domain.global.get(), ...patch }
+    await domain.global.set(next)
+    return next
   }
-}
 
-export function writeText(file: string, body: string): void {
-  mkdirSync(dirname(file), { recursive: true })
-  const tmp = `${file}.tmp`
-  writeFileSync(tmp, body, 'utf8')
-  renameSync(tmp, file)
-}
+  async getToken(): Promise<string | null> {
+    const resolved = await this.ctx.credentials.resolve(githubTokenRef)
+    return resolved?.value ?? null
+  }
 
-export function removeFile(file: string): void {
-  try {
-    unlinkSync(file)
-  } catch {
-    // ignore
+  async setToken(accessToken: string): Promise<void> {
+    await this.ctx.credentials.set(githubTokenRef, accessToken)
+  }
+
+  async clearToken(): Promise<void> {
+    await this.ctx.credentials.unset(githubTokenRef)
   }
 }

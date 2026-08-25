@@ -7,15 +7,22 @@ import { createSecretGist, getGist, resolveGistId, updateGist } from './github-g
 import { applySettings, collectPayload, contentHash, localContentUpdatedAt, parsePayload, serializePayload } from './payload.ts'
 import { applyPlugins, collectPlugins } from './profile-sync.ts'
 import type { PullRequest, PullResult, PushResult, SyncConfigPatch, SyncStatus } from './shared.ts'
-import { clearAuth, loadState, patchState } from './sync-store.ts'
+import { SyncStore, type SyncMetadata } from './sync-store.ts'
 
 export class SyncRuntime {
   private settingsChangedAt: number | null = null
+  private readonly store: SyncStore
 
   constructor(private readonly ctx: Context) {
+    this.store = new SyncStore(ctx)
     ctx.on('settings/document-updated', () => {
       this.settingsChangedAt = Date.now()
     })
+  }
+
+  /** Close the storage-domain unit (idempotent). */
+  close(): Promise<void> {
+    return this.store.close()
   }
 
   status = (req: IncomingMessage, res: ServerResponse): void => {
@@ -27,7 +34,7 @@ export class SyncRuntime {
       const body = await readJsonBody(req)
       if (!isRecord(body)) throw new HttpInputError('invalid body')
       const patch = body as SyncConfigPatch
-      patchState({
+      await this.store.patchMetadata({
         clientId: typeof patch.clientId === 'string' ? patch.clientId.trim() : undefined,
         gistId: patch.gistId === null
           ? null
@@ -38,7 +45,10 @@ export class SyncRuntime {
   }
 
   authStart = (req: IncomingMessage, res: ServerResponse): void => {
-    this.run(req, res, 'POST', async () => startDeviceFlow(loadState().clientId))
+    this.run(req, res, 'POST', async () => {
+      const metadata = await this.store.metadata()
+      return startDeviceFlow(metadata.clientId)
+    })
   }
 
   authPoll = (req: IncomingMessage, res: ServerResponse): void => {
@@ -46,34 +56,36 @@ export class SyncRuntime {
       const body = await readJsonBody(req)
       const deviceCode = isRecord(body) && typeof body.deviceCode === 'string' ? body.deviceCode : ''
       if (deviceCode.trim() === '') throw new HttpInputError('deviceCode is required')
-      const state = loadState()
-      const result = await pollDeviceFlow(state.clientId, deviceCode)
+      const metadata = await this.store.metadata()
+      const result = await pollDeviceFlow(metadata.clientId, deviceCode)
       if (result.status !== 'success' || !result.accessToken) return result
       const user = await fetchGithubUser(result.accessToken)
-      patchState({ accessToken: result.accessToken, login: user.login, avatarUrl: user.avatarUrl })
+      await this.store.setToken(result.accessToken)
+      await this.store.patchMetadata({ login: user.login, avatarUrl: user.avatarUrl })
       return { status: 'success', login: user.login, avatarUrl: user.avatarUrl }
     })
   }
 
   authLogout = (req: IncomingMessage, res: ServerResponse): void => {
     this.run(req, res, 'POST', async () => {
-      clearAuth()
+      await this.store.clearToken()
+      await this.store.patchMetadata({ login: null, avatarUrl: null })
       return this.buildStatus()
     })
   }
 
   push = (req: IncomingMessage, res: ServerResponse): void => {
     this.run(req, res, 'POST', async () => {
-      const state = this.requireAuth()
+      const { token, metadata } = await this.requireAuth()
       const payload = collectPayload(this.ctx.settings, this.ctx.pluginProfile)
       const { skipped } = collectPlugins(this.ctx.pluginProfile)
       const serialized = serializePayload(payload)
-      let gistId = await resolveGistId(state.accessToken!, state.gistId)
+      let gistId = await resolveGistId(token, metadata.gistId)
       const gist = gistId === null
-        ? await createSecretGist(state.accessToken!, serialized)
-        : await updateGist(state.accessToken!, gistId, serialized)
+        ? await createSecretGist(token, serialized)
+        : await updateGist(token, gistId, serialized)
       gistId = gist.id
-      patchState({ gistId, lastSyncedAt: payload.updatedAt, lastSyncedHash: contentHash(payload) })
+      await this.store.patchMetadata({ gistId, lastSyncedAt: payload.updatedAt, lastSyncedHash: contentHash(payload) })
       const result: PushResult = {
         gistId,
         gistUrl: gist.htmlUrl,
@@ -89,8 +101,8 @@ export class SyncRuntime {
     this.run(req, res, 'POST', async () => {
       const raw = await readJsonBody(req)
       const body: PullRequest = isRecord(raw) ? raw : {}
-      const state = this.requireAuth()
-      const gistId = await resolveGistId(state.accessToken!, state.gistId)
+      const { token, metadata } = await this.requireAuth()
+      const gistId = await resolveGistId(token, metadata.gistId)
       const localUpdatedAt = localContentUpdatedAt(this.ctx.pluginProfile, this.settingsChangedAt)
       if (gistId === null) {
         return {
@@ -102,14 +114,14 @@ export class SyncRuntime {
         } satisfies PullResult
       }
 
-      const gist = await getGist(state.accessToken!, gistId)
+      const gist = await getGist(token, gistId)
       const payload = parsePayload(gist.content)
       const cloudHash = contentHash(payload)
       const localHash = contentHash(collectPayload(this.ctx.settings, this.ctx.pluginProfile))
-      const cloudNewer = cloudHash !== state.lastSyncedHash
-      const localDirty = state.lastSyncedHash !== null && localHash !== state.lastSyncedHash
+      const cloudNewer = cloudHash !== metadata.lastSyncedHash
+      const localDirty = metadata.lastSyncedHash !== null && localHash !== metadata.lastSyncedHash
       if (cloudNewer && localDirty && body.force !== true) {
-        patchState({ gistId })
+        await this.store.patchMetadata({ gistId })
         return {
           applied: false,
           conflict: true,
@@ -123,7 +135,7 @@ export class SyncRuntime {
       const pluginResult = payload.plugins
         ? await applyPlugins(this.ctx.pluginProfile, payload.plugins)
         : { added: [], removed: [], failed: [], needsRestart: false }
-      patchState({ gistId, lastSyncedAt: payload.updatedAt, lastSyncedHash: cloudHash })
+      await this.store.patchMetadata({ gistId, lastSyncedAt: payload.updatedAt, lastSyncedHash: cloudHash })
 
       const parts = [`settings ${settingsResult.applied.length} applied`]
       if (settingsResult.skipped.length > 0) {
@@ -150,28 +162,30 @@ export class SyncRuntime {
     })
   }
 
-  private buildStatus(): SyncStatus {
-    const state = loadState()
-    const gistId = state.gistId
+  private async buildStatus(): Promise<SyncStatus> {
+    const metadata = await this.store.metadata()
+    const token = await this.store.getToken()
+    const gistId = metadata.gistId
     const { snapshot } = collectPlugins(this.ctx.pluginProfile)
     return {
-      clientId: state.clientId,
-      loggedIn: state.accessToken !== null,
-      login: state.login,
-      avatarUrl: state.avatarUrl ?? (state.login ? `https://github.com/${encodeURIComponent(state.login)}.png?size=64` : null),
+      clientId: metadata.clientId,
+      loggedIn: token !== null,
+      login: metadata.login,
+      avatarUrl: metadata.avatarUrl ?? (metadata.login ? `https://github.com/${encodeURIComponent(metadata.login)}.png?size=64` : null),
       gistId,
       gistUrl: gistId ? `https://gist.github.com/${gistId}` : null,
-      lastSyncedAt: state.lastSyncedAt,
+      lastSyncedAt: metadata.lastSyncedAt,
       localUpdatedAt: localContentUpdatedAt(this.ctx.pluginProfile, this.settingsChangedAt),
       pluginCount: Object.keys(snapshot.dependencies).length,
     }
   }
 
-  private requireAuth(): ReturnType<typeof loadState> {
-    const state = loadState()
-    if (state.clientId.trim() === '') throw new HttpInputError('Set a GitHub OAuth Client ID first')
-    if (state.accessToken === null) throw new HttpInputError('Not logged in to GitHub')
-    return state
+  private async requireAuth(): Promise<{ token: string; metadata: SyncMetadata }> {
+    const metadata = await this.store.metadata()
+    const token = await this.store.getToken()
+    if (metadata.clientId.trim() === '') throw new HttpInputError('Set a GitHub OAuth Client ID first')
+    if (token === null) throw new HttpInputError('Not logged in to GitHub')
+    return { token, metadata }
   }
 
   private run(
