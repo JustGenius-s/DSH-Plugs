@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import Schema from '@deepseek-ai/schemastery'
@@ -14,7 +15,7 @@ import { createDshCodexGitGraphServer } from './host/git-graph/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
-export const inject = ['subprocess', 'webServer', 'settings', 'llm', 'agentDefaultModel'] as const
+export const inject = ['subprocess', 'webServer', 'settings', 'llm', 'agentDefaultModel', 'fs'] as const
 
 /** Host-side schema for the one durable Codex configuration namespace. */
 export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({

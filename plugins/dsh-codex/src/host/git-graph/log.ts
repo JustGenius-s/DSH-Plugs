@@ -1,3 +1,4 @@
+import type { Context } from '@deepseek-ai/cordis'
 import { execGit } from './git-exec'
 import {
   DEFAULT_GRAPH_LIMIT,
@@ -36,20 +37,21 @@ export interface GraphLog {
 }
 
 export async function loadGraphLog(
+  ctx: Context,
   cwd: string,
   skip: number,
   limit: number,
   requested?: readonly string[],
 ): Promise<GraphLog> {
-  await assertGitRepo(cwd)
+  await assertGitRepo(ctx, cwd)
   const [head, branch] = await Promise.all([
-    gitText(cwd, ['rev-parse', 'HEAD'], GIT_TIMEOUT_MS).catch(() => ''),
-    gitText(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], GIT_TIMEOUT_MS)
+    gitText(ctx, cwd, ['rev-parse', 'HEAD'], GIT_TIMEOUT_MS).catch(() => ''),
+    gitText(ctx, cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], GIT_TIMEOUT_MS)
       .catch(() => ''),
   ])
-  const refs = await listScopeRefs(cwd, branch)
+  const refs = await listScopeRefs(ctx, cwd, branch)
   const scope = resolveScope(requested, refs, branch)
-  const rows = await readLog(cwd, skip, limit + 1, scope)
+  const rows = await readLog(ctx, cwd, skip, limit + 1, scope)
   const hasMore = rows.length > limit
   if (hasMore) rows.pop()
   return {
@@ -62,18 +64,20 @@ export async function loadGraphLog(
   }
 }
 
-export async function loadCommitBody(cwd: string, sha: string): Promise<string> {
-  await assertGitRepo(cwd)
+export async function loadCommitBody(ctx: Context, cwd: string, sha: string): Promise<string> {
+  await assertGitRepo(ctx, cwd)
   return gitText(
+    ctx,
     cwd,
     ['show', '--stat', '--format=%B', '--no-color', sha, '--'],
     SHOW_TIMEOUT_MS,
   )
 }
 
-async function assertGitRepo(cwd: string): Promise<void> {
+async function assertGitRepo(ctx: Context, cwd: string): Promise<void> {
   try {
     const inside = await gitText(
+      ctx,
       cwd,
       ['rev-parse', '--is-inside-work-tree'],
       GIT_TIMEOUT_MS,
@@ -89,10 +93,11 @@ async function assertGitRepo(cwd: string): Promise<void> {
 }
 
 async function listScopeRefs(
+  ctx: Context,
   cwd: string,
   currentBranch: string,
 ): Promise<GitGraphScopeRef[]> {
-  const stdout = await gitText(cwd, [
+  const stdout = await gitText(ctx, cwd, [
     'for-each-ref',
     `--format=%(refname)${FIELD}%(refname:short)${FIELD}%(HEAD)`,
     'refs/heads',
@@ -181,6 +186,7 @@ function isSafeRefArg(value: string): boolean {
 }
 
 async function readLog(
+  ctx: Context,
   cwd: string,
   skip: number,
   limit: number,
@@ -197,7 +203,7 @@ async function readLog(
     ...(scope.all ? [] : scope.gitArgs),
     '--',
   ]
-  const stdout = await gitText(cwd, args, GIT_TIMEOUT_MS)
+  const stdout = await gitText(ctx, cwd, args, GIT_TIMEOUT_MS)
   if (stdout.length === 0) return []
   const rows: GitGraphRow[] = []
   for (const line of stdout.split('\n')) {
@@ -281,11 +287,12 @@ function shortenRef(ref: string): string {
 }
 
 async function gitText(
+  ctx: Context,
   cwd: string,
   args: string[],
   timeout: number,
 ): Promise<string> {
-  const { stdout } = await execGit(cwd, args, timeout, MAX_BUFFER)
+  const { stdout } = await execGit(ctx, cwd, args, timeout, MAX_BUFFER)
   return stdout.replace(/\n+$/, '')
 }
 

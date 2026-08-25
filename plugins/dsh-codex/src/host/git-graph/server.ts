@@ -41,37 +41,37 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
   const disposeGraph = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_PATH,
-    handler: handleGraph,
+    handler: (req, res) => handleGraph(ctx, req, res),
   })
   const disposeCommit = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_COMMIT_PATH,
-    handler: handleCommit,
+    handler: (req, res) => handleCommit(ctx, req, res),
   })
   const disposeAction = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_ACTION_PATH,
-    handler: handleAction,
+    handler: (req, res) => handleAction(ctx, req, res),
   })
   const disposeFiles = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_FILES_PATH,
-    handler: handleFiles,
+    handler: (req, res) => handleFiles(ctx, req, res),
   })
   const disposeTree = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_TREE_PATH,
-    handler: handleTree,
+    handler: (req, res) => handleTree(ctx, req, res),
   })
   const disposeFile = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_FILE_PATH,
-    handler: handleFile,
+    handler: (req, res) => handleFile(ctx, req, res),
   })
   const disposeDiff = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_DIFF_PATH,
-    handler: handleDiff,
+    handler: (req, res) => handleDiff(ctx, req, res),
   })
   const disposeMessage = ctx.webServer.register({
     kind: 'exact',
@@ -81,7 +81,7 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
   const disposeWatch = ctx.webServer.register({
     kind: 'exact',
     path: GIT_GRAPH_WATCH_PATH,
-    handler: handleWatchRoute,
+    handler: (req, res) => handleWatchRoute(ctx, req, res),
   })
   return {
     dispose() {
@@ -98,7 +98,7 @@ export function createDshCodexGitGraphServer(ctx: Context): DshCodexGitGraphServ
   }
 }
 
-async function handleWatchRoute(req: IncomingMessage, res: ServerResponse) {
+async function handleWatchRoute(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -111,13 +111,13 @@ async function handleWatchRoute(req: IncomingMessage, res: ServerResponse) {
   }
   try {
     // Keeps the response open; the stream ends when the client disconnects.
-    await handleWatch(req, res, cwd)
+    await handleWatch(ctx, req, res, cwd)
   } catch (error) {
     writeGitError(res, error)
   }
 }
 
-async function handleGraph(req: IncomingMessage, res: ServerResponse) {
+async function handleGraph(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -136,6 +136,7 @@ async function handleGraph(req: IncomingMessage, res: ServerResponse) {
   const requested = url.searchParams.getAll('ref').filter((value) => value.length > 0)
   try {
     const log = await loadGraphLog(
+      ctx,
       cwd,
       skip,
       limit,
@@ -148,7 +149,7 @@ async function handleGraph(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-async function handleCommit(req: IncomingMessage, res: ServerResponse) {
+async function handleCommit(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -165,7 +166,7 @@ async function handleCommit(req: IncomingMessage, res: ServerResponse) {
     return
   }
   try {
-    const body = await loadCommitBody(cwd, sha)
+    const body = await loadCommitBody(ctx, cwd, sha)
     const value: GitGraphCommitResponse = { ok: true, sha, body }
     json(res, 200, value)
   } catch (error) {
@@ -173,7 +174,7 @@ async function handleCommit(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-async function handleAction(req: IncomingMessage, res: ServerResponse) {
+async function handleAction(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'POST') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -191,7 +192,7 @@ async function handleAction(req: IncomingMessage, res: ServerResponse) {
     return
   }
   try {
-    const message = await runGraphAction(request)
+    const message = await runGraphAction(ctx, request)
     const value: GitGraphActionResponse = {
       ok: true,
       action: request.action,
@@ -204,7 +205,7 @@ async function handleAction(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-async function handleFiles(req: IncomingMessage, res: ServerResponse) {
+async function handleFiles(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -221,7 +222,7 @@ async function handleFiles(req: IncomingMessage, res: ServerResponse) {
     return
   }
   try {
-    const files = await loadChangeFiles(cwd, sha === '' ? undefined : sha)
+    const files = await loadChangeFiles(ctx, cwd, sha === '' ? undefined : sha)
     const value: GitGraphFilesResponse = { ok: true, cwd, files }
     json(res, 200, value)
   } catch (error) {
@@ -229,7 +230,7 @@ async function handleFiles(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-async function handleTree(req: IncomingMessage, res: ServerResponse) {
+async function handleTree(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -248,8 +249,8 @@ async function handleTree(req: IncomingMessage, res: ServerResponse) {
   try {
     const options = { showIgnored }
     const entries = query.trim().length > 0
-      ? await searchTree(cwd, query, options)
-      : await loadTree(cwd, path, options)
+      ? await searchTree(ctx, cwd, query, options)
+      : await loadTree(ctx, cwd, path, options)
     const value: GitGraphTreeResponse = { ok: true, cwd, path, entries }
     json(res, 200, value)
   } catch (error) {
@@ -257,7 +258,7 @@ async function handleTree(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-async function handleFile(req: IncomingMessage, res: ServerResponse) {
+async function handleFile(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -279,7 +280,7 @@ async function handleFile(req: IncomingMessage, res: ServerResponse) {
     return
   }
   try {
-    const loaded = await loadFile(cwd, path, sha === '' ? undefined : sha)
+    const loaded = await loadFile(ctx, cwd, path, sha === '' ? undefined : sha)
     const value: GitGraphFileResponse = { ok: true, cwd, path, ...loaded }
     json(res, 200, value)
   } catch (error) {
@@ -287,7 +288,7 @@ async function handleFile(req: IncomingMessage, res: ServerResponse) {
   }
 }
 
-async function handleDiff(req: IncomingMessage, res: ServerResponse) {
+async function handleDiff(ctx: Context, req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     json(res, 405, fail('bad-request', 'method not allowed'))
     return
@@ -309,7 +310,7 @@ async function handleDiff(req: IncomingMessage, res: ServerResponse) {
     return
   }
   try {
-    const diff = await loadFileDiff(cwd, path, sha === '' ? undefined : sha)
+    const diff = await loadFileDiff(ctx, cwd, path, sha === '' ? undefined : sha)
     const value: GitGraphDiffResponse = {
       ok: true,
       cwd,

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { Context } from '@deepseek-ai/cordis'
 import { execGit } from './git-exec'
 
 const GIT_TIMEOUT_MS = 5_000
@@ -15,19 +16,24 @@ const POLL_RELAXED_MS = 15_000
 const POLL_FALLBACK_MS = 3_000
 
 /**
- * SSE handler for the watch route: streams one `change` event whenever the
- * repository state moves — worktree edits, staging, commits, checkouts,
- * fetches. fs.watch covers the git dir (index/HEAD/refs) and the working
- * tree; a slow fingerprint poll (`git status` + HEAD) backstops missed
- * events and platforms without recursive fs.watch. The response stays open
- * until the client disconnects.
+ * SSE handler for the watch route: streams one change event whenever the
+ * repository state moves (worktree edits, staging, commits, checkouts,
+ * fetches). fs.watch covers the git dir (index/HEAD/refs) and the working
+ * tree; a slow fingerprint poll (git status + HEAD) backstops missed events
+ * and platforms without recursive fs.watch. The response stays open until the
+ * client disconnects.
+ *
+ * The filesystem watch stays on node:fs — the ctx.fs seam exposes read/list/
+ * write primitives, not a directory watch, so this remains a host-local
+ * concern.
  */
 export async function handleWatch(
+  ctx: Context,
   req: IncomingMessage,
   res: ServerResponse,
   cwd: string,
 ): Promise<void> {
-  const dirs = await resolveGitDirs(cwd)
+  const dirs = await resolveGitDirs(ctx, cwd)
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-store',
@@ -70,7 +76,7 @@ export async function handleWatch(
     if (closed || polling) return
     polling = true
     try {
-      const next = await fingerprint(cwd)
+      const next = await fingerprint(ctx, cwd)
       if (lastFingerprint !== '' && next !== lastFingerprint) schedule()
       lastFingerprint = next
     } catch {
@@ -110,7 +116,7 @@ interface GitDirs {
 /**
  * The directories worth watching. The git dir sees staging and checkout
  * writes; refs/ sees branch and tag movement; the worktree root sees file
- * edits. `refs` is watched recursively where the platform allows.
+ * edits. refs is watched recursively where the platform allows.
  */
 function watchTargets(
   cwd: string,
@@ -128,11 +134,11 @@ function watchTargets(
   return targets
 }
 
-async function resolveGitDirs(cwd: string): Promise<GitDirs> {
+async function resolveGitDirs(ctx: Context, cwd: string): Promise<GitDirs> {
   try {
     const [gitDir, commonDir] = await Promise.all([
-      gitText(cwd, ['rev-parse', '--absolute-git-dir']),
-      gitText(cwd, ['rev-parse', '--git-common-dir']),
+      gitText(ctx, cwd, ['rev-parse', '--absolute-git-dir']),
+      gitText(ctx, cwd, ['rev-parse', '--git-common-dir']),
     ])
     return {
       gitDir,
@@ -148,15 +154,15 @@ async function resolveGitDirs(cwd: string): Promise<GitDirs> {
 }
 
 /** Hash of the worktree status plus HEAD identity and position. */
-async function fingerprint(cwd: string): Promise<string> {
+async function fingerprint(ctx: Context, cwd: string): Promise<string> {
   const [status, head] = await Promise.all([
-    gitText(cwd, ['status', '--porcelain', '-z', '-uall']),
-    gitText(cwd, ['rev-parse', 'HEAD', '--abbrev-ref', 'HEAD']).catch(() => ''),
+    gitText(ctx, cwd, ['status', '--porcelain', '-z', '-uall']),
+    gitText(ctx, cwd, ['rev-parse', 'HEAD', '--abbrev-ref', 'HEAD']).catch(() => ''),
   ])
   return createHash('sha1').update(status).update('\0').update(head).digest('hex')
 }
 
-async function gitText(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await execGit(cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
+async function gitText(ctx: Context, cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execGit(ctx, cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
   return stdout.replace(/\n+$/, '')
 }

@@ -17,11 +17,11 @@ const SYSTEM_PROMPT = [
 ].join(' ')
 
 /**
- * Generate a commit message for the working tree of `cwd` with the harness's
+ * Generate a commit message for the working tree of cwd with the harness's
  * default model. Staged changes are summarized when present, otherwise every
  * unstaged change plus the untracked file list (VSCode's "commit all" scope).
  *
- * `signal` lets the HTTP handler abort when the client disconnects (panel
+ * signal lets the HTTP handler abort when the client disconnects (panel
  * switch / navigation) so a stuck stream does not keep the model busy.
  */
 export async function generateCommitMessage(
@@ -32,7 +32,7 @@ export async function generateCommitMessage(
   if (signal?.aborted === true) {
     throw new Error('aborted')
   }
-  const diff = await collectDiff(cwd)
+  const diff = await collectDiff(ctx, cwd)
   if (diff.length === 0) {
     throw badRequest('no changes to summarize')
   }
@@ -42,7 +42,7 @@ export async function generateCommitMessage(
     throw new Error('no model is configured')
   }
   const selection = defaultModel.currentSelection()
-  const subjects = await recentSubjects(cwd)
+  const subjects = await recentSubjects(ctx, cwd)
   const prompt = [
     subjects.length === 0 ? '' : `Recent commit subjects:\n${subjects.join('\n')}\n`,
     `Diff:\n${diff}`,
@@ -84,21 +84,21 @@ async function collectText(stream: AsyncIterable<StreamChunk>): Promise<string> 
       throw new Error(chunk.reason.failure.message)
     }
   }
-  const message = text.trim().replace(/^```[a-z]*\n?|\n?```$/g, '').trim()
-  if (message.length === 0) {
+  const result = text.trim().replace(/^```[a-z]*\n?|\n?```$/g, '').trim()
+  if (result.length === 0) {
     throw new Error('the model returned an empty message')
   }
-  return message
+  return result
 }
 
 /** Staged diff when present, else the worktree diff plus untracked names. */
-async function collectDiff(cwd: string): Promise<string> {
-  const staged = await gitDiff(cwd, ['diff', '--cached', '--no-color', '--no-ext-diff'])
+async function collectDiff(ctx: Context, cwd: string): Promise<string> {
+  const staged = await gitDiff(ctx, cwd, ['diff', '--cached', '--no-color', '--no-ext-diff'])
   if (staged.length > 0) return cap(staged)
   const parts: string[] = []
-  const worktree = await gitDiff(cwd, ['diff', '--no-color', '--no-ext-diff'])
+  const worktree = await gitDiff(ctx, cwd, ['diff', '--no-color', '--no-ext-diff'])
   if (worktree.length > 0) parts.push(worktree)
-  const untracked = await gitDiff(cwd, ['ls-files', '--others', '--exclude-standard'])
+  const untracked = await gitDiff(ctx, cwd, ['ls-files', '--others', '--exclude-standard'])
   if (untracked.length > 0) {
     parts.push(`Untracked files:\n${untracked}`)
   }
@@ -111,15 +111,15 @@ function cap(diff: string): string {
 }
 
 /** Recent commit subjects, for style matching; empty on an unborn HEAD. */
-async function recentSubjects(cwd: string): Promise<string[]> {
-  const out = await gitDiff(cwd, ['log', '-5', '--format=%s'])
+async function recentSubjects(ctx: Context, cwd: string): Promise<string[]> {
+  const out = await gitDiff(ctx, cwd, ['log', '-5', '--format=%s'])
   return out.split('\n').map((line) => line.trim()).filter((line) => line.length > 0)
 }
 
 /** Run git, returning trimmed stdout; failures yield an empty string. */
-async function gitDiff(cwd: string, args: string[]): Promise<string> {
+async function gitDiff(ctx: Context, cwd: string, args: string[]): Promise<string> {
   try {
-    const { stdout } = await execGit(cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
+    const { stdout } = await execGit(ctx, cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
     return stdout.trim()
   } catch {
     return ''

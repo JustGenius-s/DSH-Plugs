@@ -1,8 +1,6 @@
-import { execFile, spawn } from 'node:child_process'
-import { readdir, stat } from 'node:fs/promises'
-import { promisify } from 'node:util'
-import { isAbsolute, join, posix, relative, resolve } from 'node:path'
-import { execGit } from './git-exec'
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-fs'
+import { execGit, runGitBuffer, runGitWithStdin } from './git-exec'
 import type {
   GitChangeFile,
   GitChangeStatus,
@@ -10,7 +8,6 @@ import type {
   GitTreeEntry,
 } from '../../shared/git-graph'
 
-const execFileAsync = promisify(execFile)
 const GIT_TIMEOUT_MS = 8_000
 const MAX_BUFFER = 32 * 1024 * 1024
 const FIELD = '\x1f'
@@ -26,36 +23,40 @@ const STATUS_TO_CHANGE: Record<string, GitChangeStatus> = {
 }
 
 /**
- * Files changed by a commit, or in the working tree when `sha` is absent.
+ * Files changed by a commit, or in the working tree when sha is absent.
  *
- * Commit mode: `git diff-tree --no-commit-id --name-status -z -r <sha>`.
- * Working-tree mode: `git status --porcelain -z` (renames/copies follow the
- * `X\told -> new` shape of porcelain v1 with -z). Insertion/deletion counts
- * are read with `--numstat` in both modes.
+ * Commit mode: git diff-tree --no-commit-id --name-status -z -r sha.
+ * Working-tree mode: git status --porcelain -z (renames/copies follow the
+ * X[tab]old -> new shape of porcelain v1 with -z). Insertion/deletion counts
+ * are read with --numstat in both modes.
  */
 export async function loadChangeFiles(
+  ctx: Context,
   cwd: string,
   sha?: string,
 ): Promise<GitChangeFile[]> {
-  await assertGitRepo(cwd)
+  await assertGitRepo(ctx, cwd)
   if (sha !== undefined) {
-    // A merge commit diffs against its FIRST parent — the branch the merge
-    // landed on. Bare `diff-tree <merge>` prints nothing at all, and
-    // `-m --first-parent` still splits the output per parent, so the first
-    // parent is resolved explicitly and the two-tree form is used. A root
-    // commit has no parent and keeps the single-commit `--root` form.
+    // A merge commit diffs against its FIRST parent, the branch the merge
+    // landed on. Bare diff-tree merge prints nothing, and -m --first-parent
+    // still splits the output per parent, so the first parent is resolved
+    // explicitly and the two-tree form is used. A root commit has no parent
+    // and keeps the single-commit --root form.
     const firstParent = await gitText(
+      ctx,
       cwd,
       ['rev-parse', '--verify', '--quiet', sha + '^1'],
       GIT_TIMEOUT_MS,
     ).catch(() => '')
     const trees = firstParent === '' ? ['--root', sha] : [firstParent, sha]
     const nameStatus = await gitText(
+      ctx,
       cwd,
       ['diff-tree', '--no-commit-id', '--name-status', '-z', '-r', '-M', ...trees, '--'],
       GIT_TIMEOUT_MS,
     )
     const numstat = await gitText(
+      ctx,
       cwd,
       ['diff-tree', '--no-commit-id', '--numstat', '-r', '-M', ...trees, '--'],
       GIT_TIMEOUT_MS,
@@ -73,6 +74,7 @@ export async function loadChangeFiles(
   }
 
   const porcelain = await gitText(
+    ctx,
     cwd,
     ['status', '--porcelain', '-z', '-uall'],
     GIT_TIMEOUT_MS,
@@ -83,8 +85,8 @@ export async function loadChangeFiles(
   // Per-side +/- counts: staged entries read the index diff, unstaged ones
   // the worktree-vs-index diff (untracked files get no counts).
   const [cachedNumstat, worktreeNumstat] = await Promise.all([
-    gitText(cwd, ['diff', '--cached', '--numstat', '--'], GIT_TIMEOUT_MS).catch(() => ''),
-    gitText(cwd, ['diff', '--numstat', '--'], GIT_TIMEOUT_MS).catch(() => ''),
+    gitText(ctx, cwd, ['diff', '--cached', '--numstat', '--'], GIT_TIMEOUT_MS).catch(() => ''),
+    gitText(ctx, cwd, ['diff', '--numstat', '--'], GIT_TIMEOUT_MS).catch(() => ''),
   ])
   const cachedCounts = parseNumstat(cachedNumstat)
   const worktreeCounts = parseNumstat(worktreeNumstat)
@@ -98,80 +100,70 @@ export async function loadChangeFiles(
   return files
 }
 
-/** Cap on explorer search hits (matches the client `MAX_SEARCH_ROWS`). */
+/** Cap on explorer search hits (matches the client MAX_SEARCH_ROWS). */
 const TREE_SEARCH_LIMIT = 200
-/** Safety cap so a rare query cannot walk an entire `node_modules` tree. */
+/** Safety cap so a rare query cannot walk an entire node_modules tree. */
 const TREE_SEARCH_MAX_DIRS = 2_500
 
 export interface LoadTreeOptions {
-  /** When false, drop paths matched by `.gitignore` / exclude rules. Default true. */
+  /** When false, drop paths matched by .gitignore / exclude rules. Default true. */
   showIgnored?: boolean
 }
 
 /**
  * One directory of the working-tree browser (VS Code Explorer style).
  *
- * Uses the real filesystem so gitignored paths (`node_modules`, build
- * outputs, …) can appear. `.git` is the only name always skipped. `path`
- * is the repo-relative directory to list (`''` = workspace root). Children
- * are not recursed — the client loads each folder when the user expands it.
+ * Uses the filesystem seam (ctx.fs) so gitignored paths (node_modules, build
+ * outputs, etc.) can appear. .git is the only name always skipped. path is the
+ * repo-relative directory to list ('' = workspace root). Children are not
+ * recursed; the client loads each folder when the user expands it.
  *
- * Git status from `status --porcelain -z -uall` is overlaid on files so
- * modified / untracked badges still show. When `showIgnored` is true
- * (default), gitignored rows are kept and flagged `ignored` for a faded
- * Explorer look; pass `showIgnored: false` to hide them entirely.
+ * Git status from status --porcelain -z -uall is overlaid on files so
+ * modified / untracked badges still show. When showIgnored is true (default),
+ * gitignored rows are kept and flagged ignored for a faded Explorer look;
+ * pass showIgnored: false to hide them entirely.
  */
 export async function loadTree(
+  ctx: Context,
   cwd: string,
   path: string,
   options: LoadTreeOptions = {},
 ): Promise<GitTreeEntry[]> {
   const showIgnored = options.showIgnored !== false
-  await assertGitRepo(cwd)
+  await assertGitRepo(ctx, cwd)
   const root = posixSafe(path)
-  const abs = resolveUnderCwd(cwd, root)
-  const statusByPath = await loadStatusByPath(cwd)
-  let dirents
+  const statusByPath = await loadStatusByPath(ctx, cwd)
+
+  const dirTarget = await ctx.fs.resolve(root === '' ? '.' : root, { cwd })
+  let children
   try {
-    dirents = await readdir(abs, { withFileTypes: true })
+    children = await ctx.fs.listDir(dirTarget)
   } catch (error) {
-    const code = error !== null && typeof error === 'object' && 'code' in error
-      ? String((error as { code?: unknown }).code ?? '')
-      : ''
-    if (code === 'ENOENT' || code === 'ENOTDIR') return []
+    if (isFsMissing(error)) return []
     throw error
   }
 
   const entries: GitTreeEntry[] = []
-  for (const dirent of dirents) {
-    if (dirent.name === '.git' || dirent.name === '.' || dirent.name === '..') continue
-    const rel = root === '' ? dirent.name : root + '/' + dirent.name
-    let kind: 'dir' | 'file' = dirent.isDirectory() ? 'dir' : 'file'
-    if (dirent.isSymbolicLink()) {
-      const target = await stat(join(abs, dirent.name))
-        .then((value) => (value.isDirectory() ? 'dir' : 'file'))
-        .catch(() => 'file' as const)
-      kind = target
-    } else if (!dirent.isFile() && !dirent.isDirectory()) {
-      // Sockets / fifos / devices: treat as non-openable files.
-      kind = 'file'
-    }
+  for (const child of children) {
+    if (child.name === '.git') continue
+    const rel = root === '' ? child.name : root + '/' + child.name
+    const kind: 'dir' | 'file' = child.type === 'directory' ? 'dir' : 'file'
     entries.push({
-      name: dirent.name,
+      name: child.name,
       path: rel,
       kind,
       status: kind === 'file' ? statusByPath.get(rel) : undefined,
     })
   }
   // Inside an already-ignored directory every child is ignored (same as
-  // VS Code's per-URI checkIgnore under node_modules / lib / …).
+  // VS Code's per-URI checkIgnore under node_modules / lib / etc.).
   const parentIgnored = showIgnored && root !== ''
-    && (await gitIgnoredPaths(cwd, [root])).has(root)
+    && (await gitIgnoredPaths(ctx, cwd, [root])).has(root)
   const visible = !showIgnored
-    ? await dropGitIgnored(cwd, entries)
+    ? await dropGitIgnored(ctx, cwd, entries)
     : parentIgnored
       ? entries.map((entry) => ({ ...entry, ignored: true as const }))
-      : await markGitIgnored(cwd, entries)
+      : await markGitIgnored(ctx, cwd, entries)
   visible.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
     return a.name.localeCompare(b.name)
@@ -181,15 +173,16 @@ export async function loadTree(
 
 /**
  * Flat file search across the worktree. BFS from the repo root, stops after
- * {@link TREE_SEARCH_LIMIT} hits or {@link TREE_SEARCH_MAX_DIRS} directories
- * visited so huge trees stay bounded.
+ * TREE_SEARCH_LIMIT hits or TREE_SEARCH_MAX_DIRS directories visited so huge
+ * trees stay bounded.
  *
- * Ignored directories are **never** entered — same as VS Code Quick Open / file
- * search — even when the Explorer setting shows gitignored rows. Walking
- * `node_modules` while marking every child with `check-ignore` took ~26s on
- * this repo and left the client stuck on “loading”.
+ * Ignored directories are never entered (same as VS Code Quick Open / file
+ * search) even when the Explorer setting shows gitignored rows. Walking
+ * node_modules while marking every child with check-ignore took ~26s on this
+ * repo and left the client stuck on "loading".
  */
 export async function searchTree(
+  ctx: Context,
   cwd: string,
   query: string,
   options: LoadTreeOptions = {},
@@ -197,33 +190,28 @@ export async function searchTree(
   const needle = query.trim().toLowerCase()
   if (needle.length === 0) return []
   const showIgnored = options.showIgnored !== false
-  await assertGitRepo(cwd)
-  const statusByPath = await loadStatusByPath(cwd)
+  await assertGitRepo(ctx, cwd)
+  const statusByPath = await loadStatusByPath(ctx, cwd)
   const matches: GitTreeEntry[] = []
   const queue: string[] = ['']
   let visited = 0
   while (queue.length > 0 && matches.length < TREE_SEARCH_LIMIT && visited < TREE_SEARCH_MAX_DIRS) {
     const dir = queue.shift() ?? ''
     visited += 1
-    const abs = resolveUnderCwd(cwd, dir)
-    let dirents
+    const dirTarget = await ctx.fs.resolve(dir === '' ? '.' : dir, { cwd })
+    let children
     try {
-      dirents = await readdir(abs, { withFileTypes: true })
+      children = await ctx.fs.listDir(dirTarget)
     } catch {
       continue
     }
     const pending: GitTreeEntry[] = []
-    for (const dirent of dirents) {
-      if (dirent.name === '.git' || dirent.name === '.' || dirent.name === '..') continue
-      const rel = dir === '' ? dirent.name : dir + '/' + dirent.name
-      let isDir = dirent.isDirectory()
-      if (dirent.isSymbolicLink()) {
-        isDir = await stat(join(abs, dirent.name))
-          .then((value) => value.isDirectory())
-          .catch(() => false)
-      }
+    for (const child of children) {
+      if (child.name === '.git') continue
+      const rel = dir === '' ? child.name : dir + '/' + child.name
+      const isDir = child.type === 'directory'
       pending.push({
-        name: dirent.name,
+        name: child.name,
         path: rel,
         kind: isDir ? 'dir' : 'file',
         status: isDir ? undefined : statusByPath.get(rel),
@@ -231,13 +219,13 @@ export async function searchTree(
     }
     // Always classify ignore so we can skip ignored dirs. When the Explorer
     // setting hides them, drop those rows from results entirely.
-    const annotated = await markGitIgnored(cwd, pending)
+    const annotated = await markGitIgnored(ctx, cwd, pending)
     const visible = showIgnored
       ? annotated
       : annotated.filter((entry) => entry.ignored !== true)
     for (const entry of visible) {
       if (entry.kind === 'dir') {
-        // Never descend into gitignored folders (node_modules, dist, …).
+        // Never descend into gitignored folders (node_modules, dist, etc.).
         if (entry.ignored === true) continue
         queue.push(entry.path)
         continue
@@ -251,17 +239,18 @@ export async function searchTree(
 }
 
 /**
- * Annotate entries that `git check-ignore` reports as excluded so the client
- * can apply `gitDecoration.ignoredResourceForeground`. Tracked paths and
- * paths matched only by a negation pattern (`!…`) stay unmarked — same as
- * VS Code's `GitIgnoreDecorationProvider`.
+ * Annotate entries that git check-ignore reports as excluded so the client
+ * can apply gitDecoration.ignoredResourceForeground. Tracked paths and paths
+ * matched only by a negation pattern stay unmarked, same as VS Code's
+ * GitIgnoreDecorationProvider.
  */
 async function markGitIgnored(
+  ctx: Context,
   cwd: string,
   entries: readonly GitTreeEntry[],
 ): Promise<GitTreeEntry[]> {
   if (entries.length === 0) return []
-  const ignored = await gitIgnoredPaths(cwd, entries.map((entry) => entry.path))
+  const ignored = await gitIgnoredPaths(ctx, cwd, entries.map((entry) => entry.path))
   if (ignored.size === 0) return [...entries]
   return entries.map((entry) => (
     ignored.has(entry.path) ? { ...entry, ignored: true } : entry
@@ -269,15 +258,16 @@ async function markGitIgnored(
 }
 
 /**
- * Drop entries that `git check-ignore` reports as excluded. Tracked files
- * that happen to match a pattern stay (check-ignore skips the index).
+ * Drop entries that git check-ignore reports as excluded. Tracked files that
+ * happen to match a pattern stay (check-ignore skips the index).
  */
 async function dropGitIgnored(
+  ctx: Context,
   cwd: string,
   entries: readonly GitTreeEntry[],
 ): Promise<GitTreeEntry[]> {
   if (entries.length === 0) return []
-  const ignored = await gitIgnoredPaths(cwd, entries.map((entry) => entry.path))
+  const ignored = await gitIgnoredPaths(ctx, cwd, entries.map((entry) => entry.path))
   if (ignored.size === 0) return [...entries]
   return entries.filter((entry) => !ignored.has(entry.path))
 }
@@ -285,41 +275,38 @@ async function dropGitIgnored(
 /**
  * Paths that match a git exclude rule.
  *
- * Mirrors VS Code `Repository.checkIgnore`: `check-ignore -v -z --stdin`,
- * then keep only records whose pattern does **not** start with `!`.
- * Output records are `<source>\0<linenum>\0<pattern>\0<path>\0` (see
- * `git check-ignore` docs).
+ * Mirrors VS Code Repository.checkIgnore: check-ignore -v -z --stdin, then
+ * keep only records whose pattern does not start with a bang. Output records
+ * are source NUL linenum NUL pattern NUL path NUL (see git check-ignore docs).
  */
-async function gitIgnoredPaths(cwd: string, paths: readonly string[]): Promise<Set<string>> {
+async function gitIgnoredPaths(ctx: Context, cwd: string, paths: readonly string[]): Promise<Set<string>> {
   if (paths.length === 0) return new Set()
-  return new Promise((resolve) => {
-    const child = spawn('git', ['-C', cwd, 'check-ignore', '-v', '-z', '--stdin'], {
-      stdio: ['pipe', 'pipe', 'ignore'],
-    })
-    const ignored = new Set<string>()
-    let stdout = ''
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => { stdout += chunk })
-    child.on('error', () => resolve(ignored))
-    child.on('close', () => {
-      const parts = stdout.split('\0')
-      for (let i = 0; i + 3 < parts.length; i += 4) {
-        const pattern = parts[i + 2]
-        const path = parts[i + 3]
-        if (pattern !== undefined && pattern.length > 0 && !pattern.startsWith('!')
-          && path !== undefined && path.length > 0) {
-          ignored.add(path)
-        }
-      }
-      resolve(ignored)
-    })
-    child.stdin.end(paths.join('\0') + '\0', 'utf8')
-  })
+  const result = await runGitWithStdin(
+    ctx,
+    cwd,
+    ['check-ignore', '-v', '-z', '--stdin'],
+    paths.join('\0') + '\0',
+    GIT_TIMEOUT_MS,
+    MAX_BUFFER,
+  ).catch(() => undefined)
+  const ignored = new Set<string>()
+  if (result === undefined) return ignored
+  const parts = result.stdout.split('\0')
+  for (let i = 0; i + 3 < parts.length; i += 4) {
+    const pattern = parts[i + 2]
+    const path = parts[i + 3]
+    if (pattern !== undefined && pattern.length > 0 && !pattern.startsWith('!')
+      && path !== undefined && path.length > 0) {
+      ignored.add(path)
+    }
+  }
+  return ignored
 }
 
-/** Working-tree porcelain → path → status (first side wins if duplicated). */
-async function loadStatusByPath(cwd: string): Promise<Map<string, GitChangeStatus>> {
+/** Working-tree porcelain -> path -> status (first side wins if duplicated). */
+async function loadStatusByPath(ctx: Context, cwd: string): Promise<Map<string, GitChangeStatus>> {
   const porcelain = await gitText(
+    ctx,
     cwd,
     ['status', '--porcelain', '-z', '-uall'],
     GIT_TIMEOUT_MS,
@@ -329,17 +316,6 @@ async function loadStatusByPath(cwd: string): Promise<Map<string, GitChangeStatu
     if (!statusByPath.has(file.path)) statusByPath.set(file.path, file.status)
   }
   return statusByPath
-}
-
-/** Resolve `rel` under `cwd`; reject escapes outside the workspace. */
-function resolveUnderCwd(cwd: string, rel: string): string {
-  const root = resolve(cwd)
-  const abs = resolve(root, rel === '' ? '.' : rel)
-  const relToRoot = relative(root, abs)
-  if (relToRoot.startsWith('..') || isAbsolute(relToRoot)) {
-    throw badRequest('invalid path')
-  }
-  return abs
 }
 
 /** Image extensions the panel previews inline, mapped to their MIME type. */
@@ -366,45 +342,63 @@ export interface LoadedFile {
 }
 
 /**
- * File contents at a commit, or from the working tree when `sha` is absent.
+ * File contents at a commit, or from the working tree when sha is absent.
  * Images come back base64-encoded with their MIME type so the panel can
- * render them inline; other binary files are flagged `binary` with empty
- * content. Returns `exists: false` when the path is not present at the
- * given revision.
+ * render them inline; other binary files are flagged binary with empty
+ * content. Returns exists: false when the path is not present at the given
+ * revision.
  *
- * Worktree reads accept absolute paths too — a chat link can point anywhere
- * on disk, and previewing it is read-only file IO. Commit reads (sha set)
- * stay repo-relative: `posixSafe` keeps git path arguments inside the tree.
+ * Worktree reads go through ctx.fs (the fs-local backend is a resolution
+ * default, not a containment boundary), so a chat link can point anywhere on
+ * disk. Commit reads (sha set) stay repo-relative: posixSafe keeps git path
+ * arguments inside the tree.
  */
 export async function loadFile(
+  ctx: Context,
   cwd: string,
   path: string,
   sha?: string,
 ): Promise<LoadedFile> {
-  if (sha !== undefined) await assertGitRepo(cwd)
-  const worktree = sha === undefined ? resolveWorktreePath(cwd, path) : undefined
-  if (worktree === null) {
+  const trimmed = path.trim()
+  if (trimmed.length === 0 || trimmed.includes('\0')) {
     throw badRequest('invalid file path')
   }
-  const safePath = worktree === undefined ? posixSafe(path) : undefined
-  if (safePath !== undefined && safePath.length === 0) {
-    throw badRequest('invalid file path')
+  if (sha !== undefined) {
+    await assertGitRepo(ctx, cwd)
+    const safePath = posixSafe(trimmed)
+    if (safePath.length === 0) throw badRequest('invalid file path')
+    const bytes = await readCommitBytes(ctx, cwd, safePath, sha)
+    if (bytes === null) return { content: '', encoding: 'utf8', exists: false }
+    return decodeFileBytes(bytes, safePath)
   }
-  if (worktree !== undefined) {
-    const info = await stat(worktree).catch(() => null)
-    if (info === null) return { content: '', encoding: 'utf8', exists: false }
-    if (info.isDirectory()) {
-      return { content: '', encoding: 'utf8', directory: true, exists: true }
-    }
+  return readWorktreeFile(ctx, cwd, trimmed)
+}
+
+async function readWorktreeFile(ctx: Context, cwd: string, path: string): Promise<LoadedFile> {
+  let target
+  try {
+    target = await ctx.fs.resolve(path, { cwd })
+  } catch (error) {
+    if (isFsMissing(error)) return { content: '', encoding: 'utf8', exists: false }
+    throw error
   }
-  const bytes =
-    worktree !== undefined
-      ? await readWorktreeBytes(worktree)
-      : await readCommitBytes(cwd, safePath as string, sha as string)
-  if (bytes === null) {
-    return { content: '', encoding: 'utf8', exists: false }
+  const info = await ctx.fs.stat(target)
+  if (info === undefined) return { content: '', encoding: 'utf8', exists: false }
+  if (info.type === 'directory') {
+    return { content: '', encoding: 'utf8', directory: true, exists: true }
   }
-  const mime = IMAGE_MIME[extensionOf(worktree ?? (safePath as string))]
+  let bytes
+  try {
+    bytes = await ctx.fs.readBytes(target, undefined, MAX_BUFFER)
+  } catch (error) {
+    if (isFsMissing(error)) return { content: '', encoding: 'utf8', exists: false }
+    throw error
+  }
+  return decodeFileBytes(Buffer.from(bytes), target.displayPath)
+}
+
+function decodeFileBytes(bytes: Buffer, displayPath: string): LoadedFile {
+  const mime = IMAGE_MIME[extensionOf(displayPath)]
   if (mime !== undefined) {
     return { content: bytes.toString('base64'), encoding: 'base64', mime, exists: true }
   }
@@ -415,60 +409,27 @@ export async function loadFile(
 }
 
 /**
- * Absolute filesystem path for a worktree read, or null when the path is
- * unusable (empty, or carrying a NUL byte). Relative input resolves against
- * `cwd` and must survive `posixSafe`; absolute input (POSIX or a Windows
- * drive path) is normalized and used as-is — it may point anywhere on disk.
- */
-function resolveWorktreePath(cwd: string, path: string): string | null {
-  const trimmed = path.trim()
-  if (trimmed.length === 0 || trimmed.includes('\0')) return null
-  if (trimmed.startsWith('/') || /^[A-Za-z]:[\\/]/.test(trimmed)) {
-    return resolve(trimmed)
-  }
-  return join(cwd, ...posixSafe(trimmed).split('/'))
-}
-
-/** Raw bytes of a worktree file (`cat`); null when the path is absent. */
-async function readWorktreeBytes(abs: string): Promise<Buffer | null> {
-  try {
-    const { stdout } = (await execFileAsync('cat', [abs], {
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-      encoding: 'buffer',
-    })) as unknown as { stdout: Buffer }
-    return stdout
-  } catch (error) {
-    const message = errorMessage(error)
-    if (/no such file/i.test(message)) return null
-    throw new Error(message)
-  }
-}
-
-/**
- * Raw bytes of a committed blob (`git show <sha>:<path>`); null when the
- * path is absent at that revision.
+ * Raw bytes of a committed blob (git show sha:path); null when the path is
+ * absent at that revision.
  */
 async function readCommitBytes(
+  ctx: Context,
   cwd: string,
   path: string,
   sha: string,
 ): Promise<Buffer | null> {
-  try {
-    const { stdout } = (await execFileAsync('git', ['show', sha + ':' + path], {
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-      encoding: 'buffer',
-      cwd,
-    })) as unknown as { stdout: Buffer }
-    return stdout
-  } catch (error) {
-    const message = gitErrorMessage(error)
-    if (/does not exist|invalid object name|exists on disk, but not in/i.test(message)) {
-      return null
-    }
-    throw new Error(message)
+  const result = await runGitBuffer(
+    ctx,
+    cwd,
+    ['show', sha + ':' + path],
+    GIT_TIMEOUT_MS,
+    MAX_BUFFER,
+  )
+  if (result.exitCode === 0) return result.stdout
+  if (/does not exist|invalid object name|exists on disk, but not in/i.test(result.stderr)) {
+    return null
   }
+  throw new Error(result.stderr.trim() || `git show exited with code ${result.exitCode}`)
 }
 
 /** Heuristic: a NUL byte in the first chunk marks the file as binary. */
@@ -485,28 +446,29 @@ function extensionOf(path: string): string {
 }
 
 /**
- * One file's diff. With `sha`, the change that commit introduced to `path`
- * (`<sha>^..<sha>`; a root commit diffs against the empty tree). Without a
- * `sha`, the working tree against HEAD. Returns `null` when the path has no
- * change at that point (no worktree change, or the commit did not touch it).
+ * One file's diff. With sha, the change that commit introduced to path
+ * (sha^..sha; a root commit diffs against the empty tree). Without a sha, the
+ * working tree against HEAD. Returns null when the path has no change at that
+ * point (no worktree change, or the commit did not touch it).
  */
 export async function loadFileDiff(
+  ctx: Context,
   cwd: string,
   path: string,
   sha?: string,
 ): Promise<GitFileDiff | null> {
-  await assertGitRepo(cwd)
+  await assertGitRepo(ctx, cwd)
   const safePath = posixSafe(path)
   if (safePath.length === 0) {
     throw badRequest('invalid file path')
   }
 
   if (sha !== undefined) {
-    // `git show <sha>` diffs the commit against its parent — root commits
-    // against the empty tree — and prints nothing for untouched paths.
-    // `--first-parent` picks the landing-side parent for merges; without it
-    // `show` falls back to a combined diff that is empty for clean merges.
-    const patch = await runDiff(cwd, [
+    // git show sha diffs the commit against its parent (root commits against
+    // the empty tree) and prints nothing for untouched paths. --first-parent
+    // picks the landing-side parent for merges; without it show falls back to
+    // a combined diff that is empty for clean merges.
+    const patch = await runDiff(ctx, cwd, [
       'show',
       '--no-color',
       '--no-ext-diff',
@@ -524,12 +486,14 @@ export async function loadFileDiff(
 
   // Working tree vs HEAD.
   const worktree = await runDiff(
+    ctx,
     cwd,
     ['diff', '--no-color', '--no-ext-diff', '--unified=3', 'HEAD', '--', safePath],
   )
   if (worktree !== null) return { path: safePath, patch: worktree }
 
   const cached = await runDiff(
+    ctx,
     cwd,
     ['diff', '--cached', '--no-color', '--no-ext-diff', '--unified=3', '--', safePath],
   )
@@ -537,14 +501,15 @@ export async function loadFileDiff(
 
   // No staged/unstaged change. An untracked file still reads as a new file.
   const tracked = await gitText(
+    ctx,
     cwd,
     ['ls-files', '--', safePath],
     GIT_TIMEOUT_MS,
   ).catch(() => '')
   if (tracked.trim().length === 0) {
-    const { content, exists } = await loadFile(cwd, safePath)
-    if (exists) {
-      return { path: safePath, patch: synthesizeNewFilePatch(safePath, content) }
+    const loaded = await loadFile(ctx, cwd, safePath)
+    if (loaded.exists) {
+      return { path: safePath, patch: synthesizeNewFilePatch(safePath, loaded.content) }
     }
   }
   return null
@@ -554,8 +519,8 @@ export async function loadFileDiff(
  * Run a diff command restricted to one path and return the raw unified patch.
  * Returns null when the diff is empty (no change at that path).
  */
-async function runDiff(cwd: string, args: string[]): Promise<string | null> {
-  const { stdout } = await execGit(cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
+async function runDiff(ctx: Context, cwd: string, args: string[]): Promise<string | null> {
+  const { stdout } = await execGit(ctx, cwd, args, GIT_TIMEOUT_MS, MAX_BUFFER)
     .catch((error: unknown) => {
       const message = gitErrorMessage(error)
       if (/unknown revision/i.test(message)) return { stdout: '', stderr: message }
@@ -582,7 +547,7 @@ function synthesizeNewFilePatch(path: string, content: string): string {
   return [...header, ...lines.map((line) => '+' + line)].join('\n')
 }
 
-/** `git diff-tree --name-status -z` output → change files. */
+/** git diff-tree --name-status -z output -> change files. */
 function parseNameStatusZ(raw: string, followRenames: boolean): GitChangeFile[] {
   const parts = raw.split('\0')
   const files: GitChangeFile[] = []
@@ -612,17 +577,16 @@ function parseNameStatusZ(raw: string, followRenames: boolean): GitChangeFile[] 
   return files
 }
 
-/** `git status --porcelain -z` output → change files.
+/** git status --porcelain -z output -> change files.
  *
- * With `-z` each entry is NUL-separated. A normal entry is one field
- * `XY <path>`; a rename/copy is TWO fields `R  <newPath>` then `<oldPath>`
- * (the target comes first). Untracked directories are only shown collapsed
- * (`?? dir/`) unless `-uall` was passed; callers pass `-uall` so untracked
- * files appear individually.
+ * With -z each entry is NUL-separated. A normal entry is one field XY path; a
+ * rename/copy is TWO fields R newPath then oldPath (the target comes first).
+ * Untracked directories are only shown collapsed (?? dir/) unless -uall was
+ * passed; callers pass -uall so untracked files appear individually.
  *
  * X is the index (staged) side, Y the worktree side; a path changed in both
- * (`MM`) yields one entry per side, flagged via `staged`, so the client can
- * group them the way VSCode does.
+ * (MM) yields one entry per side, flagged via staged, so the client can group
+ * them the way VSCode does.
  */
 function parsePorcelainZ(raw: string): GitChangeFile[] {
   const parts = raw.split('\0')
@@ -638,8 +602,8 @@ function parsePorcelainZ(raw: string): GitChangeFile[] {
       continue
     }
     if (x === 'R' || x === 'C') {
-      // Two fields: <newPath> then <oldPath>. The rename itself is staged;
-      // y may still flag further unstaged edits to the new path.
+      // Two fields: newPath then oldPath. The rename itself is staged; y may
+      // still flag further unstaged edits to the new path.
       const newPath = body
       const oldPath = parts[index + 1]
       if (newPath.length > 0 && oldPath !== undefined) {
@@ -667,7 +631,7 @@ function parsePorcelainZ(raw: string): GitChangeFile[] {
   return files
 }
 
-/** `git diff --numstat` output → path → {added, removed}. */
+/** git diff --numstat output -> path -> {added, removed}. */
 function parseNumstat(raw: string): Map<string, { added: number; removed: number }> {
   const counts = new Map<string, { added: number; removed: number }>()
   for (const line of raw.split('\n')) {
@@ -679,7 +643,7 @@ function parseNumstat(raw: string): Map<string, { added: number; removed: number
     const added = Number.parseInt(line.slice(0, tab), 10)
     const removed = Number.parseInt(line.slice(tab + 1, second), 10)
     let path = line.slice(second + 1).trim()
-    // Rename/copy paths print as `old => new`; keep the destination so the
+    // Rename/copy paths print as old => new; keep the destination so the
     // count lines up with the name-status newPath.
     const arrow = path.indexOf(' => ')
     if (arrow !== -1) path = path.slice(arrow + 4)
@@ -689,7 +653,7 @@ function parseNumstat(raw: string): Map<string, { added: number; removed: number
   return counts
 }
 
-/** Strip a leading `./` and normalize separators for git path arguments. */
+/** Strip a leading ./ and normalize separators for git path arguments. */
 function posixSafe(path: string): string {
   const trimmed = path.trim().replace(/\\/g, '/')
   const normalized = trimmed.startsWith('./') ? trimmed.slice(2) : trimmed
@@ -700,9 +664,9 @@ function posixSafe(path: string): string {
   return cleaned
 }
 
-async function assertGitRepo(cwd: string): Promise<void> {
+async function assertGitRepo(ctx: Context, cwd: string): Promise<void> {
   try {
-    const inside = await gitText(cwd, ['rev-parse', '--is-inside-work-tree'], GIT_TIMEOUT_MS)
+    const inside = await gitText(ctx, cwd, ['rev-parse', '--is-inside-work-tree'], GIT_TIMEOUT_MS)
     if (inside === 'true') return
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -713,9 +677,20 @@ async function assertGitRepo(cwd: string): Promise<void> {
   throw error
 }
 
-async function gitText(cwd: string, args: string[], timeout: number): Promise<string> {
-  const { stdout } = await execGit(cwd, args, timeout, MAX_BUFFER)
+async function gitText(
+  ctx: Context,
+  cwd: string,
+  args: string[],
+  timeout: number,
+): Promise<string> {
+  const { stdout } = await execGit(ctx, cwd, args, timeout, MAX_BUFFER)
   return stdout.replace(/\n+$/, '')
+}
+
+function isFsMissing(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false
+  const code = (error as { code?: unknown }).code
+  return code === 'FS_NOT_FOUND' || code === 'FS_NOT_DIRECTORY'
 }
 
 function gitErrorMessage(error: unknown): string {
