@@ -2,7 +2,7 @@
 
 Cursor-style debug mode for DSH: a `/debug` collaboration mode, a Debug chip, a Debug Logs dock, and a reproduction-steps card with **Proceed** / **Mark as fixed**.
 
-This is the human-in-the-loop shell. The agent still instruments by editing files and calling `debug_log` — there is no automatic language-runtime probe bus yet.
+This is the human-in-the-loop shell. The agent still instruments by editing files and calling `debug_log` for its own notes. Every program reaches Debug Logs the same way: POST to this session's ingest sink.
 
 ## Persistence note
 
@@ -14,16 +14,17 @@ Consequence: reload / restart / reopen clears debug mode, open waits, and the lo
 
 ## Features
 
-- **`/debug` / `/debug off`** — same shape as `/plan`. An optional message after `/debug` is submitted as the next user turn under debug guidance.
+- **`/debug` / `/debug off`** — same shape as `/plan`. An optional message after `/debug` is submitted as the next user turn under debug guidance. Turning it on injects this session's ingest `url` + `sessionId` for the agent, and the live values stay in the system prompt while debug is on.
 - **Debug chip** — red pill in the composer tool row while debug mode is the effective target; clicking it runs `/debug off`.
-- **Debug Logs dock** — sits above the composer while debug mode is on; read-only evidence from `debug_log` (polled over HTTP).
+- **Debug Logs dock** — sits above the composer while debug mode is on; read-only evidence from `debug_log` and runtime POSTs (polled over HTTP).
+- **Runtime ingest** — `POST /dsh-debug-mode/logs` with `{ sessionId, text }` or `{ sessionId, lines }`. External posts are always `source: ingest`. Debug must be on, or the sink returns 409.
 - **Reproduction card** — shown when the model calls `wait_for_repro`. Follow the steps, then **Proceed** or **Mark as fixed**; extra notes typed in the composer are attached by those buttons.
 
 ## Design
 
 | Half | Source | Role |
 | --- | --- | --- |
-| host | `src/index.ts`, `src/policy.ts` | In-memory store; `wait_for_repro` / `debug_log`; `/dsh-debug-mode/state|logs|repro` |
+| host | `src/index.ts`, `src/policy.ts` | In-memory store; `wait_for_repro` / `debug_log`; ingest sink on `/dsh-debug-mode/logs` |
 | client | `src/client/*` | Chip + dock poll `/dsh-debug-mode/state`; styles via CSS Modules |
 | shared | `src/shared.ts`, `src/types.ts` | Paths and payload types shared by both halves |
 

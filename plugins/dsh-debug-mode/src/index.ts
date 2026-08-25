@@ -12,17 +12,19 @@ import { DEBUG_POLICY } from './policy.ts'
 import {
   DEBUG_LOG,
   LOGS_PATH,
+  MAX_INGEST_BATCH,
+  MAX_INGEST_LINE,
   REPRO_PATH,
   STATE_PATH,
   WAIT_FOR_REPRO,
   capLogs,
   mintDebugId,
-  type DebugHttpResult,
   type DebugLogEntry,
   type DebugLogSource,
   type DebugReproAction,
   type DebugReproVerdict,
   type DebugReproWait,
+  type IngestSink,
 } from './shared.ts'
 import type { DebugProjection } from './types.ts'
 
@@ -93,7 +95,7 @@ export function apply(ctx: Context): void {
     const state = store.get(sessionId)
     if (state === undefined || state.wanted === null) return decision
     const target = state.wanted
-    const narration = narrationFor(state, target)
+    const narration = narrationFor(state, target, ingestSink(ctx, sessionId))
     commitWanted(state)
     return narration === undefined
       ? decision
@@ -112,6 +114,19 @@ export function apply(ctx: Context): void {
     },
   })
 
+  ctx.systemPrompt.section({
+    name: 'debug:ingest',
+    order: 52,
+    text: (context) => {
+      if (context.agent === undefined) return ''
+      const sessionId = String(context.agent.session.id)
+      const state = store.get(sessionId)
+      if (state === undefined) return ''
+      const on = state.wanted ?? state.active
+      return on ? formatIngestBlock(ingestSink(ctx, sessionId)) : ''
+    },
+  })
+
   ctx.inject(['commands'], (commandCtx) => {
     commandCtx.commands.register({
       name: 'debug',
@@ -119,10 +134,11 @@ export function apply(ctx: Context): void {
       input: { hint: '[off|message]' },
       handler: ({ agent, rawInput }) => {
         const message = rawInput.trim()
+        const sink = ingestSink(ctx, String(agent.session.id))
         if (message === 'off') {
           cancelWait(waits, String(agent.session.id), new Error('The user left debug mode.'))
           closeOpenWait(store, agent.session)
-          switch (setDebugMode(store, agent, false)) {
+          switch (setDebugMode(store, agent, false, sink)) {
             case 'committed':
               return { kind: 'success', text: 'Debug mode off.' }
             case 'queued':
@@ -135,15 +151,13 @@ export function apply(ctx: Context): void {
                 : { kind: 'success', text: 'Debug mode is already inactive.' }
           }
         }
-        const outcome = setDebugMode(store, agent, true)
+        const outcome = setDebugMode(store, agent, true, sink)
         if (message !== '') {
           agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
         }
         return {
           kind: 'success',
-          text: outcome === 'committed'
-            ? 'Debug mode on for this live session only (not persisted across reload). Reproduce the bug, then use /debug off to leave.'
-            : 'Entering debug mode (applies from the next step). Use /debug off to leave.',
+          text: formatDebugOnCommand(sink, outcome),
         }
       },
     })
@@ -326,6 +340,7 @@ function setDebugMode(
   store: Map<string, SessionDebugState>,
   agent: Agent,
   active: boolean,
+  sink: IngestSink,
 ): 'committed' | 'queued' | 'cancelled' | 'noop' {
   const session = agent.session
   const state = ensureState(store, String(session.id))
@@ -341,7 +356,7 @@ function setDebugMode(
   }
   state.active = active
   state.wanted = null
-  const narration = narrationFor(state, active)
+  const narration = narrationFor(state, active, sink)
   if (narration !== undefined) {
     state.toldActive = active
     agent.inject(narration)
@@ -362,15 +377,80 @@ function commitWanted(state: SessionDebugState): void {
   state.toldActive = state.active
 }
 
-function narrationFor(state: SessionDebugState, target: boolean) {
-  if (state.toldActive === undefined || state.toldActive === target) return undefined
-  const text = target
-    ? 'The user switched this session to debug mode.'
-    : 'The user switched this session back to the default mode.'
+function narrationFor(state: SessionDebugState, target: boolean, sink: IngestSink) {
+  if (target) {
+    if (state.toldActive === true) return undefined
+    const text = formatDebugOnNotice(sink)
+    return createUserMessage({
+      content: [{ type: 'text', text }],
+      source: {
+        kind: 'plugin',
+        plugin: 'dsh-debug-mode',
+        form: 'notice',
+        summary: 'Debug mode on — runtime ingest sink attached.',
+      },
+    })
+  }
+  if (state.toldActive !== true) return undefined
+  const text = 'The user switched this session back to the default mode.'
   return createUserMessage({
     content: [{ type: 'text', text }],
     source: { kind: 'plugin', plugin: 'dsh-debug-mode', form: 'notice', summary: text },
   })
+}
+
+function ingestSink(ctx: Context, sessionId: string): IngestSink {
+  const host = ctx.webServer.host === '0.0.0.0' ? '127.0.0.1' : ctx.webServer.host
+  const port = ctx.webServer.port
+  return {
+    url: `http://${host}:${port}${LOGS_PATH}`,
+    sessionId,
+  }
+}
+
+function formatIngestBlock(sink: IngestSink): string {
+  const example = JSON.stringify({
+    sessionId: sink.sessionId,
+    text: '<one line>',
+    source: 'ingest',
+  })
+  return [
+    'Runtime ingest for this live session (localhost only):',
+    `url: ${sink.url}`,
+    `sessionId: ${sink.sessionId}`,
+    `POST ${sink.url}`,
+    example,
+    'Every program reaches Debug Logs the same way: POST here. Do not treat the current process as a special case.',
+    'Batch with "lines": ["..."]. This HTTP port always records source=ingest.',
+  ].join('\n')
+}
+
+function formatDebugOnNotice(sink: IngestSink): string {
+  return [
+    'The user switched this session to debug mode.',
+    '',
+    formatIngestBlock(sink),
+    '',
+    'Put this POST (or an equivalent pipe) in the reproduction steps for every program that must emit runtime evidence. Use debug_log only for your own hypothesis notes.',
+  ].join('\n')
+}
+
+function formatDebugOnCommand(
+  sink: IngestSink,
+  outcome: 'committed' | 'queued' | 'cancelled' | 'noop',
+): string {
+  const head = outcome === 'committed'
+    ? 'Debug mode on for this live session only (not persisted across reload).'
+    : outcome === 'queued'
+      ? 'Entering debug mode (applies from the next step).'
+      : 'Debug mode is already on.'
+  return [
+    head,
+    '',
+    formatIngestBlock(sink),
+    '',
+    'Use /debug off to leave.',
+  ].join('\n')
 }
 
 function appendLog(
@@ -424,6 +504,25 @@ function formatLogs(logs: readonly DebugLogEntry[]): string {
   }).join('\n')
 }
 
+function collectIngestLines(body: object): string[] {
+  const value = body as { text?: unknown; lines?: unknown }
+  const lines: string[] = []
+  if (typeof value.text === 'string') {
+    const text = value.text.trim()
+    if (text !== '') lines.push(text)
+  }
+  if (Array.isArray(value.lines)) {
+    for (const item of value.lines) {
+      if (typeof item !== 'string') continue
+      const text = item.trim()
+      if (text !== '') lines.push(text)
+    }
+  }
+  return lines.slice(0, MAX_INGEST_BATCH).map((line) => (
+    line.length > MAX_INGEST_LINE ? line.slice(0, MAX_INGEST_LINE) : line
+  ))
+}
+
 function handleState(
   store: Map<string, SessionDebugState>,
   req: IncomingMessage,
@@ -463,12 +562,11 @@ async function handleLogs(
     json(res, 400, { ok: false, message: 'invalid body' })
     return
   }
-  const value = body as { sessionId?: unknown; text?: unknown; source?: unknown }
+  const value = body as { sessionId?: unknown }
   const sessionId = typeof value.sessionId === 'string' ? value.sessionId : ''
-  const text = typeof value.text === 'string' ? value.text.trim() : ''
-  const source = value.source === 'ingest' || value.source === 'agent' ? value.source : 'user'
-  if (sessionId === '' || text === '') {
-    json(res, 400, { ok: false, message: 'sessionId and text are required' })
+  const lines = collectIngestLines(body)
+  if (sessionId === '' || lines.length === 0) {
+    json(res, 400, { ok: false, message: 'sessionId and text or lines are required' })
     return
   }
   const session = ctx.sessions.get(sessionId as never)
@@ -480,8 +578,8 @@ async function handleLogs(
     json(res, 409, { ok: false, message: 'debug mode is not active' })
     return
   }
-  const entry = appendLog(store, session, source, text)
-  json(res, 200, { ok: true, value: entry })
+  const entries = lines.map(line => appendLog(store, session, 'ingest', line))
+  json(res, 200, { ok: true, value: { recorded: entries.length, entries } })
 }
 
 async function handleRepro(

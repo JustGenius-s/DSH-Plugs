@@ -16,7 +16,19 @@ export const STATE_PATH = '/dsh-debug-mode/state'
 /** Keep the projection small enough for frequent polls. */
 export const MAX_DEBUG_LOGS = 200
 
+/** Truncate a single ingested runtime line. */
+export const MAX_INGEST_LINE = 2048
+
+/** Max lines accepted in one POST to the ingest sink. */
+export const MAX_INGEST_BATCH = 50
+
 export type DebugLogSource = 'agent' | 'user' | 'ingest'
+
+/** Live localhost POST sink for one debug session. */
+export interface IngestSink {
+  url: string
+  sessionId: string
+}
 
 export type DebugReproVerdict = 'proceed' | 'fixed'
 
@@ -37,7 +49,8 @@ export interface DebugReproWait {
 
 export interface DebugLogPost {
   sessionId: string
-  text: string
+  text?: string
+  lines?: string[]
   source?: DebugLogSource
 }
 
