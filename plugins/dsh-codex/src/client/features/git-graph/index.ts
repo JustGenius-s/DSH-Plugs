@@ -7,6 +7,7 @@ import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
 import { GitChangesView } from './changes-view'
 import { GitGraphView } from './graph-view'
+import { bindEnabledSlot } from '../../bind-enabled-slot'
 
 const PANEL_SLOT = 'side.panel'
 const PANEL_ID = 'git-graph'
@@ -50,15 +51,10 @@ export function createGitGraphFeature(
         })
       }
 
-      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => {
-        let disposeEntry: (() => void) | undefined
-
-        const syncRegistration = (): void => {
-          disposeEntry?.()
-          disposeEntry = undefined
-          if (!(scope.getSnapshot().value ?? DEFAULT_CONFIG).gitGraphEnabled) return
-
-          disposeEntry = ctx.slots.register(
+      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => bindEnabledSlot(
+        scope,
+        config => config.gitGraphEnabled,
+        () => ctx.slots.register(
             {
               name: PANEL_SLOT,
               id: PANEL_ID,
@@ -101,17 +97,8 @@ export function createGitGraphFeature(
                 onOpenGraph: openGraph,
               })
             } as never,
-          )
-        }
-
-        syncRegistration()
-        const unsubscribe = scope.subscribe(syncRegistration)
-        return () => {
-          unsubscribe()
-          disposeEntry?.()
-          disposeEntry = undefined
-        }
-      })
+          ),
+      ))
 
       return () => {
         disposeDescriptor()

@@ -27,7 +27,7 @@ import {
 } from '../../../shared/config'
 import { resolvePanelIcon } from './icons'
 import { launcherVisible, type LauncherStore } from './launcher-store'
-import type { SidePanelInstance, SidePanelsStore } from './service'
+import { NO_SESSION_PANEL_KEY, type SidePanelInstance, type SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
 import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
@@ -39,6 +39,33 @@ ensureSidePanelStyles()
 
 /** Breathing room between the conversation header's bottom edge and the launcher card. */
 const LAUNCHER_HEADER_GAP = 20
+
+/** Whether a retained pane bucket belongs to the host's current session id. */
+function panelSessionMatch(
+  retainedSessionId: string,
+  currentSessionId: string | undefined,
+): boolean {
+  if (retainedSessionId === NO_SESSION_PANEL_KEY) return currentSessionId === undefined
+  return retainedSessionId === currentSessionId
+}
+
+/**
+ * Map the internal retain bucket back to a slot owner session id.
+ * The no-session bucket uses an empty string internally; panels receive
+ * undefined cwd and may omit session-scoped wiring.
+ */
+function resolvePanelSessionId(retainedSessionId: string): string | undefined {
+  return retainedSessionId === NO_SESSION_PANEL_KEY ? undefined : retainedSessionId
+}
+
+/** Resolve cwd for a pane; the no-session bucket has no conversation cwd. */
+function resolvePanelCwd(
+  retainedSessionId: string,
+  sessionsById: SessionListState['byId'],
+): string | undefined {
+  if (retainedSessionId === NO_SESSION_PANEL_KEY) return undefined
+  return sessionCwd(sessionsById, retainedSessionId)
+}
 
 /**
  * Tab caption: a lone instance keeps the panel label ("终端"); duplicates
@@ -388,7 +415,8 @@ export function SidePanelsShell(props: ShellProps) {
   const renderPanes = (): ReactNode => (
     <div className="dsh-side-panels-body">
       {retainedPanes.map(({ session, instance }) => {
-        const visible = open && session.sessionId === sessionId && instance.key === activeKey
+        const visible = open && panelSessionMatch(session.sessionId, sessionId) && instance.key === activeKey
+        const ownerSessionId = resolvePanelSessionId(session.sessionId)
         return (
           <div
             key={session.sessionId + ':' + instance.key}
@@ -398,8 +426,8 @@ export function SidePanelsShell(props: ShellProps) {
             {renderSlot(
               'side.panel',
               {
-                sessionId: session.sessionId,
-                cwd: sessionCwd(sessionsById, session.sessionId),
+                sessionId: ownerSessionId ?? NO_SESSION_PANEL_KEY,
+                cwd: resolvePanelCwd(session.sessionId, sessionsById),
                 instanceKey: instance.key,
                 state: instance.state,
                 // Hidden retained panes stay mounted but must not hold SSE.

@@ -43,8 +43,19 @@ export interface SidePanelInstance {
  */
 export type PanelNavState = Readonly<Record<string, string | undefined>>
 
+/**
+ * Bucket key used when the host has no current session (e.g. after the last
+ * session is deleted and no workspace is selected yet). Keeps the side-panel
+ * strip renderable so Files / Git can show empty states and Terminal can still
+ * open against the host default cwd.
+ */
+export const NO_SESSION_PANEL_KEY = ''
+
 export interface SidePanelSessionSnapshot {
-  /** Session owning these panel instances. */
+  /**
+   * Session owning these panel instances.
+   * {@link NO_SESSION_PANEL_KEY} means "outside any conversation session".
+   */
   sessionId: string
   /** Open instances for this session, in tab order. */
   instances: readonly SidePanelInstance[]
@@ -306,16 +317,28 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
   }
 
   const retainCurrentSession = (next: SidePanelsSnapshot): void => {
-    if (sessionId === undefined) return
-    retained.delete(sessionId)
-    retained.set(sessionId, {
-      sessionId,
+    // Always retain the active bucket — including the no-session key — so the
+    // shell can keep mounting panel bodies when the host has no conversation
+    // (delete-last-session → blank workspace). Skipping that case left the
+    // tab strip live but the pane body empty.
+    const key = sessionId ?? NO_SESSION_PANEL_KEY
+    retained.delete(key)
+    retained.set(key, {
+      sessionId: key,
       instances: next.instances,
       activeKey: next.activeKey,
     })
     while (retained.size > MAX_RETAINED_SESSIONS) {
       const oldest = retained.keys().next().value
       if (oldest === undefined) break
+      // Never evict the bucket we just wrote; otherwise a full retain map
+      // would drop the current session on the next open.
+      if (oldest === key) {
+        const rest = [...retained.keys()].find((id) => id !== key)
+        if (rest === undefined) break
+        retained.delete(rest)
+        continue
+      }
       retained.delete(oldest)
     }
   }

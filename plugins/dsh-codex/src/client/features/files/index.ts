@@ -5,6 +5,7 @@ import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
+import { bindEnabledSlot } from '../../bind-enabled-slot'
 import { insertFileReference } from './add-to-chat'
 import { FilesPanel, type FilesPanelProps } from './files-panel'
 
@@ -40,15 +41,10 @@ export function createFilesFeature(
         ctx.sidePanels.open('files', state)
       }
 
-      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => {
-        let disposeEntry: (() => void) | undefined
-
-        const syncRegistration = (): void => {
-          disposeEntry?.()
-          disposeEntry = undefined
-          if (!(scope.getSnapshot().value ?? DEFAULT_CONFIG).filesEnabled) return
-
-          disposeEntry = ctx.slots.register(
+      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => bindEnabledSlot(
+        scope,
+        config => config.filesEnabled,
+        () => ctx.slots.register(
             {
               name: PANEL_SLOT,
               id: 'files',
@@ -93,17 +89,8 @@ export function createFilesFeature(
               }
               return createElement(FilesPanel, panelProps)
             } as never,
-          )
-        }
-
-        syncRegistration()
-        const unsubscribe = scope.subscribe(syncRegistration)
-        return () => {
-          unsubscribe()
-          disposeEntry?.()
-          disposeEntry = undefined
-        }
-      })
+          ),
+      ))
 
       return () => {
         disposeDescriptor()

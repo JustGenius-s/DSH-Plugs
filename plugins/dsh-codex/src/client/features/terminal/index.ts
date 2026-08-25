@@ -8,6 +8,7 @@ import type { PanelNavState } from '../side-panels/service'
 import { WarpTerminalView } from './warp-terminal-view'
 import type { TerminalControllerStore } from './controller'
 import { createTerminalReference, type TerminalReferenceApi } from './reference'
+import { bindEnabledSlot } from '../../bind-enabled-slot'
 
 const PANEL_SLOT = 'side.panel'
 const NS = 'settings.codex'
@@ -58,34 +59,20 @@ export function createTerminalFeature(
       const terminalReference = createTerminalReference(ctx)
       const TerminalPanel = createTerminalPanel(scope, controllerStore, terminalReference)
       const disposeDescriptor = ctx.sidePanels.describe('terminal', { icon: 'terminal', multi: true })
-      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => {
-        let disposeEntry: (() => void) | undefined
-
-        const syncRegistration = (): void => {
-          disposeEntry?.()
-          disposeEntry = undefined
-          if (!(scope.getSnapshot().value ?? DEFAULT_CONFIG).terminalEnabled) return
-
-          disposeEntry = ctx.slots.register(
-            {
-              name: PANEL_SLOT,
-              id: 'terminal',
-              order: 20,
-              locale: NS as never,
-              label: () => t('view.warpTerminal'),
-            },
-            TerminalPanel as never,
-          )
-        }
-
-        syncRegistration()
-        const unsubscribe = scope.subscribe(syncRegistration)
-        return () => {
-          unsubscribe()
-          disposeEntry?.()
-          disposeEntry = undefined
-        }
-      })
+      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => bindEnabledSlot(
+        scope,
+        config => config.terminalEnabled,
+        () => ctx.slots.register(
+          {
+            name: PANEL_SLOT,
+            id: 'terminal',
+            order: 20,
+            locale: NS as never,
+            label: () => t('view.warpTerminal'),
+          },
+          TerminalPanel as never,
+        ),
+      ))
 
       return () => {
         terminalReference.dispose()
