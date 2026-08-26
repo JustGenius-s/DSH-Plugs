@@ -7,12 +7,13 @@
  * the panel's own CSS (same `--dsw-*` tokens as the git-graph panel), which
  * keeps the files panel visually consistent with the rest of the sidebar.
  *
- * Performance gates mirror VS Code's editor defaults:
+ * Performance gates mirror editor defaults:
  *  - `MAX_TOKENIZATION_LINE_LENGTH` (in highlight.ts): overlong lines skip
  *    the grammar entirely.
  *  - `STOP_RENDERING_LINE_AFTER`: DOM only paints the first N characters of
  *    a line (`editor.stopRenderingLineAfter`).
- *  - Viewport virtualization: only rows near the scroll window mount.
+ * Rows stay in normal document flow so wrapped lines have their real height,
+ * matching Codex Desktop's no-horizontal-scroll file and diff previews.
  */
 import {
   useCallback,
@@ -25,7 +26,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
   type ReactNode,
-  type UIEvent,
 } from 'react'
 import {
   IconChevronDownOutline14,
@@ -50,11 +50,6 @@ const MAX_DIFF_ROWS = 240
  * stay in the source string but are not painted.
  */
 const STOP_RENDERING_LINE_AFTER = 10_000
-/** Must match `.dsh-files-code-line` / `.dsh-files-diff-row` line-height. */
-const ROW_HEIGHT = 21
-/** Extra rows above/below the viewport so scroll feels continuous. */
-const OVERSCAN_ROWS = 24
-
 export interface ViewLabels {
   /** Expand-row label; `{count}` is the hidden row count. */
   expand: (count: number) => string
@@ -82,7 +77,7 @@ export function FileCodeView(props: {
   const lines = useMemo(() => splitLines(content), [content])
   // Highlight after the first plain-text paint — sync Shiki on render blocked
   // open for 0.5–2s+. Oversized buffers skip (see highlight.ts caps); the
-  // virtual window still scrolls the full file as plain text.
+  // source view still renders the full file as plain text.
   const [highlighted, setHighlighted] = useState<HighlightSpan[][] | undefined>(undefined)
   useEffect(() => {
     let cancelled = false
@@ -127,9 +122,18 @@ export function FileCodeView(props: {
   }, [matches])
 
   const gutterWidth = String(lines.length).length
-  const {
-    start, end, onScroll, totalHeight, offsetY, scrollerRef, scrollToLine,
-  } = useVirtualWindow(lines.length)
+  const scrollerRef = useRef<HTMLDivElement | null>(null)
+  const scrollToLine = useCallback((lineIndex: number): void => {
+    const scroller = scrollerRef.current
+    if (scroller === null) return
+    const row = scroller.querySelector<HTMLElement>(`[data-line="${lineIndex}"]`)
+    if (row === null) return
+    const top = row.offsetTop
+    const bottom = top + row.offsetHeight
+    if (top < scroller.scrollTop || bottom > scroller.scrollTop + scroller.clientHeight) {
+      scroller.scrollTop = Math.max(0, top - Math.floor(scroller.clientHeight / 3))
+    }
+  }, [])
 
   const goToMatch = useCallback((index: number): void => {
     if (matches.length === 0) return
@@ -276,47 +280,39 @@ export function FileCodeView(props: {
           onKeyDown={onFindInputKeyDown}
         />
       ) : null}
-      <div className="dsh-files-view" ref={scrollerRef} onScroll={onScroll}>
-        <div
-          className="dsh-files-code"
-          style={{ height: totalHeight }}
-        >
-          <div
-            className="dsh-files-virt-window"
-            style={{ top: offsetY }}
-          >
-            {lines.slice(start, end).map((line, offset) => {
-              const index = start + offset
-              const lineHits = matchesByLine.get(index)
-              const findRanges = lineHits?.map((hit) => ({
-                start: hit.start,
-                end: hit.end,
-                active: activeHit !== undefined
-                  && hit.line === activeHit.line
-                  && hit.start === activeHit.start
-                  && hit.end === activeHit.end,
-              }))
-              return (
-                <div
-                  key={index}
-                  className={
-                    'dsh-files-code-line'
-                    + (activeHit?.line === index ? ' is-find-active-line' : '')
-                  }
+      <div className="dsh-files-view" ref={scrollerRef}>
+        <div className="dsh-files-code">
+          {lines.map((line, index) => {
+            const lineHits = matchesByLine.get(index)
+            const findRanges = lineHits?.map((hit) => ({
+              start: hit.start,
+              end: hit.end,
+              active: activeHit !== undefined
+                && hit.line === activeHit.line
+                && hit.start === activeHit.start
+                && hit.end === activeHit.end,
+            }))
+            return (
+              <div
+                key={index}
+                data-line={index}
+                className={
+                  'dsh-files-code-line'
+                  + (activeHit?.line === index ? ' is-find-active-line' : '')
+                }
+              >
+                <span
+                  className="dsh-files-code-ln"
+                  style={{ width: gutterWidth + 'ch' }}
                 >
-                  <span
-                    className="dsh-files-code-ln"
-                    style={{ width: gutterWidth + 'ch' }}
-                  >
-                    {index + 1}
-                  </span>
-                  <span className="dsh-files-code-text">
-                    {renderLineText(line, highlighted?.[index], findRanges)}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
+                  {index + 1}
+                </span>
+                <span className="dsh-files-code-text">
+                  {renderLineText(line, highlighted?.[index], findRanges)}
+                </span>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -482,51 +478,36 @@ export function FileDiffView(props: {
     maxLn = Math.max(maxLn, row.oldLn ?? 0, row.newLn ?? 0)
   }
   const gutterWidth = String(Math.max(maxLn, 1)).length
-  const { start, end, onScroll, totalHeight, offsetY, scrollerRef } = useVirtualWindow(list.length)
-
   return (
-    <div className="dsh-files-view" ref={(node) => { scrollerRef.current = node }} onScroll={onScroll}>
-      <div
-        className="dsh-files-diff-body"
-        style={{ height: totalHeight + (capped ? 28 : 0) }}
-      >
-        <div
-          className="dsh-files-virt-window"
-          style={{ top: offsetY }}
-        >
-          {list.slice(start, end).map((row, offset) => {
-            const index = start + offset
-            return (
-              <div key={index} className={'dsh-files-diff-row is-' + row.kind}>
-                {/* One sticky gutter: both line numbers and the sign stay pinned
-                    while the text scrolls horizontally under them. */}
-                <span className="dsh-files-diff-gutter">
-                  <span
-                    className="dsh-files-diff-ln"
-                    style={{ width: gutterWidth + 'ch' }}
-                  >
-                    {row.oldLn ?? ''}
-                  </span>
-                  <span
-                    className="dsh-files-diff-ln"
-                    style={{ width: gutterWidth + 'ch' }}
-                  >
-                    {row.newLn ?? ''}
-                  </span>
-                  <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
+    <div className="dsh-files-view">
+      <div className="dsh-files-diff-body">
+        {list.map((row, index) => {
+          return (
+            <div key={index} className={'dsh-files-diff-row is-' + row.kind}>
+              {/* One gutter keeps both line numbers and the sign aligned. */}
+              <span className="dsh-files-diff-gutter">
+                <span
+                  className="dsh-files-diff-ln"
+                  style={{ width: gutterWidth + 'ch' }}
+                >
+                  {row.oldLn ?? ''}
                 </span>
-                <span className="dsh-files-diff-text">
-                  {renderLineText(row.text, highlighted[index])}
+                <span
+                  className="dsh-files-diff-ln"
+                  style={{ width: gutterWidth + 'ch' }}
+                >
+                  {row.newLn ?? ''}
                 </span>
-              </div>
-            )
-          })}
-        </div>
+                <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
+              </span>
+              <span className="dsh-files-diff-text">
+                {renderLineText(row.text, highlighted[index])}
+              </span>
+            </div>
+          )
+        })}
         {capped ? (
-          <div
-            className="dsh-files-expand-slot"
-            style={{ top: list.length * ROW_HEIGHT }}
-          >
+          <div className="dsh-files-expand-slot">
             <ExpandRow
               count={rows.length - MAX_DIFF_ROWS}
               labels={labels}
@@ -555,82 +536,6 @@ export function FileMarkdownView(props: { content: string }) {
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )
-}
-
-/**
- * Track the visible row window inside a vertically scrolling `.dsh-files-view`.
- * Horizontal scroll is unchanged (sticky gutters still pin to `left: 0`).
- */
-function useVirtualWindow(count: number): {
-  start: number
-  end: number
-  offsetY: number
-  totalHeight: number
-  scrollerRef: MutableRefObject<HTMLDivElement | null>
-  onScroll: (event: UIEvent<HTMLDivElement>) => void
-  scrollToLine: (lineIndex: number) => void
-} {
-  const scrollerRef = useRef<HTMLDivElement | null>(null)
-  const [window, setWindow] = useState({ start: 0, end: Math.min(count, 60) })
-  const raf = useRef(0)
-
-  const syncWindow = useCallback((top: number, height: number): void => {
-    const first = Math.max(0, Math.floor(top / ROW_HEIGHT) - OVERSCAN_ROWS)
-    const last = Math.min(
-      count,
-      Math.ceil((top + height) / ROW_HEIGHT) + OVERSCAN_ROWS,
-    )
-    setWindow((current) => (
-      current.start === first && current.end === last
-        ? current
-        : { start: first, end: last }
-    ))
-  }, [count])
-
-  useLayoutEffect(() => {
-    const el = scrollerRef.current
-    if (el === null) {
-      setWindow({ start: 0, end: Math.min(count, 60) })
-      return
-    }
-    syncWindow(el.scrollTop, el.clientHeight)
-  }, [count, syncWindow])
-
-  const onScroll = useCallback((event: UIEvent<HTMLDivElement>): void => {
-    const top = event.currentTarget.scrollTop
-    const height = event.currentTarget.clientHeight
-    cancelAnimationFrame(raf.current)
-    raf.current = requestAnimationFrame(() => {
-      syncWindow(top, height)
-    })
-  }, [syncWindow])
-
-  const scrollToLine = useCallback((lineIndex: number): void => {
-    const el = scrollerRef.current
-    if (el === null) return
-    const top = Math.max(0, lineIndex) * ROW_HEIGHT
-    const viewTop = el.scrollTop
-    const viewBottom = viewTop + el.clientHeight
-    const rowBottom = top + ROW_HEIGHT
-    if (top < viewTop || rowBottom > viewBottom) {
-      el.scrollTop = Math.max(0, top - Math.floor(el.clientHeight / 3))
-      syncWindow(el.scrollTop, el.clientHeight)
-    }
-  }, [syncWindow])
-
-  useEffect(() => () => cancelAnimationFrame(raf.current), [])
-
-  const start = Math.min(window.start, count)
-  const end = Math.min(Math.max(window.end, start), count)
-  return {
-    start,
-    end,
-    offsetY: start * ROW_HEIGHT,
-    totalHeight: count * ROW_HEIGHT,
-    scrollerRef,
-    onScroll,
-    scrollToLine,
-  }
 }
 
 interface FindRange {

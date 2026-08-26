@@ -34,9 +34,8 @@ const FILES_CSS = `
 .dsh-files-status-badge.is-renamed,.dsh-files-status-badge.is-copied{background:rgba(9,105,218,.14);color:#0550ae}
 .dsh-files-status-badge.is-untracked{background:rgba(31,122,55,.14);color:#116329}
 .dsh-files-status-badge.is-conflicted{background:rgba(130,80,223,.14);color:#8250df}
-/* Preview/diff hosts fill the panel; the inner .dsh-files-view owns both
-   vertical (virtualized) and horizontal scrolling so sticky gutters keep
-   working against the same scrollport. */
+/* Preview/diff hosts fill the panel; code wraps to the pane width like Codex
+   Desktop, so the inner view only scrolls vertically. */
 .dsh-files-preview,.dsh-files-diff{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
 .dsh-files-code-shell{flex:1;min-height:0;display:flex;flex-direction:column;outline:none}
 /* VS Code–style find widget above the code scrollport. */
@@ -72,27 +71,19 @@ body[data-ds-dark-theme] .dsh-files-code-line.is-find-active-line{background:rgb
 .dsh-files-preview .dsh-files-status,.dsh-files-diff .dsh-files-status{padding:16px 12px}
 .dsh-files-tree-dir{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-files-tree-note{padding:4px 12px;font-size:12px;line-height:18px}
-/* The view is the scrollport. Its content wrapper is height-sized to the full
-   virtual list; width:max-content on the painted window keeps sticky gutters
-   pinned across horizontal scroll the same way the pre-virtual layout did. */
-.dsh-files-view{flex:1;min-height:0;overflow:auto;position:relative;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:21px}
-.dsh-files-code,.dsh-files-diff-body{position:relative;width:max-content;min-width:100%;padding:0 0 8px;box-sizing:content-box}
-.dsh-files-virt-window{position:absolute;left:0;width:max-content;min-width:100%}
-.dsh-files-expand-slot{position:absolute;left:0;right:0;width:100%}
-.dsh-files-code-line{display:flex;min-height:21px;padding-right:8px;white-space:pre}
+/* Wrapped rows stay in normal flow because their height depends on pane width. */
+.dsh-files-view{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;position:relative;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:21px}
+.dsh-files-code,.dsh-files-diff-body{position:relative;width:100%;min-width:0;padding:0 0 8px;box-sizing:border-box}
+.dsh-files-expand-slot{width:100%}
+.dsh-files-code-line{display:flex;align-items:flex-start;width:100%;min-width:0;min-height:21px;padding-right:8px;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 .dsh-files-code-line:hover{background:var(--dsw-alias-interactive-bg-hover)}
-/* The gutter is sticky and opaque: code scrolls horizontally UNDER it. The
-   background must be solid — the panel sits on --dsw-specific-sidebar-fill, and the
-   translucent hover tint is composited over it with a gradient layer so the
-   gutter never shows the text sliding beneath. */
-.dsh-files-code-ln{position:sticky;left:0;z-index:1;flex:none;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-specific-sidebar-fill)}
+/* The line number stays aligned with the first visual row after wrapping. */
+.dsh-files-code-ln{flex:none;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-specific-sidebar-fill)}
 .dsh-files-code-line:hover .dsh-files-code-ln{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-code-text{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e8)}
-.dsh-files-diff-row{display:flex;min-height:21px;padding-right:8px;white-space:pre}
-/* Same sticky trick for the diff gutter (old ln + new ln + sign ride one
-   pinned wrapper); tinted rows composite their tint over the panel base so
-   the gutter matches the row while staying opaque. */
-.dsh-files-diff-gutter{position:sticky;left:0;z-index:1;flex:none;display:flex;background:var(--dsw-specific-sidebar-fill)}
+.dsh-files-diff-row{display:flex;align-items:flex-start;width:100%;min-width:0;min-height:21px;padding-right:8px;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
+/* Old/new line numbers and the sign share one non-wrapping gutter. */
+.dsh-files-diff-gutter{flex:none;display:flex;background:var(--dsw-specific-sidebar-fill)}
 .dsh-files-diff-row.is-hunk .dsh-files-diff-gutter{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(31,122,55,.12),rgba(31,122,55,.12)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(248,81,73,.12),rgba(248,81,73,.12)),var(--dsw-specific-sidebar-fill)}

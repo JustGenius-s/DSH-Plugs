@@ -1,10 +1,8 @@
 /**
  * Syntax highlighting for the files panel's code preview.
  *
- * A synchronous shiki core on the JavaScript regex engine, themed with
- * VSCode's default token colors: `light-plus` / `dark-plus` (the "Light
- * Modern" / "Dark Modern" themes share Dark+/Light+'s TextMate token colors;
- * the Modern variants only re-skinned the workbench). Both themes ride one
+ * A synchronous shiki core on the JavaScript regex engine, themed with the
+ * Codex Desktop defaults: `Codex Light` / `Codex Dark`. Both themes ride one
  * tokenization through shiki's dual-theme mode: each token carries its light
  * color as `var(--shiki-light)` plus a `--shiki-dark` custom property, and
  * the panel stylesheet flips on `body[data-ds-dark-theme]` — the same marker
@@ -15,13 +13,13 @@
  * on createHighlighter; empty create is ~0ms and a single load is a few ms.
  */
 import type { CSSProperties } from 'react'
-import { createHighlighterCoreSync } from 'shiki/core'
+import { createHighlighterCoreSync, type ThemeRegistration } from 'shiki/core'
 import {
   createJavaScriptRegexEngine,
   defaultJavaScriptRegexConstructor,
 } from 'shiki/engine/javascript'
-import themeDarkPlus from '@shikijs/themes/dark-plus'
-import themeLightPlus from '@shikijs/themes/light-plus'
+import themeCodexDark from './themes/codex-dark.json'
+import themeCodexLight from './themes/codex-light.json'
 import langTs from '@shikijs/langs/typescript'
 import langJavascript from '@shikijs/langs/javascript'
 import langJsx from '@shikijs/langs/jsx'
@@ -371,7 +369,10 @@ let singleton: ReturnType<typeof createHighlighter> | undefined
  */
 function createHighlighter() {
   return createHighlighterCoreSync({
-    themes: [themeLightPlus, themeDarkPlus],
+    themes: [
+      themeCodexLight as ThemeRegistration,
+      themeCodexDark as ThemeRegistration,
+    ],
     langs: [],
     engine: regexEngine,
   })
@@ -497,7 +498,7 @@ export function highlightLines(
   try {
     const { tokens } = highlighter().codeToTokens(massaged, {
       lang: resolved,
-      themes: { light: 'light-plus', dark: 'dark-plus' },
+      themes: { light: 'codex-light', dark: 'codex-dark' },
       cssVariablePrefix: '--shiki-',
     })
     // The phantom line after a trailing newline now tokenizes to a real
@@ -556,7 +557,7 @@ export function highlightToHtml(
   try {
     return highlighter().codeToHtml(code, {
       lang: resolved,
-      themes: { light: 'light-plus', dark: 'dark-plus' },
+      themes: { light: 'codex-light', dark: 'codex-dark' },
       cssVariablePrefix: '--shiki-',
     })
   } catch {

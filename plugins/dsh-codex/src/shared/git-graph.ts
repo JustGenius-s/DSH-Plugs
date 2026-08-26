@@ -178,7 +178,7 @@ export interface GitTreeEntry {
 export interface GitGraphTreeOk {
   ok: true
   cwd: string
-  /** The directory shown; a trailing empty path means the repository root. */
+  /** The directory shown; an empty path means the workspace root. */
   path: string
   entries: GitTreeEntry[]
 }

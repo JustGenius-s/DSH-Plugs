@@ -115,13 +115,14 @@ export interface LoadTreeOptions {
  *
  * Uses the filesystem seam (ctx.fs) so gitignored paths (node_modules, build
  * outputs, etc.) can appear. .git is the only name always skipped. path is the
- * repo-relative directory to list ('' = workspace root). Children are not
+ * workspace-relative directory to list ('' = workspace root). Children are not
  * recursed; the client loads each folder when the user expands it.
  *
- * Git status from status --porcelain -z -uall is overlaid on files so
- * modified / untracked badges still show. When showIgnored is true (default),
- * gitignored rows are kept and flagged ignored for a faded Explorer look;
- * pass showIgnored: false to hide them entirely.
+ * In a Git repository, status from status --porcelain -z -uall is overlaid on
+ * files so modified / untracked badges still show. When showIgnored is true
+ * (default), gitignored rows are kept and flagged ignored for a faded Explorer
+ * look; pass showIgnored: false to hide them entirely. Plain folders remain
+ * browsable and simply omit Git-specific status and ignore decorations.
  */
 export async function loadTree(
   ctx: Context,
@@ -130,9 +131,11 @@ export async function loadTree(
   options: LoadTreeOptions = {},
 ): Promise<GitTreeEntry[]> {
   const showIgnored = options.showIgnored !== false
-  await assertGitRepo(ctx, cwd)
+  const gitRepo = await isGitRepo(ctx, cwd)
   const root = posixSafe(path)
-  const statusByPath = await loadStatusByPath(ctx, cwd)
+  const statusByPath = gitRepo
+    ? await loadStatusByPath(ctx, cwd)
+    : new Map<string, GitChangeStatus>()
 
   const dirTarget = await ctx.fs.resolve(root === '' ? '.' : root, { cwd })
   let children
@@ -157,13 +160,18 @@ export async function loadTree(
   }
   // Inside an already-ignored directory every child is ignored (same as
   // VS Code's per-URI checkIgnore under node_modules / lib / etc.).
-  const parentIgnored = showIgnored && root !== ''
+  const parentIgnored = gitRepo && showIgnored && root !== ''
     && (await gitIgnoredPaths(ctx, cwd, [root])).has(root)
-  const visible = !showIgnored
-    ? await dropGitIgnored(ctx, cwd, entries)
-    : parentIgnored
-      ? entries.map((entry) => ({ ...entry, ignored: true as const }))
-      : await markGitIgnored(ctx, cwd, entries)
+  let visible: GitTreeEntry[]
+  if (!gitRepo) {
+    visible = entries
+  } else if (!showIgnored) {
+    visible = await dropGitIgnored(ctx, cwd, entries)
+  } else if (parentIgnored) {
+    visible = entries.map((entry) => ({ ...entry, ignored: true as const }))
+  } else {
+    visible = await markGitIgnored(ctx, cwd, entries)
+  }
   visible.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1
     return a.name.localeCompare(b.name)
@@ -172,12 +180,13 @@ export async function loadTree(
 }
 
 /**
- * Flat file search across the worktree. BFS from the repo root, stops after
+ * Flat file search across the worktree. BFS from the workspace root, stops after
  * TREE_SEARCH_LIMIT hits or TREE_SEARCH_MAX_DIRS directories visited so huge
  * trees stay bounded.
  *
- * Ignored directories are never entered (same as VS Code Quick Open / file
- * search) even when the Explorer setting shows gitignored rows. Walking
+ * In Git repositories, ignored directories are never entered (same as VS Code
+ * Quick Open / file search) even when the Explorer setting shows gitignored
+ * rows. Walking
  * node_modules while marking every child with check-ignore took ~26s on this
  * repo and left the client stuck on "loading".
  */
@@ -190,8 +199,10 @@ export async function searchTree(
   const needle = query.trim().toLowerCase()
   if (needle.length === 0) return []
   const showIgnored = options.showIgnored !== false
-  await assertGitRepo(ctx, cwd)
-  const statusByPath = await loadStatusByPath(ctx, cwd)
+  const gitRepo = await isGitRepo(ctx, cwd)
+  const statusByPath = gitRepo
+    ? await loadStatusByPath(ctx, cwd)
+    : new Map<string, GitChangeStatus>()
   const matches: GitTreeEntry[] = []
   const queue: string[] = ['']
   let visited = 0
@@ -217,9 +228,11 @@ export async function searchTree(
         status: isDir ? undefined : statusByPath.get(rel),
       })
     }
-    // Always classify ignore so we can skip ignored dirs. When the Explorer
-    // setting hides them, drop those rows from results entirely.
-    const annotated = await markGitIgnored(ctx, cwd, pending)
+    // In a repository, classify ignore so search can skip ignored dirs. When
+    // the Explorer setting hides them, drop those rows from results entirely.
+    const annotated = gitRepo
+      ? await markGitIgnored(ctx, cwd, pending)
+      : pending
     const visible = showIgnored
       ? annotated
       : annotated.filter((entry) => entry.ignored !== true)
@@ -665,16 +678,22 @@ function posixSafe(path: string): string {
 }
 
 async function assertGitRepo(ctx: Context, cwd: string): Promise<void> {
-  try {
-    const inside = await gitText(ctx, cwd, ['rev-parse', '--is-inside-work-tree'], GIT_TIMEOUT_MS)
-    if (inside === 'true') return
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (!/not a git repository/i.test(message)) throw error
-  }
+  if (await isGitRepo(ctx, cwd)) return
   const error = new Error('not a git repository')
   error.name = 'NotGit'
   throw error
+}
+
+/** Detect a repository without making the Files explorer Git-dependent. */
+async function isGitRepo(ctx: Context, cwd: string): Promise<boolean> {
+  try {
+    const inside = await gitText(ctx, cwd, ['rev-parse', '--is-inside-work-tree'], GIT_TIMEOUT_MS)
+    return inside === 'true'
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!/not a git repository/i.test(message)) throw error
+    return false
+  }
 }
 
 async function gitText(

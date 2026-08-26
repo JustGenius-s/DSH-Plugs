@@ -17,11 +17,11 @@ const POLL_FALLBACK_MS = 3_000
 
 /**
  * SSE handler for the watch route: streams one change event whenever the
- * repository state moves (worktree edits, staging, commits, checkouts,
- * fetches). fs.watch covers the git dir (index/HEAD/refs) and the working
- * tree; a slow fingerprint poll (git status + HEAD) backstops missed events
- * and platforms without recursive fs.watch. The response stays open until the
- * client disconnects.
+ * workspace moves. fs.watch covers the working tree and, in a Git repository,
+ * the git dir (index/HEAD/refs). A slow Git fingerprint poll backstops missed
+ * events and platforms without recursive fs.watch for repositories. Plain
+ * folders still get the filesystem watcher and focus refresh fallback. The
+ * response stays open until the client disconnects.
  *
  * The filesystem watch stays on node:fs — the ctx.fs seam exposes read/list/
  * write primitives, not a directory watch, so this remains a host-local
@@ -84,11 +84,13 @@ export async function handleWatch(
     }
     polling = false
   }
-  const pollTimer = setInterval(
-    () => { void poll() },
-    worktreeWatched ? POLL_RELAXED_MS : POLL_FALLBACK_MS,
-  )
-  void poll()
+  const pollTimer = dirs === undefined
+    ? undefined
+    : setInterval(
+      () => { void poll() },
+      worktreeWatched ? POLL_RELAXED_MS : POLL_FALLBACK_MS,
+    )
+  if (dirs !== undefined) void poll()
 
   const heartbeat = setInterval(() => {
     if (!closed) res.write(': ping\n\n')
@@ -98,7 +100,7 @@ export async function handleWatch(
     if (closed) return
     closed = true
     clearTimeout(debounce)
-    clearInterval(pollTimer)
+    if (pollTimer !== undefined) clearInterval(pollTimer)
     clearInterval(heartbeat)
     for (const watcher of watchers) watcher.close()
   }
@@ -114,14 +116,15 @@ interface GitDirs {
 }
 
 /**
- * The directories worth watching. The git dir sees staging and checkout
- * writes; refs/ sees branch and tag movement; the worktree root sees file
- * edits. refs is watched recursively where the platform allows.
+ * The directories worth watching. The worktree root always sees file edits;
+ * in repositories, the git dir sees staging and checkout writes and refs/
+ * sees branch and tag movement. Recursive watches are used where supported.
  */
 function watchTargets(
   cwd: string,
-  dirs: GitDirs,
+  dirs: GitDirs | undefined,
 ): readonly { dir: string; recursive: boolean }[] {
+  if (dirs === undefined) return [{ dir: cwd, recursive: true }]
   const targets = [
     { dir: dirs.gitDir, recursive: false },
     { dir: join(dirs.commonDir, 'refs'), recursive: true },
@@ -134,7 +137,7 @@ function watchTargets(
   return targets
 }
 
-async function resolveGitDirs(ctx: Context, cwd: string): Promise<GitDirs> {
+async function resolveGitDirs(ctx: Context, cwd: string): Promise<GitDirs | undefined> {
   try {
     const [gitDir, commonDir] = await Promise.all([
       gitText(ctx, cwd, ['rev-parse', '--absolute-git-dir']),
@@ -147,9 +150,7 @@ async function resolveGitDirs(ctx: Context, cwd: string): Promise<GitDirs> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (!/not a git repository/i.test(message)) throw error
-    const notGit = new Error('not a git repository')
-    notGit.name = 'NotGit'
-    throw notGit
+    return undefined
   }
 }
 
