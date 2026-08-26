@@ -159,6 +159,15 @@ body[data-ds-dark-theme] .dsh-files-diff-row.is-del .dsh-files-diff-gutter{backg
 .dsh-files-md-body :not(pre)>code{display:inline-flex;align-items:center;box-sizing:border-box;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:.875em!important;background-color:var(--dsw-alias-markdown-inline-code,rgba(128,128,128,.1));border-radius:6px;padding:0 5px}
 .dsh-files-md-body :where(h1,h2,h3,h4,h5,h6) code{font:inherit;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace)}
 
+/* Task-list checkboxes (GFM): disabled inputs rendered from [ ]/[x].
+   GitHub-style task items drop their bullet and let the checkbox take its
+   place (no "·" left behind), so only the checkbox row keeps the marker
+   suppressed. Slightly enlarged and nudged so it sits on the prose baseline
+   instead of floating above it; the default checkbox otherwise looks tiny
+   next to 16px text. */
+.dsh-files-md-body li.task-list-item{list-style:none}
+.dsh-files-md-body li input[type="checkbox"]{width:14px;height:14px;margin:0 6px 0 1px;vertical-align:-2px;accent-color:var(--dsw-alias-state-business-primary,#4176e6);cursor:default}
+
 /* Tables — DSH horizontal-rule style: header bottom rule + row rules, packed
    cells, wide tables scroll horizontally inside the pane. */
 .dsh-files-md-body table{border-collapse:collapse;width:max-content;max-width:max-content}
