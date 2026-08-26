@@ -18,8 +18,12 @@ import {
   createJavaScriptRegexEngine,
   defaultJavaScriptRegexConstructor,
 } from 'shiki/engine/javascript'
-import themeCodexDark from './themes/codex-dark.json'
-import themeCodexLight from './themes/codex-light.json'
+import {
+  DEFAULT_HIGHLIGHT_THEME_DARK,
+  DEFAULT_HIGHLIGHT_THEME_LIGHT,
+  HIGHLIGHT_THEME_OPTIONS,
+  highlightThemeRegistration,
+} from './themes'
 import langTs from '@shikijs/langs/typescript'
 import langJavascript from '@shikijs/langs/javascript'
 import langJsx from '@shikijs/langs/jsx'
@@ -364,18 +368,46 @@ const regexEngine = createJavaScriptRegexEngine({
 let singleton: ReturnType<typeof createHighlighter> | undefined
 
 /**
- * Themes only — no grammars. VS Code loads TextMate grammars when a document
- * of that language opens; we do the same via {@link ensureLanguage}.
+ * Themes only — no grammars. Every catalog theme is registered up front so a
+ * settings change re-highlights synchronously (see {@link setHighlightThemes});
+ * VS Code loads TextMate grammars when a document of that language opens, and
+ * we do the same for grammars via {@link ensureLanguage}.
  */
 function createHighlighter() {
   return createHighlighterCoreSync({
-    themes: [
-      themeCodexLight as ThemeRegistration,
-      themeCodexDark as ThemeRegistration,
-    ],
+    themes: HIGHLIGHT_THEME_OPTIONS.map((option) =>
+      highlightThemeRegistration(option.id) as ThemeRegistration,
+    ),
     langs: [],
     engine: regexEngine,
   })
+}
+
+/** The light/dark theme pair currently applied to every highlight call. */
+let activeThemes: { light: string; dark: string } = {
+  light: DEFAULT_HIGHLIGHT_THEME_LIGHT,
+  dark: DEFAULT_HIGHLIGHT_THEME_DARK,
+}
+
+/** Resolve `id` to the current pair; unknown ids fall back to the Codex default. */
+function resolveThemeIds(
+  light: string,
+  dark: string,
+): { light: string; dark: string } {
+  const known = new Set(HIGHLIGHT_THEME_OPTIONS.map((option) => option.id))
+  return {
+    light: known.has(light) ? light : DEFAULT_HIGHLIGHT_THEME_LIGHT,
+    dark: known.has(dark) ? dark : DEFAULT_HIGHLIGHT_THEME_DARK,
+  }
+}
+
+/**
+ * Swap the light/dark pair the panel highlights with. Settings (and the
+ * settings-page sync below) call this; every caller then re-highlights, which
+ * is cheap — the grammar is already loaded and the tokenization is unchanged.
+ */
+export function setHighlightThemes(light: string, dark: string): void {
+  activeThemes = resolveThemeIds(light, dark)
 }
 
 function highlighter() {
@@ -498,7 +530,7 @@ export function highlightLines(
   try {
     const { tokens } = highlighter().codeToTokens(massaged, {
       lang: resolved,
-      themes: { light: 'codex-light', dark: 'codex-dark' },
+      themes: { light: activeThemes.light, dark: activeThemes.dark },
       cssVariablePrefix: '--shiki-',
     })
     // The phantom line after a trailing newline now tokenizes to a real
@@ -557,7 +589,7 @@ export function highlightToHtml(
   try {
     return highlighter().codeToHtml(code, {
       lang: resolved,
-      themes: { light: 'codex-light', dark: 'codex-dark' },
+      themes: { light: activeThemes.light, dark: activeThemes.dark },
       cssVariablePrefix: '--shiki-',
     })
   } catch {

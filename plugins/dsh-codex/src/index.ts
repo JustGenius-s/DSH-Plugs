@@ -26,6 +26,8 @@ export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),
   fileLinksInPanel: Schema.boolean().default(DEFAULT_CONFIG.fileLinksInPanel),
   filesShowGitIgnored: Schema.boolean().default(DEFAULT_CONFIG.filesShowGitIgnored),
+  highlightThemeLight: Schema.string().default(DEFAULT_CONFIG.highlightThemeLight),
+  highlightThemeDark: Schema.string().default(DEFAULT_CONFIG.highlightThemeDark),
   terminalShell: Schema.union([
     Schema.const('auto'),
     Schema.const('bash'),

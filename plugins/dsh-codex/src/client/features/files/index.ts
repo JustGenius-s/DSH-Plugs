@@ -7,6 +7,7 @@ import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
 import { insertFileReference } from './add-to-chat'
+import { setHighlightThemes } from './highlight'
 import { FilesPanel, type FilesPanelProps } from './files-panel'
 
 const PANEL_SLOT = 'side.panel'
@@ -22,6 +23,17 @@ export function createFilesFeature(
     requires: ['sidePanels'],
     activate() {
       const store = ctx.sidePanels as SidePanelsStore
+
+      // Keep the shared highlighter's light/dark pair in sync with settings.
+      // The settings page (a separate tab) writes through the same scope, so
+      // the subscription below is the single source of truth for the panel.
+      const applyHighlightThemes = (): void => {
+        const snapshot = scope.getSnapshot()
+        const value = { ...DEFAULT_CONFIG, ...snapshot.value }
+        setHighlightThemes(value.highlightThemeLight, value.highlightThemeDark)
+      }
+      applyHighlightThemes()
+      const disposeThemeSync = scope.subscribe(applyHighlightThemes)
 
       // `multi`: every open is a NEW instance (tab). One form per instance —
       // switching form or opening a file opens another `files` tab.
@@ -75,7 +87,7 @@ export function createFilesFeature(
                 (item) => item.panelId === 'files' && item.key === props.instanceKey,
               )
               const navState = instance?.state
-              const showIgnored = (settings.value ?? DEFAULT_CONFIG).filesShowGitIgnored
+              const config = { ...DEFAULT_CONFIG, ...settings.value }
               const panelProps: FilesPanelProps = {
                 sessionId: props.sessionId,
                 cwd: props.cwd,
@@ -83,7 +95,9 @@ export function createFilesFeature(
                 t: props.t,
                 navState,
                 onOpen: open,
-                showIgnored,
+                showIgnored: config.filesShowGitIgnored,
+                highlightThemeLight: config.highlightThemeLight,
+                highlightThemeDark: config.highlightThemeDark,
                 visible: props.visible !== false,
                 onAddToChat: (path) => insertFileReference(ctx, props.sessionId, path),
               }
@@ -93,6 +107,7 @@ export function createFilesFeature(
       ))
 
       return () => {
+        disposeThemeSync()
         disposeDescriptor()
         disposeInjection()
       }

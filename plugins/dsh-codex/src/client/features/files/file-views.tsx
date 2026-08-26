@@ -72,8 +72,10 @@ export function FileCodeView(props: {
   /** File-extension language hint; unknown ids render plain. */
   lang?: string
   labels: ViewLabels
+  /** Light/dark theme pair, so a settings change re-highlights this view. */
+  themeKey?: string
 }) {
-  const { content, lang, labels } = props
+  const { content, lang, labels, themeKey = '' } = props
   const lines = useMemo(() => splitLines(content), [content])
   // Highlight after the first plain-text paint — sync Shiki on render blocked
   // open for 0.5–2s+. Oversized buffers skip (see highlight.ts caps); the
@@ -95,7 +97,7 @@ export function FileCodeView(props: {
       cancelled = true
       window.clearTimeout(handle)
     }
-  }, [content, lang])
+  }, [content, lang, themeKey])
 
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
@@ -466,10 +468,12 @@ export function FileDiffView(props: {
   /** File-extension language hint; unknown ids render plain. */
   lang?: string
   labels: ViewLabels
+  /** Light/dark theme pair, so a settings change re-highlights this view. */
+  themeKey?: string
 }) {
-  const { patch, lang, labels } = props
+  const { patch, lang, labels, themeKey = '' } = props
   const rows = useMemo(() => parsePatch(patch), [patch])
-  const highlighted = useMemo(() => highlightDiffRows(rows, lang), [rows, lang])
+  const highlighted = useMemo(() => highlightDiffRows(rows, lang), [rows, lang, themeKey])
   const [expanded, setExpanded] = useState(false)
   const capped = !expanded && rows.length > MAX_DIFF_ROWS
   const list = capped ? rows.slice(0, MAX_DIFF_ROWS) : rows
@@ -528,8 +532,11 @@ export function FileDiffView(props: {
  * markdown blocks have no fixed row height) and `.dsh-files-md-body` carries
  * the prose styling.
  */
-export function FileMarkdownView(props: { content: string }) {
-  const html = useMemo(() => renderMarkdown(props.content), [props.content])
+export function FileMarkdownView(props: { content: string; themeKey?: string }) {
+  const html = useMemo(
+    () => renderMarkdown(props.content),
+    [props.content, props.themeKey ?? ''],
+  )
   return (
     <div
       className="dsh-files-md-body"

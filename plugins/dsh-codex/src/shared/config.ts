@@ -24,6 +24,10 @@ export interface DshCodexConfig {
   fileLinksInPanel: boolean
   /** When true, the files tree lists gitignored paths (VS Code default). */
   filesShowGitIgnored: boolean
+  /** Light syntax-highlight theme id for the files panel (see client catalog). */
+  highlightThemeLight: string
+  /** Dark syntax-highlight theme id for the files panel (see client catalog). */
+  highlightThemeDark: string
   terminalShell: TerminalShell
   terminalScrollback: number
   terminalFontSize: number
@@ -46,6 +50,8 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   filesEnabled: true,
   fileLinksInPanel: true,
   filesShowGitIgnored: true,
+  highlightThemeLight: 'codex-light',
+  highlightThemeDark: 'codex-dark',
   terminalShell: 'auto',
   terminalScrollback: 5000,
   terminalFontSize: 12,

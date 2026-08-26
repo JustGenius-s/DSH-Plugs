@@ -57,6 +57,13 @@ export interface FilesPanelProps {
    */
   visible?: boolean
   /**
+   * Light syntax-highlight theme id (see files/themes.ts). Fed into the code
+   * views so a settings change re-highlights the open file in place.
+   */
+  highlightThemeLight?: string
+  /** Dark syntax-highlight theme id (see files/themes.ts). */
+  highlightThemeDark?: string
+  /**
    * Insert a worktree file into the conversation draft as an `@file` chip.
    * Wired by the feature wrapper; omitted when conversation is unavailable.
    */
@@ -108,7 +115,14 @@ export function FilesPanel(props: FilesPanelProps) {
             error !== undefined ? (
               <div className="dsh-files-status is-error">{error}</div>
             ) : (
-              <FilesPreview file={file} data={data} busy={busy} t={t} />
+              <FilesPreview
+                file={file}
+                data={data}
+                busy={busy}
+                t={t}
+                highlightThemeLight={props.highlightThemeLight}
+                highlightThemeDark={props.highlightThemeDark}
+              />
             )
           )}
         />
@@ -122,7 +136,14 @@ export function FilesPanel(props: FilesPanelProps) {
             error !== undefined ? (
               <div className="dsh-files-status is-error">{error}</div>
             ) : (
-              <FilesDiffView file={file} diff={diff} busy={busy} t={t} />
+              <FilesDiffView
+                file={file}
+                diff={diff}
+                busy={busy}
+                t={t}
+                highlightThemeLight={props.highlightThemeLight}
+                highlightThemeDark={props.highlightThemeDark}
+              />
             )
           )}
         />
@@ -720,6 +741,8 @@ function FilesPreview(props: {
   data: GitGraphFileOk | null
   busy: boolean
   t: (key: string) => string
+  highlightThemeLight?: string
+  highlightThemeDark?: string
 }) {
   const { data, busy, t } = props
   if (busy && data === null) {
@@ -746,7 +769,13 @@ function FilesPreview(props: {
   }
   return (
     <div className="dsh-files-preview">
-      <FilesTextPreview file={props.file} content={data.content} t={t} />
+      <FilesTextPreview
+        file={props.file}
+        content={data.content}
+        t={t}
+        highlightThemeLight={props.highlightThemeLight}
+        highlightThemeDark={props.highlightThemeDark}
+      />
     </div>
   )
 }
@@ -762,6 +791,8 @@ function FilesTextPreview(props: {
   file: string
   content: string
   t: (key: string) => string
+  highlightThemeLight?: string
+  highlightThemeDark?: string
 }) {
   const { file, content, t } = props
   const markdown = isMarkdownFile(file)
@@ -772,12 +803,15 @@ function FilesTextPreview(props: {
     setView(markdown ? 'preview' : 'source')
   }, [file, markdown])
 
+  const themeKey = `${props.highlightThemeLight ?? ''}|${props.highlightThemeDark ?? ''}`
+
   if (!markdown) {
     return (
       <FileCodeView
         content={content}
         lang={langHintOf(file)}
         labels={viewLabels(t)}
+        themeKey={themeKey}
       />
     )
   }
@@ -788,12 +822,13 @@ function FilesTextPreview(props: {
         <MarkdownToggle view={view} t={t} onSelect={setView} />
       </div>
       {view === 'preview' ? (
-        <FileMarkdownView content={content} />
+        <FileMarkdownView content={content} themeKey={themeKey} />
       ) : (
         <FileCodeView
           content={content}
           lang={langHintOf(file)}
           labels={viewLabels(t)}
+          themeKey={themeKey}
         />
       )}
     </div>
@@ -836,6 +871,8 @@ function FilesDiffView(props: {
   diff: GitFileDiff | null
   busy: boolean
   t: (key: string) => string
+  highlightThemeLight?: string
+  highlightThemeDark?: string
 }) {
   const { diff, busy, t } = props
   if (busy && diff === null) {
@@ -850,6 +887,7 @@ function FilesDiffView(props: {
         patch={diff.patch}
         lang={langHintOf(props.file)}
         labels={viewLabels(t)}
+        themeKey={`${props.highlightThemeLight ?? ''}|${props.highlightThemeDark ?? ''}`}
       />
     </div>
   )

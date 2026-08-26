@@ -3,6 +3,7 @@ import { Button, IconChevronDownOutline14, Input, Menu } from '@deepseek-ai/dsh-
 import type { MenuItem } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import { Switch } from '@just-genius/dsh-plugin-ui'
+import { HIGHLIGHT_THEME_OPTIONS, type HighlightThemeKind } from '../features/files/themes'
 import { clampPanelLauncherWidth, DEFAULT_CONFIG, PANEL_LAUNCHER_WIDTH_MAX, PANEL_LAUNCHER_WIDTH_MIN, type DshCodexConfig, type TerminalShell } from '../../shared/config'
 import type { CodexKey } from '../locales'
 
@@ -65,6 +66,51 @@ function ShellMenu(props: { label: string; value: TerminalShell; t: (key: CodexK
           aria-expanded={open}
           onClick={() => setOpen(current => !current)}
           style={{ minWidth: 116, justifyContent: 'space-between', gap: 8 }}
+        >
+          <span>{selectedLabel}</span>
+          <IconChevronDownOutline14 aria-hidden="true" />
+        </Button>
+      )}
+    />
+  )
+}
+
+function HighlightThemeMenu(props: {
+  label: string
+  kind: HighlightThemeKind
+  value: string
+  onChange: (value: string) => void
+}) {
+  const { label, kind, value, onChange } = props
+  const [open, setOpen] = useState(false)
+  const items: readonly MenuItem[] = HIGHLIGHT_THEME_OPTIONS
+    .filter(option => option.kind === kind)
+    .map(option => ({ id: option.id, label: option.label }))
+  const selectedLabel = items.find(item => item.id === value)?.label ?? value
+
+  return (
+    <Menu
+      open={open}
+      items={items}
+      selectedId={value}
+      onSelect={id => {
+        onChange(id)
+        setOpen(false)
+      }}
+      onClose={() => setOpen(false)}
+      align="end"
+      side="bottom"
+      portal
+      anchor={(
+        <Button
+          type="button"
+          size="sm"
+          variant="toolbar"
+          aria-label={label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen(current => !current)}
+          style={{ minWidth: 180, justifyContent: 'space-between', gap: 8 }}
         >
           <span>{selectedLabel}</span>
           <IconChevronDownOutline14 aria-hidden="true" />
@@ -139,6 +185,12 @@ function SettingsBody(props: CodexSettingsInjected) {
         </FieldRow>
         <FieldRow label={t('filesShowGitIgnored')}>
           <Switch label={t('filesShowGitIgnored')} checked={value.filesShowGitIgnored} onChange={next => set('filesShowGitIgnored', next)} />
+        </FieldRow>
+        <FieldRow label={t('highlightThemeLight')}>
+          <HighlightThemeMenu label={t('highlightThemeLight')} kind="light" value={value.highlightThemeLight} onChange={next => set('highlightThemeLight', next)} />
+        </FieldRow>
+        <FieldRow label={t('highlightThemeDark')}>
+          <HighlightThemeMenu label={t('highlightThemeDark')} kind="dark" value={value.highlightThemeDark} onChange={next => set('highlightThemeDark', next)} />
         </FieldRow>
       </Group>
 
