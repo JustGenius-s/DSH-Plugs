@@ -24,13 +24,16 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type MutableRefObject,
   type ReactNode,
 } from 'react'
 import {
+  Button,
   IconChevronDownOutline14,
   IconChevronUpOutline14,
   IconCloseOutline16,
+  IconPlusOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   highlightLines,
@@ -42,6 +45,7 @@ import {
   type FindMatch,
   type FindOptions,
 } from './find-model'
+import type { FileReviewComment, FileReviewSide } from './review-comment'
 
 /** Diff rows shown before a long patch collapses behind an expand row. */
 const MAX_DIFF_ROWS = 240
@@ -53,6 +57,7 @@ const STOP_RENDERING_LINE_AFTER = 10_000
 export interface ViewLabels {
   /** Expand-row label; `{count}` is the hidden row count. */
   expand: (count: number) => string
+  unmodifiedLines: (count: number) => string
   findPlaceholder: string
   findNoResults: string
   findInvalidRegex: string
@@ -64,6 +69,19 @@ export interface ViewLabels {
   findMatchCase: string
   findWholeWord: string
   findRegex: string
+  addComment: string
+  commentPlaceholder: string
+  commentCancel: string
+  commentSubmit: string
+  commentFailed: string
+  commentAuthor: string
+  commentLine: (side: FileReviewSide, line: number) => string
+  commentLines: (side: FileReviewSide, start: number, end: number) => string
+}
+
+interface CommentTarget {
+  startLine: number
+  endLine: number
 }
 
 /** One file's contents with a line-number gutter and syntax highlighting. */
@@ -74,9 +92,13 @@ export function FileCodeView(props: {
   labels: ViewLabels
   /** Light/dark theme pair, so a settings change re-highlights this view. */
   themeKey?: string
+  path?: string
+  onAddComment?: (comment: FileReviewComment) => boolean
 }) {
   const { content, lang, labels, themeKey = '' } = props
   const lines = useMemo(() => splitLines(content), [content])
+  const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
+  useEffect(() => setCommentTarget(null), [content, props.path])
   // Highlight after the first plain-text paint — sync Shiki on render blocked
   // open for 0.5–2s+. Oversized buffers skip (see highlight.ts caps); the
   // source view still renders the full file as plain text.
@@ -236,6 +258,18 @@ export function FileCodeView(props: {
 
   const activeHit = matches[activeMatch]
 
+  const beginComment = useCallback((line: number, event: ReactMouseEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setCommentTarget((current) => {
+      if (!event.shiftKey || current === null) return { startLine: line, endLine: line }
+      return {
+        startLine: Math.min(current.startLine, line),
+        endLine: Math.max(current.endLine, line),
+      }
+    })
+  }, [])
+
   const onFindInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'Enter') {
       event.preventDefault()
@@ -285,6 +319,7 @@ export function FileCodeView(props: {
       <div className="dsh-files-view" ref={scrollerRef}>
         <div className="dsh-files-code">
           {lines.map((line, index) => {
+            const lineNumber = index + 1
             const lineHits = matchesByLine.get(index)
             const findRanges = lineHits?.map((hit) => ({
               start: hit.start,
@@ -294,24 +329,71 @@ export function FileCodeView(props: {
                 && hit.start === activeHit.start
                 && hit.end === activeHit.end,
             }))
+            const commentSelected = commentTarget !== null
+              && lineNumber >= commentTarget.startLine
+              && lineNumber <= commentTarget.endLine
             return (
-              <div
-                key={index}
-                data-line={index}
-                className={
-                  'dsh-files-code-line'
-                  + (activeHit?.line === index ? ' is-find-active-line' : '')
-                }
-              >
-                <span
-                  className="dsh-files-code-ln"
-                  style={{ width: gutterWidth + 'ch' }}
+              <div key={index} className="dsh-files-code-entry">
+                <div
+                  data-line={index}
+                  className={
+                    'dsh-files-code-line'
+                    + (activeHit?.line === index ? ' is-find-active-line' : '')
+                    + (commentSelected ? ' is-comment-selected' : '')
+                  }
                 >
-                  {index + 1}
-                </span>
-                <span className="dsh-files-code-text">
-                  {renderLineText(line, highlighted?.[index], findRanges)}
-                </span>
+                  <span
+                    className="dsh-files-code-ln"
+                    style={{ width: gutterWidth + 'ch' }}
+                  >
+                    {lineNumber}
+                    {props.onAddComment !== undefined && props.path !== undefined ? (
+                      <button
+                        type="button"
+                        className="dsh-files-comment-add"
+                        title={props.labels.addComment}
+                        aria-label={`${props.labels.addComment}, ${props.labels.commentLine('file', lineNumber)}`}
+                        onClick={(event) => beginComment(lineNumber, event)}
+                      >
+                        <IconPlusOutline16 size={12} />
+                      </button>
+                    ) : null}
+                  </span>
+                  <span className="dsh-files-code-text">
+                    {renderLineText(line, highlighted?.[index], findRanges)}
+                  </span>
+                </div>
+                {commentTarget !== null
+                  && lineNumber === commentTarget.endLine
+                  && props.path !== undefined
+                  && props.onAddComment !== undefined ? (
+                    <InlineReviewCommentEditor
+                      key={`${commentTarget.startLine}:${commentTarget.endLine}`}
+                      label={commentTarget.startLine === commentTarget.endLine
+                        ? props.labels.commentLine('file', commentTarget.endLine)
+                        : props.labels.commentLines(
+                            'file',
+                            commentTarget.startLine,
+                            commentTarget.endLine,
+                          )}
+                      labels={props.labels}
+                      onCancel={() => setCommentTarget(null)}
+                      onSubmit={(body) => {
+                        const applied = props.onAddComment?.({
+                          path: props.path ?? '',
+                          side: 'file',
+                          startLine: commentTarget.startLine,
+                          endLine: commentTarget.endLine,
+                          body,
+                          code: lines
+                            .slice(commentTarget.startLine - 1, commentTarget.endLine)
+                            .join('\n'),
+                        }) === true
+                        if (applied) setCommentTarget(null)
+                        return applied
+                      }}
+                    />
+                  ) : null}
               </div>
             )
           })}
@@ -459,7 +541,15 @@ interface DiffRow {
   oldLn?: number
   /** Line number on the new side (add/ctx rows only). */
   newLn?: number
+  /** Unchanged source lines omitted before this hunk. */
+  unmodifiedLines?: number
   text: string
+}
+
+interface DiffCommentTarget {
+  startIndex: number
+  endIndex: number
+  side: Exclude<FileReviewSide, 'file'>
 }
 
 /** One file's unified patch with dual line-number gutters. */
@@ -470,11 +560,15 @@ export function FileDiffView(props: {
   labels: ViewLabels
   /** Light/dark theme pair, so a settings change re-highlights this view. */
   themeKey?: string
+  path?: string
+  onAddComment?: (comment: FileReviewComment) => boolean
 }) {
   const { patch, lang, labels, themeKey = '' } = props
   const rows = useMemo(() => parsePatch(patch), [patch])
   const highlighted = useMemo(() => highlightDiffRows(rows, lang), [rows, lang, themeKey])
   const [expanded, setExpanded] = useState(false)
+  const [commentTarget, setCommentTarget] = useState<DiffCommentTarget | null>(null)
+  useEffect(() => setCommentTarget(null), [patch, props.path])
   const capped = !expanded && rows.length > MAX_DIFF_ROWS
   const list = capped ? rows.slice(0, MAX_DIFF_ROWS) : rows
   let maxLn = 0
@@ -482,31 +576,104 @@ export function FileDiffView(props: {
     maxLn = Math.max(maxLn, row.oldLn ?? 0, row.newLn ?? 0)
   }
   const gutterWidth = String(Math.max(maxLn, 1)).length
+  const commentInfo = commentTarget === null ? undefined : diffCommentInfo(rows, commentTarget)
+  const beginComment = (rowIndex: number, side: Exclude<FileReviewSide, 'file'>, event: ReactMouseEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    setCommentTarget((current) => {
+      if (!event.shiftKey || current === null || current.side !== side) {
+        return { startIndex: rowIndex, endIndex: rowIndex, side }
+      }
+      return {
+        startIndex: Math.min(current.startIndex, rowIndex),
+        endIndex: Math.max(current.endIndex, rowIndex),
+        side,
+      }
+    })
+  }
   return (
     <div className="dsh-files-view">
       <div className="dsh-files-diff-body">
         {list.map((row, index) => {
+          const commentSide = commentSideForRow(row)
+          const lineNumber = unifiedLineNumber(row)
+          const commentSelected = commentTarget !== null
+            && index >= commentTarget.startIndex
+            && index <= commentTarget.endIndex
+            && rowLineForSide(row, commentTarget.side) !== undefined
           return (
-            <div key={index} className={'dsh-files-diff-row is-' + row.kind}>
-              {/* One gutter keeps both line numbers and the sign aligned. */}
-              <span className="dsh-files-diff-gutter">
-                <span
-                  className="dsh-files-diff-ln"
-                  style={{ width: gutterWidth + 'ch' }}
-                >
-                  {row.oldLn ?? ''}
+            <div key={index} className="dsh-files-diff-entry">
+              <div
+                className={
+                  'dsh-files-diff-row is-' + row.kind
+                  + (commentSelected ? ' is-comment-selected' : '')
+                }
+                role={row.kind === 'hunk' ? 'separator' : undefined}
+                aria-label={row.kind === 'hunk' ? row.text : undefined}
+                title={row.kind === 'hunk' ? row.text : undefined}
+              >
+                {/* Codex/Pierre unified view: indicator left, one active-side line number. */}
+                <span className="dsh-files-diff-gutter">
+                  <span className="dsh-files-diff-mark" aria-hidden />
+                  <span
+                    className="dsh-files-diff-ln"
+                    style={{ width: gutterWidth + 'ch' }}
+                  >
+                    {lineNumber ?? ''}
+                    {commentSide !== undefined
+                      && props.path !== undefined
+                      && props.onAddComment !== undefined ? (
+                      <button
+                        type="button"
+                        className="dsh-files-comment-add"
+                        title={labels.addComment}
+                        aria-label={`${labels.addComment}, ${labels.commentLine(
+                          commentSide,
+                          rowLineForSide(row, commentSide) ?? 0,
+                        )}`}
+                        onClick={(event) => beginComment(index, commentSide, event)}
+                      >
+                        <IconPlusOutline16 size={12} />
+                      </button>
+                      ) : null}
+                  </span>
                 </span>
-                <span
-                  className="dsh-files-diff-ln"
-                  style={{ width: gutterWidth + 'ch' }}
-                >
-                  {row.newLn ?? ''}
+                <span className="dsh-files-diff-text">
+                  {row.kind === 'hunk' && row.unmodifiedLines !== undefined
+                    ? labels.unmodifiedLines(row.unmodifiedLines)
+                    : renderLineText(row.text, highlighted[index])}
                 </span>
-                <span className="dsh-files-diff-sign">{signFor(row.kind)}</span>
-              </span>
-              <span className="dsh-files-diff-text">
-                {renderLineText(row.text, highlighted[index])}
-              </span>
+              </div>
+              {commentTarget !== null
+                && index === commentTarget.endIndex
+                && commentInfo !== undefined
+                && props.path !== undefined
+                && props.onAddComment !== undefined ? (
+                  <InlineReviewCommentEditor
+                    key={`${commentTarget.side}:${commentTarget.startIndex}:${commentTarget.endIndex}`}
+                    label={commentInfo.startLine === commentInfo.endLine
+                      ? labels.commentLine(commentTarget.side, commentInfo.endLine)
+                      : labels.commentLines(
+                          commentTarget.side,
+                          commentInfo.startLine,
+                          commentInfo.endLine,
+                        )}
+                    labels={labels}
+                    onCancel={() => setCommentTarget(null)}
+                    onSubmit={(body) => {
+                      const applied = props.onAddComment?.({
+                        path: props.path ?? '',
+                        side: commentTarget.side,
+                        startLine: commentInfo.startLine,
+                        endLine: commentInfo.endLine,
+                        body,
+                        code: commentInfo.code,
+                      }) === true
+                      if (applied) setCommentTarget(null)
+                      return applied
+                    }}
+                  />
+                ) : null}
             </div>
           )
         })}
@@ -519,6 +686,117 @@ export function FileDiffView(props: {
             />
           </div>
         ) : null}
+      </div>
+    </div>
+  )
+}
+
+function commentSideForRow(row: DiffRow): Exclude<FileReviewSide, 'file'> | undefined {
+  if (row.kind === 'del') return 'old'
+  if (row.kind === 'add' || row.kind === 'ctx') return 'new'
+  return undefined
+}
+
+/** Unified Codex view shows the line number for the side this row belongs to. */
+function unifiedLineNumber(row: DiffRow): number | undefined {
+  return row.kind === 'del' ? row.oldLn : row.newLn ?? row.oldLn
+}
+
+function rowLineForSide(
+  row: DiffRow,
+  side: Exclude<FileReviewSide, 'file'>,
+): number | undefined {
+  return side === 'old' ? row.oldLn : row.newLn
+}
+
+function diffCommentInfo(
+  rows: readonly DiffRow[],
+  target: DiffCommentTarget,
+): { startLine: number; endLine: number; code: string } | undefined {
+  const selected: Array<{ line: number; text: string }> = []
+  for (let index = target.startIndex; index <= target.endIndex; index += 1) {
+    const row = rows[index]
+    if (row === undefined) continue
+    const line = rowLineForSide(row, target.side)
+    if (line !== undefined) selected.push({ line, text: row.text })
+  }
+  if (selected.length === 0) return undefined
+  return {
+    startLine: selected[0]?.line ?? 0,
+    endLine: selected[selected.length - 1]?.line ?? 0,
+    code: selected.map(item => item.text).join('\n'),
+  }
+}
+
+/** Codex-style inline review composer rendered as a diff/file annotation. */
+function InlineReviewCommentEditor(props: {
+  label: string
+  labels: ViewLabels
+  onCancel: () => void
+  onSubmit: (body: string) => boolean
+}) {
+  const [body, setBody] = useState('')
+  const [failed, setFailed] = useState(false)
+  const submit = (): void => {
+    const value = body.trim()
+    if (value.length === 0) return
+    const applied = props.onSubmit(value)
+    setFailed(!applied)
+  }
+  return (
+    <div className="dsh-files-comment-annotation">
+      <div className="dsh-files-comment-surface">
+        <div className="dsh-files-comment-header">
+          <span className="dsh-files-comment-author">{props.labels.commentAuthor}</span>
+          <span className="dsh-files-comment-location">{props.label}</span>
+        </div>
+        <textarea
+          autoFocus
+          className="dsh-files-comment-input"
+          value={body}
+          placeholder={props.labels.commentPlaceholder}
+          aria-label={props.labels.commentPlaceholder}
+          rows={3}
+          onChange={(event) => {
+            setBody(event.currentTarget.value)
+            setFailed(false)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              props.onCancel()
+              return
+            }
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault()
+              submit()
+            }
+          }}
+        />
+        {failed ? (
+          <div className="dsh-files-comment-error" role="alert">
+            {props.labels.commentFailed}
+          </div>
+        ) : null}
+        <div className="dsh-files-comment-actions">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={props.onCancel}
+          >
+            {props.labels.commentCancel}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            disabled={body.trim().length === 0}
+            onClick={submit}
+          >
+            {props.labels.commentSubmit}
+          </Button>
+        </div>
       </div>
     </div>
   )
@@ -690,7 +968,12 @@ function ExpandRow(props: {
       className="dsh-files-expand"
       onClick={props.onExpand}
     >
-      {props.labels.expand(props.count)}
+      <span className="dsh-files-expand-control" aria-hidden>
+        <IconChevronDownOutline14 size={14} />
+      </span>
+      <span className="dsh-files-expand-label">
+        {props.labels.expand(props.count)}
+      </span>
     </button>
   )
 }
@@ -710,14 +993,25 @@ function parsePatch(patch: string): DiffRow[] {
   const rows: DiffRow[] = []
   let oldLn = 0
   let newLn = 0
+  let seenHunk = false
   for (const line of patch.split('\n')) {
     if (line.startsWith('@@')) {
       const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
       if (match !== null) {
-        oldLn = Number.parseInt(match[1] ?? '0', 10)
-        newLn = Number.parseInt(match[2] ?? '0', 10)
+        const nextOldLn = Number.parseInt(match[1] ?? '0', 10)
+        const nextNewLn = Number.parseInt(match[2] ?? '0', 10)
+        const oldGap = seenHunk ? nextOldLn - oldLn : nextOldLn - 1
+        const newGap = seenHunk ? nextNewLn - newLn : nextNewLn - 1
+        const unmodifiedLines = Math.max(0, Math.min(oldGap, newGap))
+        if (unmodifiedLines > 0) {
+          rows.push({ kind: 'hunk', text: line, unmodifiedLines })
+        }
+        oldLn = nextOldLn
+        newLn = nextNewLn
+        seenHunk = true
+        continue
       }
-      rows.push({ kind: 'hunk', text: line })
+      rows.push({ kind: 'hunk', text: line, unmodifiedLines: 0 })
       continue
     }
     if (line.startsWith('+') && !line.startsWith('+++')) {
@@ -743,12 +1037,6 @@ function parsePatch(patch: string): DiffRow[] {
     // Anything else is a file-header/meta line — hidden by design.
   }
   return rows
-}
-
-function signFor(kind: DiffRowKind): string {
-  if (kind === 'add') return '+'
-  if (kind === 'del') return '−'
-  return ''
 }
 
 /**

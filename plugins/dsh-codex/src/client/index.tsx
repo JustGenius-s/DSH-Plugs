@@ -36,7 +36,7 @@ export const inject = [
   'sessions',
   'workspaces',
   'conversationEvents',
-  // Terminal "Add selection as context" registers an `@` reference codec here.
+  // Terminal selections and file review comments register `@` reference codecs here.
   'inputTriggers',
   'settingsScope',
 ] as const

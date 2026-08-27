@@ -20,6 +20,7 @@ import type { PanelNavState } from '../side-panels/service'
 import { fileIconSvg, folderIconSvg } from './file-icons'
 import { subscribeRepoWatch } from '../repo-watch'
 import { FileCodeView, FileDiffView, FileMarkdownView, type ViewLabels } from './file-views'
+import type { FileReviewComment } from './review-comment'
 import { isMarkdownFile } from './markdown'
 import { ensureFilesStyles } from './styles'
 import { fetchDiff, fetchFile, fetchTree, fetchTreeSearch } from './files-api'
@@ -68,6 +69,8 @@ export interface FilesPanelProps {
    * Wired by the feature wrapper; omitted when conversation is unavailable.
    */
   onAddToChat?: (path: string) => boolean
+  /** Append an inline file/diff review comment to the conversation draft. */
+  onAddComment?: (comment: FileReviewComment) => boolean
 }
 
 /**
@@ -122,6 +125,7 @@ export function FilesPanel(props: FilesPanelProps) {
                 t={t}
                 highlightThemeLight={props.highlightThemeLight}
                 highlightThemeDark={props.highlightThemeDark}
+                onAddComment={props.onAddComment}
               />
             )
           )}
@@ -143,6 +147,7 @@ export function FilesPanel(props: FilesPanelProps) {
                 t={t}
                 highlightThemeLight={props.highlightThemeLight}
                 highlightThemeDark={props.highlightThemeDark}
+                onAddComment={props.onAddComment}
               />
             )
           )}
@@ -720,6 +725,9 @@ function langHintOf(path: string): string {
 function viewLabels(t: (key: string) => string): ViewLabels {
   return {
     expand: (count) => t('files.expand').replace('{count}', String(count)),
+    unmodifiedLines: (count) => t(count === 1
+      ? 'files.unmodifiedLine'
+      : 'files.unmodifiedLines').replace('{count}', String(count)),
     findPlaceholder: t('files.findPlaceholder'),
     findNoResults: t('files.findNoResults'),
     findInvalidRegex: t('files.findInvalidRegex'),
@@ -733,6 +741,19 @@ function viewLabels(t: (key: string) => string): ViewLabels {
     findMatchCase: t('files.findMatchCase'),
     findWholeWord: t('files.findWholeWord'),
     findRegex: t('files.findRegex'),
+    addComment: t('files.addComment'),
+    commentPlaceholder: t('files.commentPlaceholder'),
+    commentCancel: t('files.commentCancel'),
+    commentSubmit: t('files.commentSubmit'),
+    commentFailed: t('files.commentFailed'),
+    commentAuthor: t('files.commentAuthor'),
+    commentLine: (side, line) => t('files.commentLine')
+      .replace('{side}', side === 'old' ? t('files.commentOld') : side === 'new' ? t('files.commentNew') : '')
+      .replace('{line}', String(line)),
+    commentLines: (side, start, end) => t('files.commentLines')
+      .replace('{side}', side === 'old' ? t('files.commentOld') : side === 'new' ? t('files.commentNew') : '')
+      .replace('{start}', String(start))
+      .replace('{end}', String(end)),
   }
 }
 
@@ -743,6 +764,7 @@ function FilesPreview(props: {
   t: (key: string) => string
   highlightThemeLight?: string
   highlightThemeDark?: string
+  onAddComment?: (comment: FileReviewComment) => boolean
 }) {
   const { data, busy, t } = props
   if (busy && data === null) {
@@ -775,6 +797,7 @@ function FilesPreview(props: {
         t={t}
         highlightThemeLight={props.highlightThemeLight}
         highlightThemeDark={props.highlightThemeDark}
+        onAddComment={props.onAddComment}
       />
     </div>
   )
@@ -793,6 +816,7 @@ function FilesTextPreview(props: {
   t: (key: string) => string
   highlightThemeLight?: string
   highlightThemeDark?: string
+  onAddComment?: (comment: FileReviewComment) => boolean
 }) {
   const { file, content, t } = props
   const markdown = isMarkdownFile(file)
@@ -812,6 +836,8 @@ function FilesTextPreview(props: {
         lang={langHintOf(file)}
         labels={viewLabels(t)}
         themeKey={themeKey}
+        path={file}
+        onAddComment={props.onAddComment}
       />
     )
   }
@@ -829,6 +855,8 @@ function FilesTextPreview(props: {
           lang={langHintOf(file)}
           labels={viewLabels(t)}
           themeKey={themeKey}
+          path={file}
+          onAddComment={props.onAddComment}
         />
       )}
     </div>
@@ -873,6 +901,7 @@ function FilesDiffView(props: {
   t: (key: string) => string
   highlightThemeLight?: string
   highlightThemeDark?: string
+  onAddComment?: (comment: FileReviewComment) => boolean
 }) {
   const { diff, busy, t } = props
   if (busy && diff === null) {
@@ -888,6 +917,8 @@ function FilesDiffView(props: {
         lang={langHintOf(props.file)}
         labels={viewLabels(t)}
         themeKey={`${props.highlightThemeLight ?? ''}|${props.highlightThemeDark ?? ''}`}
+        path={props.file}
+        onAddComment={props.onAddComment}
       />
     </div>
   )

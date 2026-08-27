@@ -74,29 +74,50 @@ body[data-ds-dark-theme] .dsh-files-code-line.is-find-active-line{background:rgb
 /* Wrapped rows stay in normal flow because their height depends on pane width. */
 .dsh-files-view{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;position:relative;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:21px}
 .dsh-files-code,.dsh-files-diff-body{position:relative;width:100%;min-width:0;padding:0 0 8px;box-sizing:border-box}
-.dsh-files-expand-slot{width:100%}
+.dsh-files-expand-slot{width:100%;padding:8px;box-sizing:border-box}
+.dsh-files-code-entry,.dsh-files-diff-entry{width:100%;min-width:0}
 .dsh-files-code-line{display:flex;align-items:flex-start;width:100%;min-width:0;min-height:21px;padding-right:8px;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 .dsh-files-code-line:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-files-code-line.is-comment-selected{background:rgba(49,105,218,.10)}
 /* The line number stays aligned with the first visual row after wrapping. */
-.dsh-files-code-ln{flex:none;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-specific-sidebar-fill)}
+.dsh-files-code-ln{flex:none;position:relative;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-specific-sidebar-fill)}
 .dsh-files-code-line:hover .dsh-files-code-ln{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-specific-sidebar-fill)}
+.dsh-files-code-line.is-comment-selected .dsh-files-code-ln{background:linear-gradient(rgba(49,105,218,.10),rgba(49,105,218,.10)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-code-text{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-files-diff-row{display:flex;align-items:flex-start;width:100%;min-width:0;min-height:21px;padding-right:8px;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
-/* Old/new line numbers and the sign share one non-wrapping gutter. */
+/* Codex/Pierre gutter utility: the square comment button is mounted inside
+   the line-number cell and overlays its number instead of taking a column. */
+.dsh-files-comment-add{appearance:none;position:absolute;z-index:4;top:0;right:8px;display:flex;align-items:center;justify-content:center;width:21px;height:21px;padding:0;border:none;border-radius:4px;background:#111;color:#fff;cursor:pointer;opacity:0}
+.dsh-files-code-line:hover .dsh-files-comment-add,.dsh-files-diff-row:hover .dsh-files-comment-add,.dsh-files-comment-add:focus-visible{opacity:1}
+.dsh-files-comment-add:hover{background:#2a2a2a}
+.dsh-files-comment-add:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 45%,transparent);outline-offset:1px}
+/* One active-side line number with the change indicator at its left edge. */
 .dsh-files-diff-gutter{flex:none;display:flex;background:var(--dsw-specific-sidebar-fill)}
-.dsh-files-diff-row.is-hunk .dsh-files-diff-gutter{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-specific-sidebar-fill)}
-.dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(31,122,55,.12),rgba(31,122,55,.12)),var(--dsw-specific-sidebar-fill)}
-.dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(248,81,73,.12),rgba(248,81,73,.12)),var(--dsw-specific-sidebar-fill)}
-.dsh-files-diff-ln{flex:none;padding:0 6px 0 8px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none}
-.dsh-files-diff-sign{flex:none;width:14px;text-align:center;user-select:none}
-.dsh-files-diff-text{flex:1;min-width:0}
-.dsh-files-diff-row.is-hunk{color:var(--dsw-alias-label-tertiary,#8b8b90);background:var(--dsw-alias-interactive-bg-hover)}
-.dsh-files-diff-row.is-ctx{color:var(--dsw-alias-label-secondary,#b0b0b5)}
-.dsh-files-diff-row.is-add{color:#116329;background:rgba(31,122,55,.12)}
-.dsh-files-diff-row.is-del{color:#a40e26;background:rgba(248,81,73,.12)}
+.dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(0,162,64,.10),rgba(0,162,64,.10)),var(--dsw-specific-sidebar-fill)}
+.dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(224,46,42,.10),rgba(224,46,42,.10)),var(--dsw-specific-sidebar-fill)}
+.dsh-files-diff-ln{flex:none;position:relative;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none}
+.dsh-files-diff-mark{flex:none;align-self:stretch;width:4px;min-height:21px;background:transparent}
+.dsh-files-diff-row.is-add .dsh-files-diff-mark{background:#00a240}
+.dsh-files-diff-row.is-del .dsh-files-diff-mark{background-color:transparent;background-image:linear-gradient(0deg,rgba(224,46,42,.10) 50%,#e02e2a 50%);background-repeat:repeat;background-position:0 0;background-size:2px 2px;background-size:calc(1lh / round(1lh / 2px)) calc(1lh / round(1lh / 2px))}
+.dsh-files-diff-text{flex:1;min-width:0;padding-left:7px;color:var(--dsw-alias-label-primary,#e6e6e8)}
+/* Codex/Pierre line-info separator: raw @@ metadata is replaced by the
+   actual count of unchanged lines omitted between the rendered hunks. */
+.dsh-files-diff-row.is-hunk{display:flex;align-items:stretch;width:auto;min-height:24px;height:24px;margin:8px;padding:0;border:none;border-radius:6px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover));overflow:hidden}
+.dsh-files-diff-row.is-hunk .dsh-files-diff-gutter{display:none}
+.dsh-files-diff-row.is-hunk .dsh-files-diff-text{display:flex;align-self:stretch;align-items:center;min-width:0;height:24px;padding:0 1ch;box-sizing:border-box;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#8b8b90);font-family:var(--dsw-font-family,Inter,sans-serif);font-size:12px;line-height:18px}
+.dsh-files-diff-row.is-ctx{color:var(--dsw-alias-label-primary,#e6e6e8)}
+.dsh-files-diff-row.is-add{background:rgba(0,162,64,.10)}
+.dsh-files-diff-row.is-del{background:rgba(224,46,42,.10)}
+.dsh-files-diff-row.is-comment-selected{box-shadow:inset 0 0 0 999px rgba(49,105,218,.10)}
 .dsh-files-diff-row.is-note{color:var(--dsw-alias-label-tertiary,#8b8b90);font-style:italic}
-.dsh-files-expand{display:block;width:100%;min-height:28px;padding:0 12px;border:none;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b90);font:inherit;font-size:13px;line-height:18px;text-align:left;cursor:pointer}
-.dsh-files-expand:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
+/* Codex/Pierre unified hunk separator: a dedicated 32px expand control and a
+   separate rounded information strip, split by the diff surface behind it. */
+.dsh-files-expand{display:flex;align-items:stretch;width:100%;min-width:0;min-height:24px;padding:0;border:none;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b90);font:inherit;font-size:12px;line-height:18px;text-align:left;cursor:pointer}
+.dsh-files-expand-control{display:flex;flex:none;align-items:center;justify-content:center;width:32px;border-radius:6px 0 0 6px;border-right:2px solid var(--dsw-specific-sidebar-fill);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-tertiary,#8b8b90)}
+.dsh-files-expand-label{display:flex;flex:1;min-width:0;align-items:center;padding:0 1ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:0 6px 6px 0;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-tertiary,#8b8b90)}
+.dsh-files-expand:hover .dsh-files-expand-control,.dsh-files-expand:hover .dsh-files-expand-label{color:var(--dsw-alias-label-primary)}
+.dsh-files-expand:hover .dsh-files-expand-label{text-decoration:underline}
+.dsh-files-expand:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 45%,transparent);outline-offset:2px;border-radius:6px}
 
 /* Shiki dual-theme flip: highlighted tokens carry the light literal color
    inline plus a --shiki-dark custom property (see highlight.ts); under the
@@ -106,7 +127,7 @@ body[data-ds-dark-theme] .dsh-files-code-line.is-find-active-line{background:rgb
    pieces without token styles must inherit the line color. */
 body[data-ds-dark-theme] .dsh-files-code-text span[style],body[data-ds-dark-theme] .dsh-files-diff-text span[style]{color:var(--shiki-dark)!important}
 
-/* Dark restatement of the status/diff palette (One Dark values). */
+/* Dark restatement of status badges plus Codex diff semantic colors. */
 body[data-ds-dark-theme] .dsh-files-status.is-error{color:#f87171}
 body[data-ds-dark-theme] .dsh-files-status-badge{background:rgba(152,195,121,.18);color:#98c379}
 body[data-ds-dark-theme] .dsh-files-status-badge.is-added{background:rgba(152,195,121,.18);color:#98c379}
@@ -115,10 +136,27 @@ body[data-ds-dark-theme] .dsh-files-status-badge.is-deleted{background:rgba(224,
 body[data-ds-dark-theme] .dsh-files-status-badge.is-renamed,body[data-ds-dark-theme] .dsh-files-status-badge.is-copied{background:rgba(97,175,239,.18);color:#61afef}
 body[data-ds-dark-theme] .dsh-files-status-badge.is-untracked{background:rgba(86,182,194,.18);color:#56b6c2}
 body[data-ds-dark-theme] .dsh-files-status-badge.is-conflicted{background:rgba(198,120,221,.18);color:#c678dd}
-body[data-ds-dark-theme] .dsh-files-diff-row.is-add{color:#98c379;background:rgba(152,195,121,.12)}
-body[data-ds-dark-theme] .dsh-files-diff-row.is-del{color:#e06c75;background:rgba(224,108,117,.12)}
-body[data-ds-dark-theme] .dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(152,195,121,.12),rgba(152,195,121,.12)),var(--dsw-specific-sidebar-fill)}
-body[data-ds-dark-theme] .dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(224,108,117,.12),rgba(224,108,117,.12)),var(--dsw-specific-sidebar-fill)}
+body[data-ds-dark-theme] .dsh-files-diff-row.is-add{background:rgba(0,162,64,.14)}
+body[data-ds-dark-theme] .dsh-files-diff-row.is-del{background:rgba(224,46,42,.14)}
+body[data-ds-dark-theme] .dsh-files-diff-row.is-add .dsh-files-diff-gutter{background:linear-gradient(rgba(0,162,64,.14),rgba(0,162,64,.14)),var(--dsw-specific-sidebar-fill)}
+body[data-ds-dark-theme] .dsh-files-diff-row.is-del .dsh-files-diff-gutter{background:linear-gradient(rgba(224,46,42,.14),rgba(224,46,42,.14)),var(--dsw-specific-sidebar-fill)}
+body[data-ds-dark-theme] .dsh-files-diff-row.is-del .dsh-files-diff-mark{background-image:linear-gradient(0deg,rgba(224,46,42,.14) 50%,#e02e2a 50%)}
+body[data-ds-dark-theme] .dsh-files-code-line.is-comment-selected{background:rgba(73,126,255,.14)}
+body[data-ds-dark-theme] .dsh-files-comment-add{background:#f5f5f5;color:#111}
+body[data-ds-dark-theme] .dsh-files-comment-add:hover{background:#dedede}
+
+/* Inline review annotations reuse the DSH conversation composer's surface:
+   input-major fill, dark-mode hairline, r16 geometry, and lv2 float shadow.
+   Like the composer, the editable text area is transparent and borderless. */
+.dsh-files-comment-annotation{width:100%;max-width:768px;min-width:0;padding:8px 8px 8px 12px;box-sizing:border-box;font-family:var(--dsw-font-family,Inter,sans-serif);white-space:normal}
+.dsh-files-comment-surface{display:flex;flex-direction:column;gap:8px;padding:10px 12px;border:1px solid var(--dsw-alias-border-l2-darkmode-thin,var(--dsw-alias-border-l2,rgba(128,128,128,.12)));border-radius:16px;background:var(--dsw-specific-input-major,var(--dsw-alias-bg-layer-1,#fff));box-shadow:var(--dsw-shadow-lv2,0 6px 20px rgba(0,0,0,.10));overflow:hidden}
+.dsh-files-comment-header{display:flex;align-items:center;gap:8px;min-width:0;padding:0 2px 2px}
+.dsh-files-comment-author{font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-primary)}
+.dsh-files-comment-location{min-width:0;margin-left:auto;padding:1px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:6px;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.1));font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary,#777)}
+.dsh-files-comment-input{display:block;width:100%;min-height:64px;max-height:140px;resize:none;box-sizing:border-box;padding:2px;border:none;border-radius:0;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px;outline:none;overflow-y:auto}
+.dsh-files-comment-input::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-tertiary,#8b8b90))}
+.dsh-files-comment-error{padding:0 2px;font-size:12px;line-height:16px;color:var(--dsw-alias-state-error-primary,#cf222e)}
+.dsh-files-comment-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding-top:4px}
 
 /* Markdown file: a two-way toggle between the rendered preview and the raw
    source, above the pane. The toggle is a compact segmented control. */

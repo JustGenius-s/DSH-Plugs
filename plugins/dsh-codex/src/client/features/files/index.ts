@@ -7,6 +7,7 @@ import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
 import { insertFileReference } from './add-to-chat'
+import { createFileReviewCommentApi } from './review-comment'
 import { setHighlightThemes } from './highlight'
 import { FilesPanel, type FilesPanelProps } from './files-panel'
 
@@ -23,6 +24,7 @@ export function createFilesFeature(
     requires: ['sidePanels'],
     activate() {
       const store = ctx.sidePanels as SidePanelsStore
+      const reviewComments = createFileReviewCommentApi(ctx)
 
       // Keep the shared highlighter's light/dark pair in sync with settings.
       // The settings page (a separate tab) writes through the same scope, so
@@ -100,6 +102,7 @@ export function createFilesFeature(
                 highlightThemeDark: config.highlightThemeDark,
                 visible: props.visible !== false,
                 onAddToChat: (path) => insertFileReference(ctx, props.sessionId, path),
+                onAddComment: (comment) => reviewComments.insert(props.sessionId, comment),
               }
               return createElement(FilesPanel, panelProps)
             } as never,
@@ -110,6 +113,7 @@ export function createFilesFeature(
         disposeThemeSync()
         disposeDescriptor()
         disposeInjection()
+        reviewComments.dispose()
       }
     },
   }
