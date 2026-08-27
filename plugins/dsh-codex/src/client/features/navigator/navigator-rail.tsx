@@ -22,7 +22,7 @@ import {
 } from '../../host-adapters/conversation-history'
 
 /** Stepped bar widths, indexed by distance from the hovered bar (e-pi effect). */
-const LEVEL_WIDTHS = [12, 18, 26, 34]
+const LEVEL_WIDTHS = [8, 12, 18, 24]
 
 /** Hit-area geometry: a 16px tall transparent button per tick, overlapped by
  * 5px so the visible bars stay ~8px apart while every pixel along the rail is
