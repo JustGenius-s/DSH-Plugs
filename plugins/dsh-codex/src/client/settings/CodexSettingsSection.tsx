@@ -169,10 +169,10 @@ function SettingsBody(props: CodexSettingsInjected) {
           <NumberField label={t('panelLauncherWidth')} min={PANEL_LAUNCHER_WIDTH_MIN} max={PANEL_LAUNCHER_WIDTH_MAX} step={10} value={value.panelLauncherWidth} onChange={next => set('panelLauncherWidth', clampPanelLauncherWidth(next))} />
         </FieldRow>
         <FieldRow label={t('panelDefaultWidth')}>
-          <NumberField label={t('panelDefaultWidth')} min={300} max={720} step={10} value={value.panelDefaultWidth} onChange={next => set('panelDefaultWidth', next)} />
+          <NumberField label={t('panelDefaultWidth')} min={300} max={1080} step={10} value={value.panelDefaultWidth} onChange={next => set('panelDefaultWidth', next)} />
         </FieldRow>
         <FieldRow label={t('panelMaxWidth')}>
-          <NumberField label={t('panelMaxWidth')} min={300} max={720} step={10} value={value.panelMaxWidth} onChange={next => set('panelMaxWidth', next)} />
+          <NumberField label={t('panelMaxWidth')} min={300} max={1080} step={10} value={value.panelMaxWidth} onChange={next => set('panelMaxWidth', next)} />
         </FieldRow>
         <FieldRow label={t('panelRememberTabs')}>
           <Switch label={t('panelRememberTabs')} checked={value.panelRememberTabs} onChange={next => set('panelRememberTabs', next)} />

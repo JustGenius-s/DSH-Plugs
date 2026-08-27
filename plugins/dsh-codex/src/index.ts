@@ -35,8 +35,8 @@ export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   ]).default(DEFAULT_CONFIG.terminalShell),
   terminalScrollback: Schema.number().min(500).max(20_000).default(DEFAULT_CONFIG.terminalScrollback),
   terminalFontSize: Schema.number().min(10).max(24).default(DEFAULT_CONFIG.terminalFontSize),
-  panelDefaultWidth: Schema.number().min(300).max(720).default(DEFAULT_CONFIG.panelDefaultWidth),
-  panelMaxWidth: Schema.number().min(300).max(720).default(DEFAULT_CONFIG.panelMaxWidth),
+  panelDefaultWidth: Schema.number().min(300).max(1080).default(DEFAULT_CONFIG.panelDefaultWidth),
+  panelMaxWidth: Schema.number().min(300).max(1080).default(DEFAULT_CONFIG.panelMaxWidth),
   panelLauncherWidth: Schema.number().min(PANEL_LAUNCHER_WIDTH_MIN).max(PANEL_LAUNCHER_WIDTH_MAX).default(DEFAULT_CONFIG.panelLauncherWidth),
   panelRememberTabs: Schema.boolean().default(DEFAULT_CONFIG.panelRememberTabs),
   quickActions: Schema.array(Schema.object({
