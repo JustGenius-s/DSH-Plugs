@@ -157,44 +157,6 @@ body[data-ds-dark-theme] .dsh-files-comment-add:hover{background:#dedede}
 .dsh-files-comment-input::placeholder{color:var(--dsw-alias-label-dimmed,var(--dsw-alias-label-tertiary,#8b8b90))}
 .dsh-files-comment-error{padding:0 2px;font-size:12px;line-height:16px;color:var(--dsw-alias-state-error-primary,#cf222e)}
 .dsh-files-comment-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding-top:4px}
-/* Submitted comments pinned under their line: compact read-only surface. */
-.dsh-files-comment-annotation-pinned .dsh-files-comment-surface{box-shadow:none;border-radius:12px}
-.dsh-files-comment-annotation-pinned .dsh-files-comment-header{padding-bottom:4px}
-.dsh-files-comment-body{padding:0 2px;font-size:14px;line-height:22px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--dsw-alias-label-primary)}
-
-/* Review comments travel through the input machine as a visible @file:line
-   reference (same shape as an @file mention). The summary pill sits in the
-   composer's own attachment rail below, so no chip hiding is needed. */
-.dsh-files-review-dock-anchor{display:none!important}
-.dsh-files-review-composer-host{min-width:0;padding:4px 12px 0;font-family:var(--dsw-font-family,Inter,sans-serif)}
-.dsh-files-review-rail{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px;width:100%;min-width:0}
-/* One summary pill per comment attachment. Geometry matches the composer
-   image-attachment chip (hairline --dsw-alias-border-l2-darkmode-thin, hover
-   fill) rather than the borderless DSH Pill atom. Hover opens a content card
-   ABOVE the pill; DSH Tooltip is string-only and HoverCard only opens right,
-   so the card copies HoverCard tokens (244px, #2C2C2E, 12px radius, lv3). */
-.dsh-files-review-hover-anchor{display:inline-flex;min-width:0;flex:none;position:relative}
-.dsh-files-review-summary{box-sizing:border-box;display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 6px 0 8px;border:1px solid var(--dsw-alias-border-l2-darkmode-thin,rgba(128,128,128,.18));border-radius:13px;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.10));color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:nowrap;flex:none}
-.dsh-files-review-summary-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;color:var(--dsw-alias-label-secondary)}
-.dsh-files-review-summary-icon svg{width:16px;height:16px;display:block}
-.dsh-files-review-summary-label{flex:none;white-space:nowrap}
-.dsh-files-review-summary-remove{display:grid;place-items:center;flex:none;width:20px;height:20px;margin:0;padding:0;border:none;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b90);cursor:pointer}
-.dsh-files-review-summary-remove:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
-.dsh-files-review-summary-remove:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-state-business-primary,#2563eb) 40%,transparent);outline-offset:0}
-.dsh-files-review-popover-card{--dsw-hovercard-bg:#2C2C2E;position:fixed;z-index:1100;box-sizing:border-box;width:244px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:hidden auto;padding:12px 16px;border-radius:12px;background:var(--dsw-hovercard-bg);box-shadow:var(--dsw-shadow-lv3,0 12px 32px rgba(0,0,0,.28));color:#fff;font-family:var(--dsw-font-family,Inter,sans-serif)}
-.dsh-files-review-popover{display:flex;flex-direction:column;gap:12px;min-width:0}
-.dsh-files-review-preview{display:flex;flex-direction:column;gap:8px;min-width:0;padding:0}
-.dsh-files-review-preview+.dsh-files-review-preview{padding-top:12px;border-top:1px solid rgba(255,255,255,.1)}
-.dsh-files-review-preview-header{display:flex;align-items:center;gap:6px;min-width:0}
-.dsh-files-review-preview-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:12px;line-height:18px;color:#fff}
-.dsh-files-review-preview-loc{flex:none;font-size:12px;line-height:18px;color:rgba(255,255,255,.55);white-space:nowrap}
-.dsh-files-review-body{margin:0;font-size:14px;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere;color:#fff}
-
-/* Sent comments sit above the untouched DSH user renderer. The rail mirrors
-   the native userStack width/alignment, while the bubble below remains owned
-   by ui-conversation (images, timestamp and actions included). */
-.dsh-files-review-message{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:0}
-.dsh-files-review-message-rail{display:flex;flex-wrap:wrap;justify-content:flex-end;align-self:flex-end;gap:10px;min-width:0;width:min(525px,82%)}
 
 /* Markdown file: a two-way toggle between the rendered preview and the raw
    source, above the pane. The toggle is a compact segmented control. */

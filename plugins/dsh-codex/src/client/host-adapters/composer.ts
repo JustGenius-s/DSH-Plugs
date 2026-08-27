@@ -36,3 +36,24 @@ export function insertComposerReference(
     },
   }) === true
 }
+
+/** Append plain text at the end of the session's draft (no chip/occurrence). */
+export function insertComposerText(
+  ctx: ClientContext,
+  sessionId: string,
+  text: string,
+): boolean {
+  const actx = clientSessionScope(ctx.sessions, sessionId)
+  if (actx === undefined) return false
+  const conversation = ctx.get('conversation') as ConversationFace | undefined
+  if (conversation === undefined) return false
+  const snapshot = conversation.input.for(actx).state.getSnapshot()
+  return actx.bail(actx, 'slash/input-insert-text', {
+    text,
+    span: {
+      start: snapshot.draft.length,
+      end: snapshot.draft.length,
+      draftRev: snapshot.draftRev,
+    },
+  }) === true
+}
