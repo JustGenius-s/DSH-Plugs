@@ -20,7 +20,7 @@ import type { PanelNavState } from '../side-panels/service'
 import { fileIconSvg, folderIconSvg } from './file-icons'
 import { subscribeRepoWatch } from '../repo-watch'
 import { FileCodeView, FileDiffView, FileMarkdownView, type ViewLabels } from './file-views'
-import type { FileReviewComment } from './review-comment'
+import type { FileReviewComment, ReviewCommentEntry } from './review-comment'
 import { isMarkdownFile } from './markdown'
 import { ensureFilesStyles } from './styles'
 import { fetchDiff, fetchFile, fetchTree, fetchTreeSearch } from './files-api'
@@ -71,6 +71,12 @@ export interface FilesPanelProps {
   onAddToChat?: (path: string) => boolean
   /** Append an inline file/diff review comment to the conversation draft. */
   onAddComment?: (comment: FileReviewComment) => boolean
+  /** Live review-comment list so open files/diffs pin submitted comments. */
+  reviewComments?: {
+    list: (path: string) => ReviewCommentEntry[]
+    subscribe: (listener: () => void) => () => void
+    getVersion: () => number
+  }
 }
 
 /**
@@ -126,6 +132,7 @@ export function FilesPanel(props: FilesPanelProps) {
                 highlightThemeLight={props.highlightThemeLight}
                 highlightThemeDark={props.highlightThemeDark}
                 onAddComment={props.onAddComment}
+                reviewComments={props.reviewComments}
               />
             )
           )}
@@ -148,6 +155,7 @@ export function FilesPanel(props: FilesPanelProps) {
                 highlightThemeLight={props.highlightThemeLight}
                 highlightThemeDark={props.highlightThemeDark}
                 onAddComment={props.onAddComment}
+                reviewComments={props.reviewComments}
               />
             )
           )}
@@ -765,6 +773,7 @@ function FilesPreview(props: {
   highlightThemeLight?: string
   highlightThemeDark?: string
   onAddComment?: (comment: FileReviewComment) => boolean
+  reviewComments?: FilesPanelProps['reviewComments']
 }) {
   const { data, busy, t } = props
   if (busy && data === null) {
@@ -798,6 +807,7 @@ function FilesPreview(props: {
         highlightThemeLight={props.highlightThemeLight}
         highlightThemeDark={props.highlightThemeDark}
         onAddComment={props.onAddComment}
+        reviewComments={props.reviewComments}
       />
     </div>
   )
@@ -817,6 +827,7 @@ function FilesTextPreview(props: {
   highlightThemeLight?: string
   highlightThemeDark?: string
   onAddComment?: (comment: FileReviewComment) => boolean
+  reviewComments?: FilesPanelProps['reviewComments']
 }) {
   const { file, content, t } = props
   const markdown = isMarkdownFile(file)
@@ -838,6 +849,7 @@ function FilesTextPreview(props: {
         themeKey={themeKey}
         path={file}
         onAddComment={props.onAddComment}
+        reviewComments={props.reviewComments}
       />
     )
   }
@@ -857,6 +869,7 @@ function FilesTextPreview(props: {
           themeKey={themeKey}
           path={file}
           onAddComment={props.onAddComment}
+          reviewComments={props.reviewComments}
         />
       )}
     </div>
@@ -902,6 +915,7 @@ function FilesDiffView(props: {
   highlightThemeLight?: string
   highlightThemeDark?: string
   onAddComment?: (comment: FileReviewComment) => boolean
+  reviewComments?: FilesPanelProps['reviewComments']
 }) {
   const { diff, busy, t } = props
   if (busy && diff === null) {
@@ -919,6 +933,7 @@ function FilesDiffView(props: {
         themeKey={`${props.highlightThemeLight ?? ''}|${props.highlightThemeDark ?? ''}`}
         path={props.file}
         onAddComment={props.onAddComment}
+        reviewComments={props.reviewComments}
       />
     </div>
   )

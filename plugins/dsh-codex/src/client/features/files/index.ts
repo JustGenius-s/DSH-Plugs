@@ -24,7 +24,7 @@ export function createFilesFeature(
     requires: ['sidePanels'],
     activate() {
       const store = ctx.sidePanels as SidePanelsStore
-      const reviewComments = createFileReviewCommentApi(ctx)
+      const reviewComments = createFileReviewCommentApi(ctx, t)
 
       // Keep the shared highlighter's light/dark pair in sync with settings.
       // The settings page (a separate tab) writes through the same scope, so
@@ -103,6 +103,11 @@ export function createFilesFeature(
                 visible: props.visible !== false,
                 onAddToChat: (path) => insertFileReference(ctx, props.sessionId, path),
                 onAddComment: (comment) => reviewComments.insert(props.sessionId, comment),
+                reviewComments: {
+                  list: (path) => reviewComments.list(props.sessionId, path),
+                  subscribe: reviewComments.subscribe,
+                  getVersion: reviewComments.getVersion,
+                },
               }
               return createElement(FilesPanel, panelProps)
             } as never,

@@ -45,7 +45,13 @@ import {
   type FindMatch,
   type FindOptions,
 } from './find-model'
-import type { FileReviewComment, FileReviewSide } from './review-comment'
+import {
+  useReviewComments,
+  type FileReviewComment,
+  type FileReviewSide,
+  type ReviewCommentEntry,
+  type ReviewCommentSource,
+} from './review-comment'
 
 /** Diff rows shown before a long patch collapses behind an expand row. */
 const MAX_DIFF_ROWS = 240
@@ -94,11 +100,22 @@ export function FileCodeView(props: {
   themeKey?: string
   path?: string
   onAddComment?: (comment: FileReviewComment) => boolean
+  reviewComments?: ReviewCommentSource
 }) {
   const { content, lang, labels, themeKey = '' } = props
   const lines = useMemo(() => splitLines(content), [content])
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
   useEffect(() => setCommentTarget(null), [content, props.path])
+  const comments = useReviewComments(props.reviewComments, props.path)
+  const commentsByLine = useMemo(() => {
+    const map = new Map<number, ReviewCommentEntry[]>()
+    for (const comment of comments) {
+      const list = map.get(comment.endLine)
+      if (list === undefined) map.set(comment.endLine, [comment])
+      else list.push(comment)
+    }
+    return map
+  }, [comments])
   // Highlight after the first plain-text paint — sync Shiki on render blocked
   // open for 0.5–2s+. Oversized buffers skip (see highlight.ts caps); the
   // source view still renders the full file as plain text.
@@ -394,6 +411,13 @@ export function FileCodeView(props: {
                       }}
                     />
                   ) : null}
+                {(commentsByLine.get(lineNumber) ?? []).map(comment => (
+                  <PinnedReviewComment
+                    key={comment.ref}
+                    comment={comment}
+                    labels={props.labels}
+                  />
+                ))}
               </div>
             )
           })}
@@ -562,6 +586,7 @@ export function FileDiffView(props: {
   themeKey?: string
   path?: string
   onAddComment?: (comment: FileReviewComment) => boolean
+  reviewComments?: ReviewCommentSource
 }) {
   const { patch, lang, labels, themeKey = '' } = props
   const rows = useMemo(() => parsePatch(patch), [patch])
@@ -569,6 +594,34 @@ export function FileDiffView(props: {
   const [expanded, setExpanded] = useState(false)
   const [commentTarget, setCommentTarget] = useState<DiffCommentTarget | null>(null)
   useEffect(() => setCommentTarget(null), [patch, props.path])
+  const comments = useReviewComments(props.reviewComments, props.path)
+  // Index rows by their (side, line) so submitted comments pin to the row
+  // whose side line equals the comment's end line.
+  const commentRow = useMemo(() => {
+    const byEnd = new Map<number, ReviewCommentEntry[]>()
+    for (const comment of comments) {
+      const list = byEnd.get(comment.endLine)
+      if (list === undefined) byEnd.set(comment.endLine, [comment])
+      else list.push(comment)
+    }
+    const pinned = new Map<number, ReviewCommentEntry[]>()
+    rows.forEach((row, index) => {
+      if (row.kind === 'del') {
+        const list = byEnd.get(row.oldLn ?? -1)
+        if (list !== undefined) {
+          const match = list.filter(comment => comment.side === 'old')
+          if (match.length > 0) pinned.set(index, match)
+        }
+      } else if (row.kind === 'add' || row.kind === 'ctx') {
+        const list = byEnd.get(row.newLn ?? -1)
+        if (list !== undefined) {
+          const match = list.filter(comment => comment.side === 'new')
+          if (match.length > 0) pinned.set(index, match)
+        }
+      }
+    })
+    return pinned
+  }, [comments, rows])
   const capped = !expanded && rows.length > MAX_DIFF_ROWS
   const list = capped ? rows.slice(0, MAX_DIFF_ROWS) : rows
   let maxLn = 0
@@ -674,6 +727,13 @@ export function FileDiffView(props: {
                     }}
                   />
                 ) : null}
+              {(commentRow.get(index) ?? []).map(comment => (
+                <PinnedReviewComment
+                  key={comment.ref}
+                  comment={comment}
+                  labels={labels}
+                />
+              ))}
             </div>
           )
         })}
@@ -797,6 +857,28 @@ function InlineReviewCommentEditor(props: {
             {props.labels.commentSubmit}
           </Button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+/** Submitted review comment pinned under its diff/file line, Codex-style. */
+function PinnedReviewComment(props: {
+  comment: ReviewCommentEntry
+  labels: ViewLabels
+}) {
+  const { comment, labels } = props
+  const label = comment.startLine === comment.endLine
+    ? labels.commentLine(comment.side, comment.endLine)
+    : labels.commentLines(comment.side, comment.startLine, comment.endLine)
+  return (
+    <div className="dsh-files-comment-annotation dsh-files-comment-annotation-pinned">
+      <div className="dsh-files-comment-surface">
+        <div className="dsh-files-comment-header">
+          <span className="dsh-files-comment-author">{labels.commentAuthor}</span>
+          <span className="dsh-files-comment-location">{label}</span>
+        </div>
+        <div className="dsh-files-comment-body">{comment.body}</div>
       </div>
     </div>
   )
