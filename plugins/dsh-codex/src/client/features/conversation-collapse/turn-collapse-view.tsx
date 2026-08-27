@@ -1,5 +1,27 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+
+/** Lucide briefcase-business, DSH 16px stroke (idle glyph for the row). */
+function IconBriefcaseBusiness16() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 12h.01" />
+      <path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+      <path d="M22 13a18.15 18.15 0 0 1-20 0" />
+      <rect width="20" height="14" x="2" y="6" rx="2" />
+    </svg>
+  )
+}
 import type { SettingsScope, UseConversationSession } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
@@ -70,53 +92,6 @@ function unmarkTurn(flow: Element, turn: number): void {
   }
 }
 
-/**
- * Collapsed-state glyph for the Worked-for row. Official Lucide pickaxe, drawn
- * as a round-cap stroke (fill none) and displayed at DSH 14px.
- */
-function IconPickaxeOutline14(props: {
-  size?: number
-  className?: string
-}) {
-  const size = props.size ?? 14
-  return (
-    <svg
-      width={size}
-      height={size}
-      className={props.className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <path d="m14 13-8.381 8.38a1 1 0 0 1-3.001-3L11 9.999" />
-      <path
-        d={
-          'M15.973 4.027A13 13 0 0 0 5.902 2.373c-1.398.342-1.092 '
-          + '2.158.277 2.601a19.9 19.9 0 0 1 5.822 3.024'
-        }
-      />
-      <path
-        d={
-          'M16.001 11.999a19.9 19.9 0 0 1 3.024 5.824c.444 1.369 2.26 '
-          + '1.676 2.603.278A13 13 0 0 0 20 8.069'
-        }
-      />
-      <path
-        d={
-          'M18.352 3.352a1.205 1.205 0 0 0-1.704 0l-5.296 5.296a1.205 '
-          + '1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l'
-          + '5.296-5.296a1.205 1.205 0 0 0 0-1.704z'
-        }
-      />
-    </svg>
-  )
-}
-
 export function TurnCollapseView(props: TurnCollapseViewProps) {
   const { node, useSession, t, scope } = props
   const data = node.data
@@ -130,14 +105,7 @@ export function TurnCollapseView(props: TurnCollapseViewProps) {
 
   const hostRef = useRef<HTMLButtonElement | null>(null)
   const flowRef = useRef<Element | null>(null)
-  const [expanded, setExpanded] = useState(() => !data.closed)
-  const wasClosedRef = useRef(data.closed)
   const [now, setNow] = useState(() => Date.now())
-
-  useEffect(() => {
-    if (data.closed && !wasClosedRef.current) setExpanded(false)
-    wasClosedRef.current = data.closed
-  }, [data.closed])
 
   useEffect(() => {
     if (data.closed || data.startTime === undefined) return
@@ -160,6 +128,16 @@ export function TurnCollapseView(props: TurnCollapseViewProps) {
     return keys.filter(key => isWorkNode(key, nodes.get(key), closingAssistant))
   }, [closingSeq, data.turn, locations, nodes, order])
 
+  // Codex desktop closes the disclosure when the turn finishes: the visible
+  // summary is `startTime → endTime` (the real worked span), never a live
+  // clock. The user can still open the trace again from the row.
+  const [detailsOpen, setDetailsOpen] = useState(() => !data.closed)
+  const detailsWasClosedRef = useRef(data.closed)
+  useEffect(() => {
+    if (data.closed && !detailsWasClosedRef.current) setDetailsOpen(false)
+    detailsWasClosedRef.current = data.closed
+  }, [data.closed])
+
   useLayoutEffect(() => {
     ensureCollapseStyles()
     const found = hostRef.current?.closest('[data-chat-flow]')
@@ -171,7 +149,7 @@ export function TurnCollapseView(props: TurnCollapseViewProps) {
         unmarkTurn(flow, data.turn)
         return
       }
-      markWorkNodes(flow, workKeys, data.turn, !expanded)
+      markWorkNodes(flow, workKeys, data.turn, !detailsOpen)
     }
     apply()
     const observer = new MutationObserver(apply)
@@ -180,15 +158,17 @@ export function TurnCollapseView(props: TurnCollapseViewProps) {
       observer.disconnect()
       unmarkTurn(flow, data.turn)
     }
-  }, [data.turn, enabled, expanded, workKeys])
+  }, [data.turn, enabled, detailsOpen, workKeys])
 
   if (!enabled) return null
 
+  // Elapsed is stable after the turn ends (data.endTime); while running it
+  // derives from `now` on a 1s cadence. Word order follows Codex desktop.
   const elapsedMs = data.startTime === undefined
     ? undefined
     : Math.max(0, (data.endTime ?? now) - data.startTime)
   const duration = elapsedMs === undefined ? undefined : formatWorkedDuration(elapsedMs)
-  const label = data.closed
+  const word = data.closed
     ? (duration === undefined
       ? t('collapse.worked')
       : fillTemplate(t('collapse.workedFor'), { duration }))
@@ -200,20 +180,20 @@ export function TurnCollapseView(props: TurnCollapseViewProps) {
     <button
       ref={hostRef}
       type="button"
-      className="dsh-codex-collapse"
-      aria-expanded={expanded}
-      aria-label={expanded ? t('collapse.collapseAria') : t('collapse.expandAria')}
-      onClick={() => setExpanded(value => !value)}
+      className={'dsh-codex-collapse' + (detailsOpen ? ' is-open' : '')}
+      aria-expanded={detailsOpen}
+      aria-label={detailsOpen ? t('collapse.hideAria') : t('collapse.showAria')}
+      onClick={() => setDetailsOpen(value => !value)}
     >
-      <span className="dsh-codex-collapse-icon" aria-hidden="true">
-        <span className="dsh-codex-collapse-pickaxe">
-          <IconPickaxeOutline14 />
+      <span className="dsh-codex-collapse-leading" aria-hidden="true">
+        <span className="dsh-codex-collapse-idle">
+          <IconBriefcaseBusiness16 />
         </span>
         <span className="dsh-codex-collapse-chevron">
           <IconChevronDownOutline14 />
         </span>
       </span>
-      <span className="dsh-codex-collapse-label">{label}</span>
+      <span className="dsh-codex-collapse-label">{word}</span>
     </button>
   )
 }

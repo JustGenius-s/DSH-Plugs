@@ -4,66 +4,73 @@ const CSS = `
 .dsh-codex-collapse{
   display:flex;
   align-items:center;
-  gap:6px;
+  width:100%;
   margin:0;
-  padding:0;
+  padding:2px 0;
   border:none;
+  border-bottom:1px solid var(--dsw-alias-border-l2);
   background:transparent;
-  color:var(--dsw-alias-label-tertiary);
-  font:var(--dsw-font-s-14, 14px/24px inherit);
+  color:var(--dsw-alias-label-secondary);
+  font-size:14px;
+  line-height:24px;
   cursor:pointer;
   user-select:none;
-}
-.dsh-codex-collapse:hover{
-  color:var(--dsw-alias-label-secondary);
 }
 .dsh-codex-collapse:focus-visible{
   outline:2px solid var(--dsw-alias-state-business-primary);
   outline-offset:2px;
-  border-radius:4px;
 }
-.dsh-codex-collapse-icon{
+.dsh-codex-collapse-leading{
   position:relative;
   display:inline-flex;
   flex:none;
-  width:14px;
-  height:14px;
-  color:inherit;
+  width:16px;
+  height:16px;
+  margin-right:6px;
+  align-items:center;
+  justify-content:center;
+  color:var(--dsw-alias-label-tertiary);
 }
-.dsh-codex-collapse-pickaxe,
+.dsh-codex-collapse-idle{
+  display:inline-flex;
+  opacity:1;
+  transition:opacity .1s ease;
+}
 .dsh-codex-collapse-chevron{
   position:absolute;
-  inset:0;
+  top:0;
+  right:0;
+  bottom:0;
+  left:0;
+  margin:auto;
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  pointer-events:none;
-  transition:opacity .14s ease,transform .14s ease;
-}
-.dsh-codex-collapse-pickaxe{opacity:1}
-.dsh-codex-collapse-chevron{
   opacity:0;
-  transform:rotate(-90deg);
+  transition:opacity .1s ease;
 }
-.dsh-codex-collapse[aria-expanded="true"] .dsh-codex-collapse-pickaxe{opacity:0}
-.dsh-codex-collapse[aria-expanded="true"] .dsh-codex-collapse-chevron{
+.dsh-codex-collapse.is-open .dsh-codex-collapse-chevron{
   opacity:1;
-  transform:rotate(0deg);
 }
-.dsh-codex-collapse[aria-expanded="false"]:is(:hover,:focus-visible) .dsh-codex-collapse-pickaxe{
+.dsh-codex-collapse.is-open .dsh-codex-collapse-idle{
   opacity:0;
 }
-.dsh-codex-collapse[aria-expanded="false"]:is(:hover,:focus-visible) .dsh-codex-collapse-chevron{
+.dsh-codex-collapse:hover .dsh-codex-collapse-idle{
+  opacity:0;
+}
+.dsh-codex-collapse:hover .dsh-codex-collapse-chevron{
   opacity:1;
 }
 .dsh-codex-collapse-label{
+  flex:none;
   font-variant-numeric:tabular-nums;
+  color:inherit;
 }
 [data-dsh-codex-collapsed="true"]{
   display:none !important;
 }
 @media (prefers-reduced-motion:reduce){
-  .dsh-codex-collapse-pickaxe,
+  .dsh-codex-collapse-idle,
   .dsh-codex-collapse-chevron{transition:none}
 }
 `
