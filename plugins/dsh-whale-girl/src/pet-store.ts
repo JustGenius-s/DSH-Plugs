@@ -1,5 +1,5 @@
-import type { Context } from '@deepseek-ai/cordis'
-import { defineDomain, type Domain } from '@deepseek-ai/dsh-storage-domain'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import { defineDomain, type Domain } from '@just-genius/dsh-plugin-runtime/host'
 import { z } from 'zod'
 import { INITIAL_STATE, normalizeState, type PetState } from './shared/pet-state.ts'
 

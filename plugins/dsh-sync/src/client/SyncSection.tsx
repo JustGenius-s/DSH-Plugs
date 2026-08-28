@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+import { Button, Input } from '@just-genius/dsh-plugin-ui'
+import type { InjectFace } from '@just-genius/dsh-plugin-runtime/client'
 import type { SyncKey } from './locales.ts'
 import type { SyncController } from './sync-controller.ts'
 import styles from './SyncSection.module.css'

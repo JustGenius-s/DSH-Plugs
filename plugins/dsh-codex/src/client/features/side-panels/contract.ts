@@ -36,8 +36,8 @@ export interface SidePanelOwnerProps {
 }
 
 
-declare module '@deepseek-ai/cordis' {
-  interface Context {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginClientContext {
     /**
      * The imperative side-panels face: open/close/activate, plus `describe`
      * for a panel to report its own presentation facts (launcher glyph). The
@@ -47,8 +47,8 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface SlotMap {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginSlotMap {
     /**
      * One sidebar panel. List slot: each entry is one tab on the side panel
      * strip, ordered by `order`; the shell renders the active entry's

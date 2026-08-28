@@ -1,4 +1,4 @@
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import type {
   GitGraphActionName,
   GitGraphActionRequest,

@@ -1,4 +1,4 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import { insertComposerText } from '../../host-adapters/composer'
 
 export type FileReviewSide = 'file' | 'old' | 'new'

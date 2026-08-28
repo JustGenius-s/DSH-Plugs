@@ -1,5 +1,5 @@
 import { useCallback, useState, useSyncExternalStore } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import {
   CardFooter,
   DiscardButton,

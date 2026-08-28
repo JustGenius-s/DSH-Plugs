@@ -16,18 +16,25 @@ for (const entry of plugins) {
     continue
   }
 
-  const peers = new Set(Object.keys(manifest.peerDependencies ?? {}))
-  const required = new Set([...bundle.matchAll(/\brequire\("([^"]+)"\)/g)].map((match) => match[1]))
+  const injected = new Set((manifest.dsh?.client?.inject ?? []).map(packageNameOf))
+  const required = new Set([...bundle.matchAll(/\brequire\("([^"]+)"\)/g)].map(match => match[1]))
   for (const specifier of required) {
     const packageName = packageNameOf(specifier)
-    if (!platformSeeds.has(packageName) && !peers.has(packageName)) {
-      errors.push(`${manifest.name}: require("${specifier}") is not a declared platform peer`)
+    if (packageName.startsWith('@just-genius/dsh-plugin-')) {
+      errors.push(`${manifest.name}: shared package leaked into client require("${specifier}")`)
+    } else if (!platformSeeds.has(packageName) && !injected.has(packageName)) {
+      errors.push(`${manifest.name}: require("${specifier}") is not a declared DSH client injection`)
     }
+  }
+
+  if (required.has('@deepseek-ai/dsh-client-ui-primitives')
+    || required.has('@deepseek-ai/dsh-client-ui-primitives/client')) {
+    errors.push(`${manifest.name}: official primitives must be replaced by @just-genius/dsh-plugin-ui`)
   }
 }
 
 if (errors.length > 0) {
-  console.error('Client module-table check failed:\n' + errors.map((line) => `- ${line}`).join('\n'))
+  console.error('Client module-table check failed:\n' + errors.map(line => `- ${line}`).join('\n'))
   process.exitCode = 1
 } else {
   console.log('Client module-table contracts OK')

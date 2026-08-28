@@ -1,7 +1,5 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES, getRemote } from '@just-genius/dsh-plugin-runtime/client'
 import {
   ACTION_PATH,
   INVENTORY_PATH,
@@ -21,19 +19,25 @@ import { en, zh, type PluginsKey } from './locales.ts'
 import type { InventoryEntry } from './match.ts'
 import { requestJson, postJson } from '@just-genius/dsh-plugin-runtime/client'
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface LocaleNamespaceMap {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginLocaleNamespaceMap {
     'settings.pluginConfig': PluginsKey
   }
 }
 
 const NS = 'settings.pluginConfig'
 
-export const inject = ['slots', 'locale', 'remote', 'remote.pluginInventory'] as const
+export const inject = [
+  CLIENT_SERVICES.slots,
+  CLIENT_SERVICES.locale,
+  CLIENT_SERVICES.remote,
+  CLIENT_SERVICES.remotePluginInventory,
+] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-plugin-config: dictionaries')
   const t = ctx.locale.bind(NS)
+  const remote = getRemote(ctx)
 
   const loadInventory = async (): Promise<InventorySnapshot> => {
     const value = await requestJson<InventorySnapshot>(INVENTORY_PATH)
@@ -76,7 +80,7 @@ export function apply(ctx: ClientContext): void {
   }
 
   const listInstalled = async (): Promise<InventoryEntry[]> => {
-    const result = await ctx.remote.pluginInventory.list()
+    const result = await remote.pluginInventory.list()
     if (!result.ok) return []
     return result.value.entries.map((entry) => ({
       entryId: String(entry.entryId),

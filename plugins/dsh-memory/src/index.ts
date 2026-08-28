@@ -1,9 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-host-webserver'
-import type {} from '@deepseek-ai/dsh-system-prompt'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import { errorMessage, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import { defineTool } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, errorMessage, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
 import {
   createEntry,
   deleteEntry,
@@ -30,7 +28,7 @@ import {
 } from './shared.ts'
 
 export const name = 'dsh-memory'
-export const inject = ['tools', 'systemPrompt', 'webServer'] as const
+export const inject = [HOST_SERVICES.tools, HOST_SERVICES.systemPrompt, HOST_SERVICES.webServer] as const
 
 interface LivePropose {
   id: string

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { Button } from '@just-genius/dsh-plugin-ui'
+import type { PropsLocale, PropsRuntime } from '@just-genius/dsh-plugin-runtime/client'
 import type { MemoryKey } from './locales.ts'
 import { usePendingMemory } from './usePendingMemory.ts'
 import type { MemoryProposeAction } from '../shared.ts'

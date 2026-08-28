@@ -10,7 +10,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
-import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Tooltip } from '@just-genius/dsh-plugin-ui'
 import { launcherVisible, type LauncherStore } from './launcher-store'
 
 /**

@@ -12,9 +12,9 @@
 // fetchers and, crucially, knows the App's own version); this half carries
 // no checker. The card reads version state over the preload bridge.
 
-import type { Context } from '@deepseek-ai/cordis'
-import Schema from '@deepseek-ai/schemastery'
-import { installSettingsSection } from '@deepseek-ai/dsh-settings'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import { Schema } from '@just-genius/dsh-plugin-runtime/host'
+import { installSettingsSection } from '@just-genius/dsh-plugin-runtime/host'
 
 export const name = 'desktop-update'
 

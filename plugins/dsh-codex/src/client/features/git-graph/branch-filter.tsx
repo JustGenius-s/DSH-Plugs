@@ -13,7 +13,7 @@ import {
   IconChevronDownOutline14,
   IconSearchOutline16,
   Input,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import {
   GIT_GRAPH_ALL_SCOPE,
   type GitGraphScopeRef,

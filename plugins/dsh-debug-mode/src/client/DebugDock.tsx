@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { Button, MarkdownText } from '@just-genius/dsh-plugin-ui'
+import type { PropsLocale, PropsRuntime } from '@just-genius/dsh-plugin-runtime/client'
 import type { DebugKey } from './locales.ts'
 import { useDebugState } from './useDebugState.ts'
 import type { DebugLogEntry, DebugReproAction } from '../shared.ts'

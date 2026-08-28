@@ -1,15 +1,15 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import type { ConversationSnapshot } from '@just-genius/dsh-plugin-runtime/client'
 import type { DshCodexConfig } from '../../../shared/config'
-import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-client-runtime/client'
+import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@just-genius/dsh-plugin-runtime/client'
 import type {
   IApiClient,
   SessionEvent,
-} from '@deepseek-ai/dsh-client-connection/client'
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+} from '@just-genius/dsh-plugin-runtime/client'
+import type { PropsRuntime } from '@just-genius/dsh-plugin-runtime/client'
 import {
   chatAnchorRow,
   chatFlow,

@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-settings'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import { HttpInputError, errorMessage, readJsonBody, sendJson } from '@just-genius/dsh-plugin-runtime/host'
 import { fetchGithubUser, pollDeviceFlow, startDeviceFlow } from './github-auth.ts'
 import { createSecretGist, getGist, resolveGistId, updateGist } from './github-gist.ts'

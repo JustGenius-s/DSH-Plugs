@@ -1,7 +1,4 @@
-import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'

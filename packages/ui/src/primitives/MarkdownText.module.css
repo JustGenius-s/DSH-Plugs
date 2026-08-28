@@ -1,0 +1,53 @@
+.root {
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.root > :first-child {
+  margin-top: 0;
+}
+
+.root > :last-child {
+  margin-bottom: 0;
+}
+
+.root p,
+.root ul,
+.root ol,
+.root pre,
+.root blockquote {
+  margin: .55em 0;
+}
+
+.root ul,
+.root ol {
+  padding-left: 1.5em;
+}
+
+.root code {
+  font-family: var(--dsw-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: .92em;
+}
+
+.root :not(pre) > code {
+  padding: .1em .3em;
+  border-radius: 4px;
+  background: var(--dsw-alias-fill-tertiary, rgb(127 127 127 / 14%));
+}
+
+.root pre {
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--dsw-alias-fill-tertiary, rgb(127 127 127 / 14%));
+}
+
+.root a {
+  color: var(--dsw-alias-label-accent, currentColor);
+}
+
+.root blockquote {
+  padding-left: .8em;
+  border-left: 3px solid var(--dsw-alias-border-l1, currentColor);
+  color: var(--dsw-alias-label-secondary, inherit);
+}

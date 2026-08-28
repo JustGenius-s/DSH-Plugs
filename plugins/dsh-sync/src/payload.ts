@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { settingsNamespace, type SettingsProvider } from '@deepseek-ai/dsh-settings'
+import { settingsNamespace, type SettingsProvider } from '@just-genius/dsh-plugin-runtime/host'
 import type { PluginProfileManager } from '@just-genius/dsh-plugin-runtime'
 import type { SyncPayloadV2, SyncPluginsSnapshot } from './shared.ts'
 import { collectPlugins } from './profile-sync.ts'

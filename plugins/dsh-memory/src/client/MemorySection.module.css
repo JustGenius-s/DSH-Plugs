@@ -1,6 +1,6 @@
 /* Memory settings: only page-specific rules. Section chrome, search Input,
  * expandable rows, tags, notices come from @just-genius/dsh-plugin-ui and
- * @deepseek-ai/dsh-client-ui-primitives. */
+ * @just-genius/dsh-plugin-ui. */
 
 .root {
   margin: 0;

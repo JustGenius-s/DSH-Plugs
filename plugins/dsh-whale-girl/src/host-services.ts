@@ -1,5 +1,5 @@
-import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
-import type { JobRegistry } from '@deepseek-ai/dsh-jobs'
+import type { AgentRegistry } from '@just-genius/dsh-plugin-runtime/host'
+import type { JobRegistry } from '@just-genius/dsh-plugin-runtime/host'
 
 export interface TaskView {
   id: string

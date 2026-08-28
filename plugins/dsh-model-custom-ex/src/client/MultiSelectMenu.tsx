@@ -4,8 +4,8 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { Menu, Pill, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Menu, Pill, IconChevronDownOutline14 } from '@just-genius/dsh-plugin-ui'
+import type { MenuEntry } from '@just-genius/dsh-plugin-ui'
 
 /** How many selected tags to show before folding the rest into a "+N" chip. */
 const MAX_TAGS = 2

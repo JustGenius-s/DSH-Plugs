@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutline14 } from '@just-genius/dsh-plugin-ui'
 
 /** Lucide briefcase-business, DSH 16px stroke (idle glyph for the row). */
 function IconBriefcaseBusiness16() {
@@ -22,8 +22,8 @@ function IconBriefcaseBusiness16() {
     </svg>
   )
 }
-import type { SettingsScope, UseConversationSession } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConversationSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope, UseConversationSession } from '@just-genius/dsh-plugin-runtime/client'
+import type { ConversationSnapshot } from '@just-genius/dsh-plugin-runtime/client'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import {

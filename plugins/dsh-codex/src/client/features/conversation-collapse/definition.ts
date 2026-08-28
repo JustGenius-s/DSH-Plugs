@@ -1,9 +1,9 @@
-import type { ConversationNodeDefinition } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationNodeDefinition } from '@just-genius/dsh-plugin-runtime/client'
 import type { CodexTurnCollapseData, CollapseState } from './model'
 import { TURN_COLLAPSE_KIND, turnFromEvent } from './model'
 
-declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
-  interface ChatNodeDataMap {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginChatNodeDataMap {
     /** Collapsible per-turn work disclosure. */
     'codex-turn-collapse': CodexTurnCollapseData
   }

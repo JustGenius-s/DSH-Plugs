@@ -1,4 +1,4 @@
-import type { ConversationSnapshot, SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationSnapshot, SessionId, SessionSummary } from '@just-genius/dsh-plugin-runtime/client'
 import type { Translate } from './project.ts'
 import { projectChat, type WeChatItem } from './project.ts'
 

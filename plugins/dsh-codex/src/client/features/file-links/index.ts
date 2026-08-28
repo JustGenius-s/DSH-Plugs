@@ -15,7 +15,8 @@
  * known cwd.
  */
 
-import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import { getSessions, getWorkspaces } from '@just-genius/dsh-plugin-runtime/client'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
@@ -30,7 +31,7 @@ export function createFileLinksFeature(
     id: 'file-links',
     requires: ['sidePanels', 'files'],
     activate() {
-      const workspaces = ctx.workspaces
+      const workspaces = getWorkspaces(ctx)
       const store = ctx.sidePanels as SidePanelsStore
       const hadOwn = Object.prototype.hasOwnProperty.call(workspaces, 'openPath')
       const original = workspaces.openPath
@@ -80,7 +81,7 @@ function panelTarget(
   if (!normalized.startsWith('/') && !/^[A-Za-z]:\//.test(normalized)) {
     return undefined
   }
-  const { sessionId, cwd: rawCwd } = currentSessionLocation(ctx.sessions)
+  const { sessionId, cwd: rawCwd } = currentSessionLocation(getSessions(ctx))
   if (sessionId === undefined) return undefined
   const cwd = rawCwd?.replace(/\\/g, '/')
   if (cwd === undefined || cwd === '') return undefined

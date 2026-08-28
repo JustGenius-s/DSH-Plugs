@@ -1,6 +1,7 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { getSessions } from '@just-genius/dsh-plugin-runtime/client'
+import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import type { TurnTailOwnerProps } from '@just-genius/dsh-plugin-runtime/client'
 import type { DshCodexConfig } from '../../../shared/config'
 import type { CodexFeature } from '../../core/feature-manager'
 import { NavigatorRail } from './navigator-rail'
@@ -23,7 +24,7 @@ export function createNavigatorFeature(ctx: ClientContext, scope: SettingsScope<
               scope,
               registry,
               api,
-              loadOlder: () => loadOlderSessionHistory(ctx.sessions, sessionId),
+              loadOlder: () => loadOlderSessionHistory(getSessions(ctx), sessionId),
             }),
           },
           NavigatorRail as never,

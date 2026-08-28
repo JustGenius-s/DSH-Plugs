@@ -5,7 +5,7 @@ import type {
   PendingInteraction,
   RunningToolCall,
   SessionSummary,
-} from '@deepseek-ai/dsh-client-runtime/client'
+} from '@just-genius/dsh-plugin-runtime/client'
 import type { WeChatKey } from './locales.ts'
 
 export type WeChatItem =

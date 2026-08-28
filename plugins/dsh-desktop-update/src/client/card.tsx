@@ -9,9 +9,9 @@
 // a remote browser in memory mode) the card leaves no trace.
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
-import { Menu, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import { Menu, IconChevronDownOutline14 } from '@just-genius/dsh-plugin-ui'
+import type { MenuEntry } from '@just-genius/dsh-plugin-ui'
 import {
   ActionButton,
   CardFooter,

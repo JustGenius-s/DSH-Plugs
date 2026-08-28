@@ -1,5 +1,6 @@
 import { createElement } from 'react'
-import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import { getSessions } from '@just-genius/dsh-plugin-runtime/client'
 import type { DshCodexConfig, QuickAction } from '../../../shared/config'
 import { currentSessionLocation } from '../../host-adapters/sessions'
 import type { SidePanelActionsContribution } from '../side-panels/actions'
@@ -18,7 +19,7 @@ export function createQuickActionsContribution(
 
   const execute = async (action: QuickAction): Promise<void> => {
     const panels = ctx.sidePanels as SidePanelsStore
-    const { sessionId, cwd: sessionCwd } = currentSessionLocation(ctx.sessions)
+    const { sessionId, cwd: sessionCwd } = currentSessionLocation(getSessions(ctx))
     const snapshot = panels.getSnapshot()
     let activeTerminal = snapshot.activeKey === null
       ? undefined

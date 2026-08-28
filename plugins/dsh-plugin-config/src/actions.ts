@@ -1,4 +1,4 @@
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import type { PluginProfileManager } from '@just-genius/dsh-plugin-runtime'
 import { PROTECTED_IDS } from './classify.ts'
 import { collectInventory } from './inventory.ts'

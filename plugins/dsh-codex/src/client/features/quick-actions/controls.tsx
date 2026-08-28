@@ -22,7 +22,7 @@ import {
   Button, Menu, Modal, Tooltip,
   IconChecklistOutline14, IconChevronDownOutline14, IconPlusOutline16,
   type MenuEntry,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import { injectStyles } from '@just-genius/dsh-plugin-ui'
 import { createQuickAction } from './store'
 import type { QuickActionsStore } from './store'

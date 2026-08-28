@@ -13,7 +13,7 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
-  deps: { neverBundle: true },
+  deps: { neverBundle: true, alwaysBundle: [/^@just-genius\/dsh-plugin-runtime(?:\/|$)/] },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {

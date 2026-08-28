@@ -1,4 +1,4 @@
-import type { HistoryEntry, IApiClient } from '@deepseek-ai/dsh-client-connection/client'
+import type { HistoryEntry, IApiClient } from '@just-genius/dsh-plugin-runtime/client'
 
 export interface ConversationHistoryAddress {
   parentSessionId: string

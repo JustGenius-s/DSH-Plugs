@@ -1,7 +1,8 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import type { ConnectionHandle } from '@just-genius/dsh-plugin-runtime/client'
+import { getConnection } from '@just-genius/dsh-plugin-runtime/client'
 
 /** Cordis' runtime service lookup is intentionally narrowed at one boundary. */
 export function clientConnection(ctx: ClientContext): ConnectionHandle {
-  return ctx.get('connection') as ConnectionHandle
+  return getConnection(ctx)
 }

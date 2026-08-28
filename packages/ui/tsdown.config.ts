@@ -17,7 +17,19 @@ export default defineConfig([
     outDir: 'lib',
     clean: true,
     platform: 'browser',
-    deps: { neverBundle: true, alwaysBundle: ['clsx'] },
+    deps: {
+      neverBundle: true,
+      alwaysBundle: [
+        'clsx',
+        'dompurify',
+        'markdown-it',
+        'mdurl',
+        'uc.micro',
+        'entities',
+        'linkify-it',
+        'punycode.js',
+      ],
+    },
     plugins: [dshCssModules(PKG)],
   },
   {

@@ -42,9 +42,18 @@ Turns the web surface into a WeChat-style messenger: chat list, green/white bubb
 
 Desktop pet (whale-girl). In a plain browser it is the in-page companion; in DSH-Desktop it opens a transparent always-on-top overlay via `window.dshDesktop.overlays` so the pet sits on the OS desktop.
 
-## Shared UI package
+## Shared packages
 
-[`packages/ui`](packages/ui) (`@just-genius/dsh-plugin-ui`) ships DSH `--dsw-*` theme tokens plus React primitives (`Button`, `Input`, `Menu`, `Modal`, …) and settings chrome. Plugins bundle it at build time; standalone apps (e.g. Vellum) can depend on it via `file:` / npm and call `installTheme()` once at boot. See [packages/ui/README.md](packages/ui/README.md).
+[`packages/runtime`](packages/runtime) (`@just-genius/dsh-plugin-runtime`) is the
+only package that directly adapts official DSH host/client APIs. All plugins
+depend on this boundary instead of importing `@deepseek-ai/*` packages or
+pinning their versions independently.
+
+[`packages/ui`](packages/ui) (`@just-genius/dsh-plugin-ui`) ships DSH `--dsw-*` theme tokens plus React primitives (`Button`, `Input`, `Menu`, `Modal`, Markdown, confirmation and toast UI) and settings chrome. Plugins bundle it at build time; standalone apps (e.g. Vellum) can depend on it via `file:` / npm and call `installTheme()` once at boot. See [packages/ui/README.md](packages/ui/README.md).
+
+Official DSH contracts are pinned at the shared boundary to the newest tested
+published APIs (`0.1.1-rc.2` at this migration). See
+[`DEPENDENCY_POLICY.md`](DEPENDENCY_POLICY.md) for the upgrade and bundle rules.
 
 ## Repository layout
 
@@ -54,6 +63,7 @@ DSH-Plugs/
 ├── pnpm-workspace.yaml   # packages: ['plugins/*', 'packages/*']
 ├── tsconfig.base.json    # shared TS config
 ├── packages/
+│   ├── runtime/          # @just-genius/dsh-plugin-runtime
 │   └── ui/               # @just-genius/dsh-plugin-ui
 └── plugins/
     └── <plugin>/         # one plugin per folder

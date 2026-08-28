@@ -1,6 +1,6 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ReferenceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { getSessions } from '@just-genius/dsh-plugin-runtime/client'
+import type { ReferenceInsert } from '@just-genius/dsh-plugin-runtime/client'
 import { clientSessionScope } from './sessions'
 
 interface InputStateFace {
@@ -22,7 +22,7 @@ export function insertComposerReference(
   sessionId: string,
   reference: ReferenceInsert,
 ): boolean {
-  const actx = clientSessionScope(ctx.sessions, sessionId)
+  const actx = clientSessionScope(getSessions(ctx), sessionId)
   if (actx === undefined) return false
   const conversation = ctx.get('conversation') as ConversationFace | undefined
   if (conversation === undefined) return false
@@ -43,7 +43,7 @@ export function insertComposerText(
   sessionId: string,
   text: string,
 ): boolean {
-  const actx = clientSessionScope(ctx.sessions, sessionId)
+  const actx = clientSessionScope(getSessions(ctx), sessionId)
   if (actx === undefined) return false
   const conversation = ctx.get('conversation') as ConversationFace | undefined
   if (conversation === undefined) return false

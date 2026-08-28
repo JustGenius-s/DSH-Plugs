@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import { execGit } from './git-exec'
 
 const GIT_TIMEOUT_MS = 5_000

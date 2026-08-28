@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconCloseFill14 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { IconCloseFill14 } from '@just-genius/dsh-plugin-ui'
+import type { PropsLocale, PropsRuntime } from '@just-genius/dsh-plugin-runtime/client'
 import { useDebugState } from './useDebugState.ts'
 import styles from './DebugChip.module.css'
 

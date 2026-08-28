@@ -1,4 +1,4 @@
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../shared/config'
 
 /** Register a settings-gated slot only when the enabled bit actually flips. */

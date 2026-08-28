@@ -24,11 +24,11 @@
  * codec can rebuild the model form at submit time; disposal clears the data.
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import type {
   InputTriggerSource,
   ReferenceInsert,
-} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+} from '@just-genius/dsh-plugin-runtime/client'
 import { insertComposerReference } from '../../host-adapters/composer'
 
 /** Source name the composer's `serializeReference` routing key uses. */

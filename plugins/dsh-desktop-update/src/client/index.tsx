@@ -7,19 +7,20 @@
 // tray, `notify` for system notifications. A plain browser has no
 // `dshDesktop` and the native half stays inert.
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Type-only: the ctx.settingsScope Context merge (the implementation lives
-// in the Settings surface; binding happens on this plugin's fiber).
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-// Type-only: the `settings.plugin.item` slot declaration.
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES, getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 
 import { UpdateCard, type DesktopUpdateConfig } from './card'
 import { installDesktopSeats } from './seats'
 
 /** Client services this plugin requires before `apply` runs. */
-export const inject = ['slots', 'locale', 'connection', 'remote', 'settingsScope'] as const
+export const inject = [
+  CLIENT_SERVICES.slots,
+  CLIENT_SERVICES.locale,
+  CLIENT_SERVICES.connection,
+  CLIENT_SERVICES.remote,
+  CLIENT_SERVICES.settingsScope,
+] as const
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'desktop-update'
@@ -114,7 +115,7 @@ export function apply(ctx: ClientContext): void {
 
   // Bound on this fiber: disposal, invalidation subscriptions, and the
   // initial Host read are owned by the binder's ctx.effect.
-  const scope = ctx.settingsScope.bind<DesktopUpdateConfig>({ namespace: SETTINGS_NS })
+  const scope = getSettingsScope(ctx).bind<DesktopUpdateConfig>({ namespace: SETTINGS_NS })
   ctx.slots.inject('settings.plugin.item', () =>
     ctx.slots.register(
       {

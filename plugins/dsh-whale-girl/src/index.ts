@@ -2,16 +2,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-host-webserver'
-import type {} from '@deepseek-ai/dsh-jobs'
-import type { Session } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-session-title'
-import type {} from '@deepseek-ai/dsh-storage-domain'
-import Schema from '@deepseek-ai/schemastery'
-import { installSettingsSection } from '@deepseek-ai/dsh-settings'
-import { HttpInputError, readJsonBody, sendJson } from '@just-genius/dsh-plugin-runtime/host'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import type { Session } from '@just-genius/dsh-plugin-runtime/host'
+import { Schema } from '@just-genius/dsh-plugin-runtime/host'
+import { installSettingsSection } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, HttpInputError, readJsonBody, sendJson } from '@just-genius/dsh-plugin-runtime/host'
 import {
   BODY_LIMIT,
   DEFAULTS,
@@ -53,13 +48,13 @@ import { openPetStore } from './pet-store.ts'
 
 export const name = 'dsh-whale-girl'
 export const inject = [
-  'webServer',
-  'settings',
-  'storageDomain',
-  'jobs',
-  'agents',
-  'sessions',
-  'sessionTitle',
+  HOST_SERVICES.webServer,
+  HOST_SERVICES.settings,
+  HOST_SERVICES.storageDomain,
+  HOST_SERVICES.jobs,
+  HOST_SERVICES.agents,
+  HOST_SERVICES.sessions,
+  HOST_SERVICES.sessionTitle,
 ] as const
 
 const ConfigSchema = Schema.object({

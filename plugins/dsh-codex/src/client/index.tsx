@@ -1,10 +1,5 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import type {} from '@deepseek-ai/dsh-client-connection/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES, getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { createCodexFeatureManager } from './core/feature-manager'
 import { createConversationCollapseFeature } from './features/conversation-collapse'
 import { createFileLinksFeature } from './features/file-links'
@@ -20,8 +15,8 @@ import { installCodexSettingsIcon } from './settings/codex-settings-icon'
 import { en, zh, type CodexKey } from './locales'
 import { SETTINGS_NAMESPACE, type DshCodexConfig } from '../shared/config'
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface LocaleNamespaceMap {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginLocaleNamespaceMap {
     'settings.codex': CodexKey
   }
 }
@@ -29,22 +24,22 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 const NS = 'settings.codex'
 
 export const inject = [
-  'slots',
-  'locale',
-  'connection',
-  'remote',
-  'sessions',
-  'workspaces',
-  'conversationEvents',
+  CLIENT_SERVICES.slots,
+  CLIENT_SERVICES.locale,
+  CLIENT_SERVICES.connection,
+  CLIENT_SERVICES.remote,
+  CLIENT_SERVICES.sessions,
+  CLIENT_SERVICES.workspaces,
+  CLIENT_SERVICES.conversationEvents,
   // Terminal selections and file review comments register `@` reference codecs here.
-  'inputTriggers',
-  'settingsScope',
+  CLIENT_SERVICES.inputTriggers,
+  CLIENT_SERVICES.settingsScope,
 ] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-codex: dictionaries')
 
-  const scope = ctx.settingsScope.bind<DshCodexConfig>({ namespace: SETTINGS_NAMESPACE })
+  const scope = getSettingsScope(ctx).bind<DshCodexConfig>({ namespace: SETTINGS_NAMESPACE })
   const t = ctx.locale.bind(NS) as (key: CodexKey) => string
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({

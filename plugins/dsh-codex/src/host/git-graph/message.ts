@@ -1,6 +1,5 @@
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-agent-default-model'
-import { createUserMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import { createUserMessage, type StreamChunk } from '@just-genius/dsh-plugin-runtime/host'
 import { execGit } from './git-exec'
 
 const GIT_TIMEOUT_MS = 15_000

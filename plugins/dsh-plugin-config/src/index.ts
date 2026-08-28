@@ -1,10 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/cordis-plugin-loader'
-import type {} from '@deepseek-ai/dsh-host-webserver'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import { runAction } from './actions.ts'
 import { collectInventory } from './inventory.ts'
-import { readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
 import { CATALOG_PATH, INSTALL_PATH } from './market/types.ts'
 import { loadMarketplaceCatalog } from './market/host-catalog.ts'
 import { installCatalogSpec } from './market/install.ts'
@@ -20,7 +18,7 @@ import {
 
 export const name = 'dsh-plugin-config'
 
-export const inject = ['webServer', 'loader'] as const
+export const inject = [HOST_SERVICES.webServer, HOST_SERVICES.loader] as const
 
 export function apply(ctx: Context) {
   const profile = createPluginProfileManager(ctx)

@@ -1,4 +1,4 @@
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import { execGit } from './git-exec'
 import {
   DEFAULT_GRAPH_LIMIT,

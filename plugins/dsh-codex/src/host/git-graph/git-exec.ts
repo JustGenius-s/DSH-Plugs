@@ -1,5 +1,4 @@
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-subprocess'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 
 export interface GitResult {
   stdout: string

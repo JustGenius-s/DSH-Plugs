@@ -1,21 +1,20 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES } from '@just-genius/dsh-plugin-runtime/client'
 import { SyncSection } from './SyncSection.tsx'
 import type { SyncSectionInjected } from './SyncSection.tsx'
 import { installSyncSettingsIcon } from './sync-settings-icon.ts'
 import { en, zh, type SyncKey } from './locales.ts'
 import { SyncController } from './sync-controller.ts'
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface LocaleNamespaceMap {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginLocaleNamespaceMap {
     sync: SyncKey
   }
 }
 
 const NS = 'sync'
 
-export const inject = ['slots', 'locale'] as const
+export const inject = [CLIENT_SERVICES.slots, CLIENT_SERVICES.locale] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-sync: dictionaries')

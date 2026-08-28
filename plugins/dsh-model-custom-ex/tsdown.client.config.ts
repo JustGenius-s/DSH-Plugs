@@ -13,16 +13,13 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
-  // neverBundle leaves host seed packages as require(); schema-form is not a
-  // seed (same class as dsh-client-web-react), so it and its validator chain
-  // must be inlined or the client module table misses them at load.
+  // Shared adapters and UI are compiled into the plugin bundle; official
+  // client packages remain platform-provided module-table entries.
   deps: {
     neverBundle: true,
     alwaysBundle: [
-      '@deepseek-ai/dsh-client-schema-form',
-      '@deepseek-ai/schemastery',
-      '@deepseek-ai/cosmokit',
-      '@standard-schema/spec',
+      '@just-genius/dsh-plugin-ui',
+      /^@just-genius\/dsh-plugin-runtime(?:\/|$)/,
     ],
   },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),

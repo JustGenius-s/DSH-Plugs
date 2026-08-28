@@ -7,7 +7,7 @@ import {
   RiskConfirmation,
   writeClipboard,
   type MenuEntry,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import {
   GIT_GRAPH_ACTION_PATH,
   type GitGraphActionName,

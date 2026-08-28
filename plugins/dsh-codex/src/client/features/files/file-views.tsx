@@ -34,7 +34,7 @@ import {
   IconChevronUpOutline14,
   IconCloseOutline16,
   IconPlusOutline16,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import {
   highlightLines,
   type HighlightSpan,

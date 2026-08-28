@@ -1,8 +1,6 @@
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-credentials'
-import type {} from '@deepseek-ai/dsh-storage-domain'
-import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { defineDomain, type Domain } from '@deepseek-ai/dsh-storage-domain'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import { credentialRef } from '@just-genius/dsh-plugin-runtime/host'
+import { defineDomain, type Domain } from '@just-genius/dsh-plugin-runtime/host'
 import { z } from 'zod'
 
 /** Non-secret sync metadata. The GitHub token lives in ctx.credentials. */

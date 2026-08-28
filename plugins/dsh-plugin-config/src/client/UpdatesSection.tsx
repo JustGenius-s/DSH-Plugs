@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button } from '@just-genius/dsh-plugin-ui'
 import {
   ExpandableRow,
   FailureRow,

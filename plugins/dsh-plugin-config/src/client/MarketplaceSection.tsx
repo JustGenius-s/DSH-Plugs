@@ -7,8 +7,8 @@ import {
   IconFolderOpenOutline16,
   Menu,
   writeClipboard,
-} from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
+import type { MenuEntry } from '@just-genius/dsh-plugin-ui'
 import {
   CommandRow,
   ExpandableRow,

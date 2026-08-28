@@ -1,6 +1,5 @@
-import { symbols, type Context } from '@deepseek-ai/cordis'
-import type { Entry } from '@deepseek-ai/cordis-plugin-loader'
-import type {} from '@deepseek-ai/cordis-plugin-loader'
+import { symbols, type Context } from '@just-genius/dsh-plugin-runtime/host'
+import type { Entry } from '@just-genius/dsh-plugin-runtime/host'
 import { catalogNames, matchCatalogLabel } from './catalog.ts'
 import {
   PROTECTED_IDS,

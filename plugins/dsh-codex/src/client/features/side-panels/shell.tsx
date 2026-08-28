@@ -7,19 +7,19 @@
  * Visuals and interaction mirror the native DSH sidebar column: the same
  * `--dsw-specific-sidebar-fill` surface, `--dsw-alias-border-l1` divider and
  * no drop shadow as AppFrame's left rail. Icons and the tooltip come from
- * `@deepseek-ai/dsh-client-ui-primitives`, and resize follows AppFrame's
+ * `@just-genius/dsh-plugin-ui`, and resize follows AppFrame's
  * drag contract — pointer capture, rAF-throttled deltas against the
  * drag-start width, and an 8px hit strip with no visible pill.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import {
   IconChevronRightOutline14,
   IconCloseFill14, IconCloseOutline16, IconPlusOutline16, Menu, Tooltip,
   type MenuEntry,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import {
   clampPanelLauncherWidth,
   DEFAULT_CONFIG,
@@ -29,8 +29,8 @@ import { resolvePanelIcon } from './icons'
 import { launcherVisible, type LauncherStore } from './launcher-store'
 import { NO_SESSION_PANEL_KEY, type SidePanelInstance, type SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
-import type { SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
-import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionListState } from '@just-genius/dsh-plugin-runtime/client'
+import type { SnapshotSelectorHook } from '@just-genius/dsh-plugin-runtime/client'
 import { sessionCwd } from '../../host-adapters/sessions'
 import { useSidePanelLayout } from './layout-controller'
 import type { SidePanelActionsContribution } from './actions'

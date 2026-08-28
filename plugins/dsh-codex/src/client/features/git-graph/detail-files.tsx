@@ -4,7 +4,7 @@ import {
   IconChevronRightOutline14,
   IconCloseOutline16,
   IconPlusOutline16,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import {
   GIT_GRAPH_FILES_PATH,
   type GitChangeFile,

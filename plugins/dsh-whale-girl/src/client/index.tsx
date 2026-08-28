@@ -1,7 +1,5 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES, getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { CONTRIBUTOR, NAMESPACE, OVERLAY_ID, type WhaleGirlConfig } from '../shared/config.ts'
 import { OVERLAY_PATH } from '../shared/routes.ts'
 import { bridge } from './bridge.ts'
@@ -9,7 +7,11 @@ import { PetCard } from './card.tsx'
 import { apply as mountInPage } from './pet.mjs'
 
 export const name = 'dsh-whale-girl'
-export const inject = ['slots', 'locale', 'settingsScope'] as const
+export const inject = [
+  CLIENT_SERVICES.slots,
+  CLIENT_SERVICES.locale,
+  CLIENT_SERVICES.settingsScope,
+] as const
 
 const NS = 'whale-girl'
 
@@ -102,7 +104,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, 'zh', zh), 'dsh-whale-girl: zh dictionary')
   ctx.effect(() => ctx.locale.register(NS, 'en', en), 'dsh-whale-girl: en dictionary')
 
-  const scope = ctx.settingsScope.bind<WhaleGirlConfig>({ namespace: NAMESPACE })
+  const scope = getSettingsScope(ctx).bind<WhaleGirlConfig>({ namespace: NAMESPACE })
   ctx.slots.inject('settings.plugin.item', () =>
     ctx.slots.register(
       {

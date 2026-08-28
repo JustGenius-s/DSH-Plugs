@@ -1,9 +1,6 @@
-import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-fs'
-import type {} from '@deepseek-ai/dsh-llm'
-import type {} from '@deepseek-ai/dsh-agent-default-model'
-import Schema from '@deepseek-ai/schemastery'
-import { installSettingsSection } from '@deepseek-ai/dsh-settings'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, Schema } from '@just-genius/dsh-plugin-runtime/host'
+import { installSettingsSection } from '@just-genius/dsh-plugin-runtime/host'
 import {
   DEFAULT_CONFIG,
   PANEL_LAUNCHER_WIDTH_MAX,
@@ -15,7 +12,14 @@ import { createDshCodexGitGraphServer } from './host/git-graph/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
-export const inject = ['subprocess', 'webServer', 'settings', 'llm', 'agentDefaultModel', 'fs'] as const
+export const inject = [
+  HOST_SERVICES.subprocess,
+  HOST_SERVICES.webServer,
+  HOST_SERVICES.settings,
+  HOST_SERVICES.llm,
+  HOST_SERVICES.agentDefaultModel,
+  HOST_SERVICES.fs,
+] as const
 
 /** Host-side schema for the one durable Codex configuration namespace. */
 export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({

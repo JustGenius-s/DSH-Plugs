@@ -1,36 +1,47 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
+import type { ClientContext, ConnectionHandle } from '@just-genius/dsh-plugin-runtime/client'
+import {
+  CLIENT_SERVICES,
+  getConnection,
+  getSessions,
+  getWorkspaces,
+} from '@just-genius/dsh-plugin-runtime/client'
 import { WeChatApp, type WeChatAppInjected } from './WeChatApp.tsx'
 import { en, zh, type WeChatKey } from './locales.ts'
 import type { ModelDirectoryFace, ModelPick } from './models.ts'
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface LocaleNamespaceMap {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginLocaleNamespaceMap {
     'wechat.chat': WeChatKey
   }
 }
 
 const NS = 'wechat.chat'
 
-export const inject = ['slots', 'locale', 'sessions', 'workspaces', 'modelDirectories', 'connection'] as const
+export const inject = [
+  CLIENT_SERVICES.slots,
+  CLIENT_SERVICES.locale,
+  CLIENT_SERVICES.sessions,
+  CLIENT_SERVICES.workspaces,
+  CLIENT_SERVICES.modelDirectories,
+  CLIENT_SERVICES.connection,
+] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-wechat-chat: dictionaries')
   const t = ctx.locale.bind(NS)
-  const connection = ctx.get('connection') as ConnectionHandle
+  const connection = getConnection(ctx)
+  const sessions = getSessions(ctx)
+  const workspaces = getWorkspaces(ctx)
 
   const injected = (): WeChatAppInjected => ({
     t,
-    open: (id) => ctx.sessions.open(id),
-    startSession: (workspaceId) => ctx.workspaces.startSession(workspaceId),
-    bindingOf: (id) => ctx.sessions.binding(id as never),
-    archiveSession: (id) => ctx.workspaces.archiveSession(id),
-    pickDirectory: () => ctx.workspaces.pickDirectory(),
-    createWorkspace: (path) => ctx.workspaces.create({ path }),
-    connectWorkspace: (id) => ctx.workspaces.connectWorkspace(id),
+    open: (id) => sessions.open(id),
+    startSession: (workspaceId) => workspaces.startSession(workspaceId),
+    bindingOf: (id) => sessions.binding(id as never),
+    archiveSession: (id) => workspaces.archiveSession(id),
+    pickDirectory: () => workspaces.pickDirectory(),
+    createWorkspace: (path) => workspaces.create({ path }),
+    connectWorkspace: (id) => workspaces.connectWorkspace(id),
     directoryFor: (id) => {
       try {
         return ctx.modelDirectories.directoryFor(id as never) as ModelDirectoryFace

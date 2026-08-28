@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ConversationSnapshot, SessionBinding, SessionFace } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationSnapshot, SessionBinding, SessionFace } from '@just-genius/dsh-plugin-runtime/client'
 
 const ENABLED_KEY = 'dsh-wechat-chat.enabled'
 

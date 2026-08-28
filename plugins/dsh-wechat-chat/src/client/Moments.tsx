@@ -1,4 +1,4 @@
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '@just-genius/dsh-plugin-runtime/client'
 import type { WeChatKey } from './locales.ts'
 import { formatClock, hueFromId, initialOf } from './project.ts'
 import type { MomentPost } from './moments.ts'

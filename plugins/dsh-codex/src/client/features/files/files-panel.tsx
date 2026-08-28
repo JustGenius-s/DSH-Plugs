@@ -6,7 +6,7 @@ import {
   Input,
   Menu,
   type MenuEntry,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import {
   type GitChangeStatus,
   type GitFileDiff,

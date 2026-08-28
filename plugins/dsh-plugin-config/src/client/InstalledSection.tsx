@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Menu, Modal } from '@just-genius/dsh-plugin-ui'
+import type { MenuEntry } from '@just-genius/dsh-plugin-ui'
 import {
   ExpandableRow,
   FailureRow,

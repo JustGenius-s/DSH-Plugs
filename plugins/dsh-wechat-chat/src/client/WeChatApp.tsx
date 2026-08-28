@@ -6,8 +6,8 @@ import type {
   SessionId,
   SessionListState,
   WorkspaceId,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+} from '@just-genius/dsh-plugin-runtime/client'
+import type { SnapshotSelectorHook } from '@just-genius/dsh-plugin-runtime/client'
 import { zh, type WeChatKey } from './locales.ts'
 import { useBinding, useLiveSnapshot, useRecentSnapshots, useWeChatEnabled } from './hooks.ts'
 import { MomentsFeed } from './Moments.tsx'

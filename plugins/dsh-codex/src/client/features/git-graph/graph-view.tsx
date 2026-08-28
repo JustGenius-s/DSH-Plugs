@@ -4,7 +4,7 @@ import {
   IconCheckOutline16,
   IconWarningOutline16,
   Toast,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import {
   DEFAULT_GRAPH_LIMIT,
   GIT_GRAPH_PATH,

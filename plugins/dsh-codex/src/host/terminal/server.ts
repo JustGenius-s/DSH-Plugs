@@ -14,9 +14,9 @@
 // version) in that directory and pushes it as a `context` message; the
 // browser attaches the latest context to the block being edited.
 
-import type { Context } from '@deepseek-ai/cordis'
-import type { SubprocessTerminalHandle, SubprocessTerminalSignal } from '@deepseek-ai/dsh-subprocess'
-import type {} from '@deepseek-ai/dsh-host-webserver'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import type { SubprocessTerminalHandle, SubprocessTerminalSignal } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES } from '@just-genius/dsh-plugin-runtime/host'
 import { execFile } from 'node:child_process'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -32,7 +32,7 @@ import { resizeSubprocessTerminal } from '../adapters/subprocess-terminal'
 export const name = 'dsh-codex-terminal'
 
 /** Host services this plugin requires before `apply` runs. */
-export const inject = ['subprocess', 'webServer'] as const
+export const inject = [HOST_SERVICES.subprocess, HOST_SERVICES.webServer] as const
 
 const execFileAsync = promisify(execFile)
 

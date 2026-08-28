@@ -16,8 +16,8 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import type { DiscoveredModelView, IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
-import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { DiscoveredModelView, IApiClient } from '@just-genius/dsh-plugin-runtime/client'
+import { Button, Modal } from '@just-genius/dsh-plugin-ui'
 import { formatCapacity, parseCapacity } from './DeepSeekModelsEditor.tsx'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import { messageOf } from './store.ts'
@@ -303,10 +303,11 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         setFailure(t('fetchEmpty'))
         return
       }
-      // Nothing starts checked: the user picks each model to adopt, so a
-      // fetch never smuggles rows into the profile unexamined.
+      // Everything already configured starts unchecked, so adopting a
+      // selection never silently rewrites a capacity the user corrected.
+      const known = new Set(models.map(model => textOf(model, 'id')))
       setCandidates(found)
-      setPicked(new Set())
+      setPicked(new Set(found.filter(model => !known.has(model.id)).map(model => model.id)))
     } catch (error) {
       // The transport rejected rather than answering; without this the button
       // would stay busy with nothing shown.
@@ -342,6 +343,18 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
       const next = new Set(current)
       if (!next.delete(id)) next.add(id)
       return next
+    })
+  }
+
+  const activeCandidates = candidates ?? []
+  const allCandidatesPicked = activeCandidates.length > 0
+    && activeCandidates.every(candidate => picked.has(candidate.id))
+
+  const toggleAllCandidates = (): void => {
+    setPicked((current) => {
+      return activeCandidates.every(candidate => current.has(candidate.id))
+        ? new Set()
+        : new Set(activeCandidates.map(candidate => candidate.id))
     })
   }
 
@@ -520,6 +533,11 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
           </>
         )}
       >
+        <div className={styles['candidateActions']}>
+          <Button variant="ghost" size="sm" onClick={toggleAllCandidates}>
+            {t(allCandidatesPicked ? 'fetchDeselectAll' : 'fetchSelectAll')}
+          </Button>
+        </div>
         <ul className={styles['candidateList']}>
           {(candidates ?? []).map(candidate => (
             <li key={candidate.id} className={styles['candidate']}>

@@ -1,13 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-commands'
-import type {} from '@deepseek-ai/dsh-system-prompt'
-import type {} from '@deepseek-ai/dsh-host-webserver'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import { errorMessage, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
+import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import type { Agent } from '@just-genius/dsh-plugin-runtime/host'
+import type { Session, SessionEvent } from '@just-genius/dsh-plugin-runtime/host'
+import { createUserMessage } from '@just-genius/dsh-plugin-runtime/host'
+import { defineTool } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, errorMessage, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
 import { DEBUG_POLICY } from './policy.ts'
 import {
   DEBUG_LOG,
@@ -32,7 +29,12 @@ export type { DebugProjection } from './types.ts'
 export { DEBUG_LOG, LOGS_PATH, REPRO_PATH, STATE_PATH, WAIT_FOR_REPRO } from './shared.ts'
 
 export const name = 'dsh-debug-mode'
-export const inject = ['tools', 'systemPrompt', 'sessions', 'webServer'] as const
+export const inject = [
+  HOST_SERVICES.tools,
+  HOST_SERVICES.systemPrompt,
+  HOST_SERVICES.sessions,
+  HOST_SERVICES.webServer,
+] as const
 
 /**
  * Live debug collaboration state for one session.
@@ -127,7 +129,7 @@ export function apply(ctx: Context): void {
     },
   })
 
-  ctx.inject(['commands'], (commandCtx) => {
+  ctx.inject([HOST_SERVICES.commands], (commandCtx) => {
     commandCtx.commands.register({
       name: 'debug',
       description: 'Enter or leave debug mode',

@@ -3,10 +3,9 @@
  *
  * Two sources, in this order of preference:
  *
- * 1. REUSE a native `ic_ds_*` glyph from `@deepseek-ai/dsh-client-ui-primitives`
- *    whenever one carries the right meaning. Reuse is free consistency — the
- *    glyph is byte-identical to what DSH draws elsewhere, and it tracks any
- *    upstream redraw. Five of the seven names below are pure reuse.
+ * 1. REUSE a native-compatible `ic_ds_*` glyph from the shared plugin UI
+ *    whenever one carries the right meaning. Five of the seven names below
+ *    are shared glyphs.
  * 2. HAND-DRAW to DSH's spec only where that sheet has no equivalent
  *    (terminal, git-graph, and the generic panel mark). Spec reverse-engineered
  *    from the same sheet:
@@ -27,7 +26,7 @@
 import {
   IconBranchOutline16, IconChecklistOutline14, IconFolderOpenOutline16,
   IconGlobeOutline14, IconNewChatOutline16,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+} from '@just-genius/dsh-plugin-ui'
 import type { ReactNode } from 'react'
 
 /** Props every panel glyph takes; mirrors primitives' `IconProps`. */

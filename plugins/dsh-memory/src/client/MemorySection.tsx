@@ -4,8 +4,8 @@ import {
   IconPlusOutline16,
   IconSearchOutline16,
   Input,
-} from '@deepseek-ai/dsh-client-ui-primitives'
-import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+} from '@just-genius/dsh-plugin-ui'
+import type { InjectFace } from '@just-genius/dsh-plugin-runtime/client'
 import {
   AddButton,
   ExpandableRow,

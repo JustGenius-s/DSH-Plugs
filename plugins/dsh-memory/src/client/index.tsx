@@ -1,7 +1,5 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES } from '@just-genius/dsh-plugin-runtime/client'
 import { MemoryDock } from './MemoryDock.tsx'
 import { MemorySection } from './MemorySection.tsx'
 import type { MemorySectionInjected } from './MemorySection.tsx'
@@ -11,15 +9,15 @@ import { PROPOSE_PATH, type MemoryProposeAction } from '../shared.ts'
 import { postResult } from '@just-genius/dsh-plugin-runtime/client'
 import { MemoryController } from './memory-controller.ts'
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface LocaleNamespaceMap {
+declare module '@just-genius/dsh-plugin-runtime/client' {
+  interface PluginLocaleNamespaceMap {
     memory: MemoryKey
   }
 }
 
 const NS = 'memory'
 
-export const inject = ['slots', 'locale'] as const
+export const inject = [CLIENT_SERVICES.slots, CLIENT_SERVICES.locale] as const
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-memory: dictionaries')

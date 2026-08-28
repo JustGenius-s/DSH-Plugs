@@ -48,4 +48,4 @@ export function sessionCwd(
 ): string | undefined {
   return (sessionsById as Record<string, { cwd?: string }> | undefined)?.[sessionId]?.cwd
 }
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'

@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { IconSearchOutline16, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconSearchOutline16, Input } from '@just-genius/dsh-plugin-ui'
 import { SettingsSection, StatusText } from '@just-genius/dsh-plugin-ui'
 import { InstalledSection, type InstalledSectionInjected } from './InstalledSection.tsx'
 import { MarketplaceSection, type MarketplaceSectionInjected } from './MarketplaceSection.tsx'
