@@ -52,8 +52,7 @@ pinning their versions independently.
 [`packages/ui`](packages/ui) (`@just-genius/dsh-plugin-ui`) ships DSH `--dsw-*` theme tokens plus React primitives (`Button`, `Input`, `Menu`, `Modal`, Markdown, confirmation and toast UI) and settings chrome. Plugins bundle it at build time; standalone apps (e.g. Vellum) can depend on it via `file:` / npm and call `installTheme()` once at boot. See [packages/ui/README.md](packages/ui/README.md).
 
 Official DSH contracts are pinned at the shared boundary to the newest tested
-published APIs (`0.1.1-rc.2` at this migration). See
-[`DEPENDENCY_POLICY.md`](DEPENDENCY_POLICY.md) for the upgrade and bundle rules.
+published APIs (`0.1.1-rc.2` at this migration).
 
 ## Repository layout
 
@@ -95,10 +94,7 @@ pnpm clean        # remove all lib/
 
 ## Adding a plugin
 
-1. Copy a `plugins/*` folder and rename it to your plugin name.
-2. Set `package.json`'s `name` (keep the `@just-genius/dsh-*` prefix).
-3. Edit `src/index.ts` (node half) and `src/client/index.tsx` (browser half).
-4. `pnpm build`.
+Before creating a plugin, follow the dependency rule in [`AGENTS.md`](AGENTS.md).
 
 ## Installing a plugin
 
