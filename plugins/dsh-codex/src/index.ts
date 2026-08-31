@@ -3,6 +3,8 @@ import { HOST_SERVICES, Schema } from '@just-genius/dsh-plugin-runtime/host'
 import { installSettingsSection } from '@just-genius/dsh-plugin-runtime/host'
 import {
   DEFAULT_CONFIG,
+  FULL_SESSION_LOAD_LIMIT_MAX,
+  FULL_SESSION_LOAD_LIMIT_MIN,
   PANEL_LAUNCHER_WIDTH_MAX,
   PANEL_LAUNCHER_WIDTH_MIN,
   SETTINGS_NAMESPACE,
@@ -25,6 +27,13 @@ export const inject = [
 export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   navigatorEnabled: Schema.boolean().default(DEFAULT_CONFIG.navigatorEnabled),
   conversationCollapseEnabled: Schema.boolean().default(DEFAULT_CONFIG.conversationCollapseEnabled),
+  stickyUserBubbleEnabled: Schema.boolean().default(DEFAULT_CONFIG.stickyUserBubbleEnabled),
+  stickyUserBubbleMode: Schema.union([
+    Schema.const('running'),
+    Schema.const('always'),
+  ]).default(DEFAULT_CONFIG.stickyUserBubbleMode),
+  fullSessionLoadEnabled: Schema.boolean().default(DEFAULT_CONFIG.fullSessionLoadEnabled),
+  fullSessionLoadLimit: Schema.number().min(FULL_SESSION_LOAD_LIMIT_MIN).max(FULL_SESSION_LOAD_LIMIT_MAX).default(DEFAULT_CONFIG.fullSessionLoadLimit),
   terminalEnabled: Schema.boolean().default(DEFAULT_CONFIG.terminalEnabled),
   gitGraphEnabled: Schema.boolean().default(DEFAULT_CONFIG.gitGraphEnabled),
   filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),

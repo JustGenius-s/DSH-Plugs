@@ -4,7 +4,18 @@ import type { MenuItem } from '@just-genius/dsh-plugin-ui'
 import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { Switch } from '@just-genius/dsh-plugin-ui'
 import { HIGHLIGHT_THEME_OPTIONS, type HighlightThemeKind } from '../features/files/themes'
-import { clampPanelLauncherWidth, DEFAULT_CONFIG, PANEL_LAUNCHER_WIDTH_MAX, PANEL_LAUNCHER_WIDTH_MIN, type DshCodexConfig, type TerminalShell } from '../../shared/config'
+import {
+  clampFullSessionLoadLimit,
+  clampPanelLauncherWidth,
+  DEFAULT_CONFIG,
+  FULL_SESSION_LOAD_LIMIT_MAX,
+  FULL_SESSION_LOAD_LIMIT_MIN,
+  PANEL_LAUNCHER_WIDTH_MAX,
+  PANEL_LAUNCHER_WIDTH_MIN,
+  type DshCodexConfig,
+  type StickyUserBubbleMode,
+  type TerminalShell,
+} from '../../shared/config'
 import type { CodexKey } from '../locales'
 
 export interface CodexSettingsInjected {
@@ -30,6 +41,53 @@ function Group(props: { title: string; children: ReactNode }) {
       <h3 style={{ margin: 0, fontSize: 14, lineHeight: '20px' }}>{props.title}</h3>
       {props.children}
     </section>
+  )
+}
+
+/** When the pinned question bubble is shown; only offered while pinning is on. */
+function StickyModeMenu(props: {
+  label: string
+  value: StickyUserBubbleMode
+  t: (key: CodexKey) => string
+  onChange: (value: StickyUserBubbleMode) => void
+}) {
+  const { label, value, t, onChange } = props
+  const [open, setOpen] = useState(false)
+  const items: readonly MenuItem[] = [
+    { id: 'running', label: t('sticky.modeRunning') },
+    { id: 'always', label: t('sticky.modeAlways') },
+  ]
+  const selectedLabel = items.find(item => item.id === value)?.label ?? value
+
+  return (
+    <Menu
+      open={open}
+      items={items}
+      selectedId={value}
+      onSelect={id => {
+        onChange(id as StickyUserBubbleMode)
+        setOpen(false)
+      }}
+      onClose={() => setOpen(false)}
+      align="end"
+      side="bottom"
+      portal
+      anchor={(
+        <Button
+          type="button"
+          size="sm"
+          variant="toolbar"
+          aria-label={label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen(current => !current)}
+          style={{ minWidth: 116, justifyContent: 'space-between', gap: 8 }}
+        >
+          <span>{selectedLabel}</span>
+          <IconChevronDownOutline14 aria-hidden="true" />
+        </Button>
+      )}
+    />
   )
 }
 
@@ -162,6 +220,36 @@ function SettingsBody(props: CodexSettingsInjected) {
         <FieldRow label={t('conversationCollapseEnabled')}>
           <Switch label={t('conversationCollapseEnabled')} checked={value.conversationCollapseEnabled} onChange={next => set('conversationCollapseEnabled', next)} />
         </FieldRow>
+      </Group>
+
+      <Group title={t('groupConversation')}>
+        <FieldRow label={t('stickyUserBubbleEnabled')}>
+          <Switch label={t('stickyUserBubbleEnabled')} checked={value.stickyUserBubbleEnabled} onChange={next => set('stickyUserBubbleEnabled', next)} />
+        </FieldRow>
+        {value.stickyUserBubbleEnabled
+          ? (
+            <FieldRow label={t('stickyUserBubbleMode')}>
+              <StickyModeMenu label={t('stickyUserBubbleMode')} value={value.stickyUserBubbleMode} t={t} onChange={next => set('stickyUserBubbleMode', next)} />
+            </FieldRow>
+          )
+          : null}
+        <FieldRow label={t('fullSessionLoadEnabled')}>
+          <Switch label={t('fullSessionLoadEnabled')} checked={value.fullSessionLoadEnabled} onChange={next => set('fullSessionLoadEnabled', next)} />
+        </FieldRow>
+        {value.fullSessionLoadEnabled
+          ? (
+            <FieldRow label={t('fullSessionLoadLimit')}>
+              <NumberField
+                label={t('fullSessionLoadLimit')}
+                min={FULL_SESSION_LOAD_LIMIT_MIN}
+                max={FULL_SESSION_LOAD_LIMIT_MAX}
+                step={5}
+                value={value.fullSessionLoadLimit}
+                onChange={next => set('fullSessionLoadLimit', clampFullSessionLoadLimit(next))}
+              />
+            </FieldRow>
+          )
+          : null}
       </Group>
 
       <Group title={t('groupPanel')}>
