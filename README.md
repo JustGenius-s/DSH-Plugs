@@ -8,11 +8,15 @@
 
 ### [@just-genius/dsh-codex](plugins/dsh-codex)
 
-The consolidated Codex shell: Codex-style message navigation, Cursor-style per-turn **Worked for** collapsing, a right-side `side.panel` host with a file tree / preview / diff view (VSCode Light+/Dark+ syntax themes), a Warp-style terminal panel backed by a real login-shell PTY, and a read-only git commit-graph panel.
+The consolidated Codex shell: Codex-style message navigation, Cursor-style per-turn **Worked for** collapsing, a right-side `side.panel` host with a file tree / preview / diff view (VSCode Light+/Dark+ syntax themes), a Warp-style terminal panel backed by a real login-shell PTY, and a read-only git commit-graph panel. Optional: pin the newest question while scrolling, and drain a session's full history on open.
 
 ### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
 
 Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with **Proceed** / **Mark as fixed**. Mode/wait/logs stay in process memory for the live session only (not written to the durable session log).
+
+### [@just-genius/dsh-multi-repo](plugins/dsh-multi-repo)
+
+Multi-folder workspaces (Codex-style, no git scan): add folders one by one, pick one as the **primary** — the official workspace, session cwd, and workspace-write scope — while the rest stay readable and coordinatable. Bindings live in `~/.dsh/multi-repo/projects.json` and are injected into the system prompt.
 
 ### [@just-genius/dsh-memory](plugins/dsh-memory)
 
@@ -28,7 +32,15 @@ Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop) next
 
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 
-Replaces the official Models settings page (fork of `ui-settings-models`) to add per-model dropdown multi-selects for **vision** (`input`) and **thinking strength** (`reasoningEfforts`) — the two controls the stock page punts to `settings.yaml`.
+Replaces the official Models settings page (fork of `ui-settings-models`) to add per-model dropdown multi-selects for **vision** (`input`) and **thinking strength** (`reasoningEfforts`), plus a per-model **default thinking strength** and typeable **capacity combos** — the controls the stock page punts to `settings.yaml`.
+
+### [@just-genius/dsh-notify-jump](plugins/dsh-notify-jump)
+
+Click a `dsh-notification` system banner to focus the window and open that session; when the DSH-Desktop bridge is present it routes through `window.dshDesktop.notify` so click-to-jump survives the Electron shell. Also notifies on the rising edge of approval / ask / plan-review waits.
+
+### [@just-genius/dsh-session-archive](plugins/dsh-session-archive)
+
+**Settings → 会话归档**: archived sessions grouped by workspace, with a confirmed delete. The sidebar keeps its one-click **归档会话** entry.
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
