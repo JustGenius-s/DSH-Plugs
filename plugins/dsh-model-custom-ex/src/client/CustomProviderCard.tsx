@@ -23,7 +23,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import type { IApiClient } from '@just-genius/dsh-plugin-runtime/client'
+import type { ModelsOperations } from './operations.ts'
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { validateDeepSeekModels } from './DeepSeekModelsEditor.tsx'
@@ -58,8 +58,8 @@ export interface CustomProviderCardProps {
    * than a silent overwrite of its whole profile.
    */
   revision: number
-  /** Wire faces for the write and for interrogating the endpoint. */
-  api: Pick<IApiClient, 'settings' | 'credentials' | 'llm'>
+  /** Host operations for the write and for interrogating the endpoint. */
+  operations: ModelsOperations
   /** Section copy. */
   t: (key: keyof typeof en) => string
   /** Disable writes (read-only settings provider). */
@@ -74,7 +74,7 @@ export interface CustomProviderCardProps {
  * @returns the creation card.
  */
 export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
-  const { taken, protocols, api, t } = props
+  const { taken, protocols, operations, t } = props
   // Captured at mount, like the editor's: the write must be judged against the
   // section this card was drafted over, not whatever it grew into meanwhile.
   const [openedAt] = useState(() => props.revision)
@@ -144,26 +144,26 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         baseURL,
         models: models.map(model => ({ ...model })),
       }
-      const response = await api.settings.mutate({
-        ns: NS,
-        ops: [{ op: 'set', path: ['providers', route], value: profile }],
+      const response = await operations.writeSettings(
+        NS,
+        [{ op: 'set', path: ['providers', route], value: profile }],
         // `taken` is a snapshot too, so the id check alone cannot see a route
         // declared after this card opened; the revision makes that race a
-        // `settings-conflict` instead of a write over the other profile.
-        expectedRevision: openedAt,
-      })
-      if (!response.result.ok) return response.result.error.message
+        // conflict instead of a write over the other profile.
+        openedAt,
+      )
+      if (response.kind !== 'written') return response.message
       // The provider now exists. A retry after the key write below fails must
       // not re-run this mutate: the revision it holds is the one this write
-      // just superseded, so the Host would answer `settings-conflict` and the
+      // just superseded, so the Host would answer conflict and the
       // key could never be stored from this card at all.
       setCommitted(true)
     }
     if (storesKey) {
-      const stored = await api.credentials.set({ ref: keyRef, value: keyValue })
+      const stored = await operations.storeCredential(keyRef, keyValue)
       // The profile landed; saying the key did not is the only honest report,
       // and the retry above now goes straight back to this write.
-      if (!stored.result.ok) return stored.result.error.message
+      if (stored !== undefined) return stored
     }
     return undefined
   }
@@ -274,7 +274,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
           ...keyValue.length === 0 ? {} : { apiKey: keyValue },
         }}
         probeBlocked={keyFailure === 'keyBlank' ? 'keyBlankNew' : keyFailure}
-        api={api}
+        operations={operations}
         t={t}
         disabled={profileDisabled}
       />

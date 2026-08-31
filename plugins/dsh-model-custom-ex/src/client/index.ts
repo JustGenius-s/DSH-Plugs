@@ -9,11 +9,11 @@
 import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import {
   CLIENT_SERVICES,
-  getConnection,
   getRemote,
   getSettingsSchema,
   getSettingsScope,
 } from '@just-genius/dsh-plugin-runtime/client'
+import { createModelsOperations } from './operations.ts'
 import { ModelsSection } from './ModelsSection.tsx'
 import type { ModelsSectionInjected } from './ModelsSection.tsx'
 import { DeepSeekOnboardingDialog } from './DeepSeekOnboardingDialog.tsx'
@@ -58,8 +58,10 @@ export function refreshIfLoaded(controller: ModelsSettingsStore): void {
 export const inject = [
   CLIENT_SERVICES.slots,
   CLIENT_SERVICES.locale,
-  CLIENT_SERVICES.connection,
   CLIENT_SERVICES.remote,
+  CLIENT_SERVICES.remoteCredentials,
+  CLIENT_SERVICES.remoteLlm,
+  CLIENT_SERVICES.remoteSettings,
   CLIENT_SERVICES.settingsScope,
   CLIENT_SERVICES.settingsSchema,
 ] as const
@@ -73,25 +75,25 @@ export const inject = [
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-models: copy dictionaries')
 
-  const connection = getConnection(ctx)
   const remote = getRemote(ctx)
   const settingsScope = getSettingsScope(ctx)
   const schema = createSettingsSchemaOperations(getSettingsSchema(ctx))
-  const controller = new ModelsSettingsStore(connection.api, schema, settingsScope.describe())
+  const operations = createModelsOperations(ctx)
+  const controller = new ModelsSettingsStore(ctx, schema, settingsScope.describe())
   // Registration-time text (the nav label thunk) and the inject faces share
   // one bound translate; copy freshness rides the locale revision.
   const t = ctx.locale.bind(NS) as ModelsSectionInjected['t']
   const injected = (): ModelsSectionInjected => ({
     controller,
     hooks: { snapshot: controller.store },
-    api: connection.api,
+    operations,
     schema,
     t,
   })
   const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
     controller,
     hooks: { models: controller.store },
-    api: connection.api,
+    operations,
     schema,
     t,
   })
