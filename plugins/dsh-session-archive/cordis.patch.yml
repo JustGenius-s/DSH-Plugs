@@ -1,0 +1,8 @@
+# Bundle patch for @just-genius/dsh-session-archive.
+#
+# Host half lists archived sessions and deletes them (archive set + log files).
+# Browser half mounts Settings → 会话归档 and keeps sidebar archive one-click.
+
+- insert:
+    - id: dsh-session-archive
+      name: '@just-genius/dsh-session-archive'
