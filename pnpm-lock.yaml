@@ -384,6 +384,28 @@ importers:
         specifier: ^18.2.0
         version: 18.3.1
 
+  plugins/dsh-multi-repo:
+    dependencies:
+      '@just-genius/dsh-plugin-runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+    devDependencies:
+      '@just-genius/dsh-plugin-ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      '@types/react':
+        specifier: ~18.3.1
+        version: 18.3.31
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+
   plugins/dsh-plugin-config:
     dependencies:
       '@just-genius/dsh-plugin-runtime':
@@ -402,6 +424,8 @@ importers:
       react:
         specifier: ^18.2.0
         version: 18.3.1
+
+  plugins/dsh-synapse: {}
 
   plugins/dsh-sync:
     dependencies:

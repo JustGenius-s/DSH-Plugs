@@ -1,0 +1,52 @@
+.busy {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 20px;
+}
+
+.slot {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.edit {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.edit:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.paths {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.path {
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-all;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.path[data-primary='true'] {
+  color: var(--dsw-alias-label-primary);
+}
