@@ -47,6 +47,7 @@ export interface UpdateCardProps {
 const CHANNEL_OPTIONS: readonly { value: DshChannel; label: string }[] = [
   { value: 'latest', label: 'channel.latest' },
   { value: 'next', label: 'channel.next' },
+  { value: 'alpha', label: 'channel.alpha' },
   { value: 'custom', label: 'channel.custom' },
 ]
 

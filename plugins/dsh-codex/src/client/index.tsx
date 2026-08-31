@@ -30,7 +30,6 @@ export const inject = [
   CLIENT_SERVICES.remote,
   CLIENT_SERVICES.sessions,
   CLIENT_SERVICES.workspaces,
-  CLIENT_SERVICES.conversationEvents,
   // Terminal selections and file review comments register `@` reference codecs here.
   CLIENT_SERVICES.inputTriggers,
   CLIENT_SERVICES.settingsScope,

@@ -1,4 +1,8 @@
-import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import {
+  getConversationEventRegistry,
+  type ClientContext,
+  type SettingsScope,
+} from '@just-genius/dsh-plugin-runtime/client'
 import type { DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
@@ -16,7 +20,12 @@ export function createConversationCollapseFeature(
   return {
     id: 'conversation-collapse',
     activate() {
-      const disposeDefinition = ctx.conversationEvents.register(turnCollapseDefinition)
+      // 0.1.2+ provides `uiConversation.events`; older hosts still use
+      // `conversationEvents`. Resolve at activate so inject cannot stall boot.
+      const events = getConversationEventRegistry(ctx)
+      const disposeDefinition = events === undefined
+        ? () => {}
+        : events.register(turnCollapseDefinition)
       const disposeRenderer = ctx.slots.inject('conversation.chat.node', () =>
         ctx.slots.register(
           {

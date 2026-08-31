@@ -27,10 +27,15 @@ export const Config = Schema.object({
   checkApp: Schema.boolean().default(true),
   /** 自动检查 DSH 运行时更新（npm registry）。 */
   checkDsh: Schema.boolean().default(true),
-  /** DSH 运行时更新渠道：npm dist-tag（latest/next）或按精确版本（custom）。 */
+  /**
+   * DSH 运行时更新渠道：npm dist-tag（latest/next/alpha）或按精确版本（custom）。
+   * `alpha` 对应 npm 的 `alpha` dist-tag：上游发 alpha 时不会更新 `latest`，
+   * 因此只有显式选该渠道才能检测到 alpha 版本。
+   */
   dshChannel: Schema.union([
     Schema.const('latest' as const),
     Schema.const('next' as const),
+    Schema.const('alpha' as const),
     Schema.const('custom' as const),
   ]).default('latest' as const),
   /** dshChannel === 'custom' 时匹配的精确版本。 */

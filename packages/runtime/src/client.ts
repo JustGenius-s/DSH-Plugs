@@ -31,6 +31,7 @@ import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {
   ClientContext,
+  ConversationNodeDefinition,
   ISessions,
   IWorkspaces,
   SnapshotStore,
@@ -252,7 +253,10 @@ export function createSnapshotStore<T>(
 /** Canonical browser service names used by plugin inject declarations. */
 export const CLIENT_SERVICES = {
   connection: 'connection',
+  /** @deprecated DSH 0.1.2+ moved the registry to `uiConversation.events`. */
   conversationEvents: 'conversationEvents',
+  /** Conversation registries (`events` / `views`) since DSH 0.1.2. */
+  uiConversation: 'uiConversation',
   inputTriggers: 'inputTriggers',
   locale: 'locale',
   modelDirectories: 'modelDirectories',
@@ -265,6 +269,26 @@ export const CLIENT_SERVICES = {
   settingsSchema: 'settingsSchema',
   workspaces: 'workspaces',
 } as const
+
+/** Event-to-node registry shared by old `conversationEvents` and new `uiConversation.events`. */
+export interface ConversationEventRegistryFace {
+  register(definition: ConversationNodeDefinition): () => void
+}
+
+/**
+ * Resolve the conversation event registry without injecting either service
+ * name. 0.1.2-alpha removed the top-level `conversationEvents` service;
+ * injecting that name leaves the plugin pending forever.
+ */
+export function getConversationEventRegistry(
+  ctx: ClientContext,
+): ConversationEventRegistryFace | undefined {
+  const next = ctx.get(CLIENT_SERVICES.uiConversation) as
+    | { events?: ConversationEventRegistryFace }
+    | undefined
+  if (next?.events !== undefined) return next.events
+  return ctx.get(CLIENT_SERVICES.conversationEvents) as ConversationEventRegistryFace | undefined
+}
 
 export function getConnection(ctx: ClientContext): ConnectionHandle {
   return ctx.get('connection') as ConnectionHandle

@@ -7,8 +7,8 @@ export interface DesktopUpdateInfo {
   url?: string
 }
 
-/** DSH 运行时更新渠道：npm dist-tag（latest/next）或按精确版本（custom）。 */
-export type DshChannel = 'latest' | 'next' | 'custom'
+/** DSH 运行时更新渠道：npm dist-tag（latest/next/alpha）或按精确版本（custom）。 */
+export type DshChannel = 'latest' | 'next' | 'alpha' | 'custom'
 
 export interface DesktopUpdateConfig {
   checkApp: boolean
