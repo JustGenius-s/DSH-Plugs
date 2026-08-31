@@ -1,7 +1,7 @@
 # Bundle patch for @just-genius/dsh-model-custom-ex.
 #
-# Installs the plugin's loader row into the tree. No host `config` is needed:
-# the host body is empty and all behavior lives in the browser half.
+# Installs the plugin's loader row into the tree. The host half owns the
+# per-model default-effort settings namespace; the browser half owns the UI.
 
 - insert:
     - id: dsh-model-custom-ex
