@@ -25,6 +25,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ModelsOperations } from './operations.ts'
 import { apiKeyFailure } from './apiKey.ts'
+import { writeProviderDefaults } from './defaults.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { validateDeepSeekModels } from './DeepSeekModelsEditor.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
@@ -58,6 +59,11 @@ export interface CustomProviderCardProps {
    * than a silent overwrite of its whole profile.
    */
   revision: number
+  /**
+   * Revision of the per-model defaults namespace, when the host registered it.
+   * Absent there, the model rows offer no switch-to default picker.
+   */
+  defaultsRevision?: number
   /** Host operations for the write and for interrogating the endpoint. */
   operations: ModelsOperations
   /** Section copy. */
@@ -84,6 +90,9 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
   const [protocol, setProtocol] = useState(protocols[0] ?? '')
   const [keyDraft, setKeyDraft] = useState('')
   const [models, setModels] = useState<readonly ModelDraft[]>([])
+  // Per-model switch-to defaults, drafted with the rows and written once the
+  // route exists — a default cannot name a model on a route that is not there.
+  const [defaults, setDefaults] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /**
@@ -158,6 +167,10 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
       // just superseded, so the Host would answer conflict and the
       // key could never be stored from this card at all.
       setCommitted(true)
+    }
+    if (props.defaultsRevision !== undefined && Object.keys(defaults).length > 0) {
+      const written = await writeProviderDefaults(operations, route, defaults, props.defaultsRevision)
+      if (!written.ok) return written.message
     }
     if (storesKey) {
       const stored = await operations.storeCredential(keyRef, keyValue)
@@ -275,6 +288,9 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         }}
         probeBlocked={keyFailure === 'keyBlank' ? 'keyBlankNew' : keyFailure}
         operations={operations}
+        {...props.defaultsRevision === undefined
+          ? {}
+          : { defaults, onDefaultsChange: setDefaults }}
         t={t}
         disabled={profileDisabled}
       />

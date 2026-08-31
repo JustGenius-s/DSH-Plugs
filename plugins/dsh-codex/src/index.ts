@@ -3,12 +3,15 @@ import { HOST_SERVICES, Schema } from '@just-genius/dsh-plugin-runtime/host'
 import { installSettingsSection } from '@just-genius/dsh-plugin-runtime/host'
 import {
   DEFAULT_CONFIG,
+  FULL_SESSION_LOAD_LIMIT_MAX,
+  FULL_SESSION_LOAD_LIMIT_MIN,
   PANEL_LAUNCHER_WIDTH_MAX,
   PANEL_LAUNCHER_WIDTH_MIN,
   SETTINGS_NAMESPACE,
   type DshCodexConfig,
 } from './shared/config'
 import { createDshCodexGitGraphServer } from './host/git-graph/server'
+import { createDshCodexSideChatServer } from './host/side-chat/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
@@ -19,16 +22,28 @@ export const inject = [
   HOST_SERVICES.llm,
   HOST_SERVICES.agentDefaultModel,
   HOST_SERVICES.fs,
+  HOST_SERVICES.agents,
+  HOST_SERVICES.sessions,
+  HOST_SERVICES.agentPresets,
+  HOST_SERVICES.commands,
 ] as const
 
 /** Host-side schema for the one durable Codex configuration namespace. */
 export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   navigatorEnabled: Schema.boolean().default(DEFAULT_CONFIG.navigatorEnabled),
   conversationCollapseEnabled: Schema.boolean().default(DEFAULT_CONFIG.conversationCollapseEnabled),
+  stickyUserBubbleEnabled: Schema.boolean().default(DEFAULT_CONFIG.stickyUserBubbleEnabled),
+  stickyUserBubbleMode: Schema.union([
+    Schema.const('running'),
+    Schema.const('always'),
+  ]).default(DEFAULT_CONFIG.stickyUserBubbleMode),
+  fullSessionLoadEnabled: Schema.boolean().default(DEFAULT_CONFIG.fullSessionLoadEnabled),
+  fullSessionLoadLimit: Schema.number().min(FULL_SESSION_LOAD_LIMIT_MIN).max(FULL_SESSION_LOAD_LIMIT_MAX).default(DEFAULT_CONFIG.fullSessionLoadLimit),
   terminalEnabled: Schema.boolean().default(DEFAULT_CONFIG.terminalEnabled),
   gitGraphEnabled: Schema.boolean().default(DEFAULT_CONFIG.gitGraphEnabled),
   filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),
   fileLinksInPanel: Schema.boolean().default(DEFAULT_CONFIG.fileLinksInPanel),
+  sideChatEnabled: Schema.boolean().default(DEFAULT_CONFIG.sideChatEnabled),
   filesShowGitIgnored: Schema.boolean().default(DEFAULT_CONFIG.filesShowGitIgnored),
   highlightThemeLight: Schema.string().default(DEFAULT_CONFIG.highlightThemeLight),
   highlightThemeDark: Schema.string().default(DEFAULT_CONFIG.highlightThemeDark),
@@ -72,4 +87,9 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
     const server = createDshCodexGitGraphServer(ctx)
     return () => server.dispose()
   }, 'dsh-codex: git-graph routes')
+
+  ctx.effect(() => {
+    const server = createDshCodexSideChatServer(ctx)
+    return () => server.dispose()
+  }, 'dsh-codex: side-chat routes')
 }

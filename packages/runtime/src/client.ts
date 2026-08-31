@@ -73,6 +73,7 @@ declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
 
 export type {
   AssistantBlock,
+  ChatConversationViewNode,
   ClientContext,
   ConversationEventRegistry,
   ConversationNodeDefinition,
@@ -81,6 +82,7 @@ export type {
   ISessions,
   IWorkspaces,
   PendingInteraction,
+  PendingWait,
   RunningToolCall,
   SessionBinding,
   SessionFace,

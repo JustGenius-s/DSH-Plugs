@@ -29,6 +29,7 @@ import {
   DeepSeekModelsEditor, modelDrafts, validateDeepSeekModels,
 } from './DeepSeekModelsEditor.tsx'
 import { apiKeyFailure } from './apiKey.ts'
+import { defaultsFromNamespace, writeProviderDefaults } from './defaults.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
 import { deriveKeyRef, messageOf, protocolChoices } from './store.ts'
@@ -60,6 +61,11 @@ export interface ProviderEditorProps {
   declared?: boolean
   /** The owning namespace view (schema, layers, secrets). */
   namespace: SettingsNamespaceView
+  /**
+   * The per-model switch-to defaults namespace, when the host registered it.
+   * Absent there, the catalog rows simply offer no default picker.
+   */
+  defaultsNamespace?: SettingsNamespaceView
   /** Settings-owned synchronous schema and immutable path operations. */
   schema: SettingsSchemaOperations
   /** Path from the section root to this provider's profile. */
@@ -155,6 +161,13 @@ function refFor(
 export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const { namespace, schema, settingsPath, operations, t } = props
   const [draft, setDraft] = useState<Record<string, unknown>>(() => draftAt(schema, namespace, settingsPath))
+  // Per-model switch-to defaults are drafted alongside the profile and written
+  // only after the profile lands: the route must exist before a default can
+  // name one of its models.
+  const [defaults, setDefaults] = useState<Record<string, string>>(
+    () => defaultsFromNamespace(props.defaultsNamespace, props.provider),
+  )
+  const [defaultsRevision, setDefaultsRevision] = useState(() => props.defaultsNamespace?.revision ?? 0)
   const [keyDraft, setKeyDraft] = useState('')
   const [keyState, setKeyState] = useState<CredentialInfo | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -288,6 +301,16 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       setExpectedRevision(response.view.revision)
       setDraft(next)
     }
+    if (props.defaultsNamespace !== undefined) {
+      const written = await writeProviderDefaults(
+        operations,
+        props.provider,
+        defaults,
+        defaultsRevision,
+      )
+      if (!written.ok) return written.message
+      setDefaultsRevision(written.revision)
+    }
     if (keyValue.length > 0) {
       const stored = await operations.storeCredential(keyRef, keyValue)
       if (stored !== undefined) return stored
@@ -366,6 +389,9 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         setDraft(current => schema.setPath(current, ['models'], next))
       },
       onReset: () => { setDraft(current => schema.deletePath(current, ['models'])) },
+      ...props.defaultsNamespace === undefined
+        ? {}
+        : { defaults, onDefaultsChange: setDefaults },
     }
     return (
       <>

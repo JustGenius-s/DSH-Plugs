@@ -25,6 +25,7 @@ import { ModelsSettingsStore } from './store.ts'
 import { createSettingsSchemaOperations } from './schema-operations.ts'
 import { en, zh, type ModelsKey } from './locales.ts'
 import { WELCOME_NOTICE_SETTINGS_NAMESPACE } from '../onboarding-copy.ts'
+import { DEFAULTS_NAMESPACE } from '../shared.ts'
 
 export type { ModelsSectionInjected, ModelsSectionProps } from './ModelsSection.tsx'
 export type { ModelsKey } from './locales.ts'
@@ -103,6 +104,13 @@ export function apply(ctx: ClientContext): void {
     namespace: WELCOME_NOTICE_SETTINGS_NAMESPACE,
     decode: decodeWelcomeSection,
   }))
+  // Binding is what puts the defaults namespace into the scope's describe
+  // mirror, which is the only way the Models page can read and write it. The
+  // handle itself stays unused: the page reaches the namespace through the
+  // controller's snapshot, not through this binding.
+  void settingsScope.bind<{ defaults?: Record<string, Record<string, string>> }>({
+    namespace: DEFAULTS_NAMESPACE,
+  })
   const welcomeInjected = (): WelcomeNoticeInjected => ({
     controller: welcomeController,
     hooks: { welcome: welcomeController.store },

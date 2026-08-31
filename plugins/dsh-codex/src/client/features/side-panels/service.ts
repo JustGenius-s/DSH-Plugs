@@ -163,6 +163,12 @@ export interface SidePanelsService {
    * restores the default caption.
    */
   renameInstance(key: string, title: string): void
+  /**
+   * Merge a patch into one instance's nav state (persisted, so a restored
+   * tab keeps it). Used by panels that store per-instance identity — e.g.
+   * the side-chat tab records the side session it owns.
+   */
+  updateInstanceState(key: string, patch: PanelNavState): void
   /** Move one instance to `toIndex` in the tab strip (clamped). */
   moveInstance(key: string, toIndex: number): void
   /** Current snapshot. */
@@ -495,6 +501,17 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
         if (trimmed === '') delete state.title
         else state.title = trimmed
         return { ...i, state }
+      })
+      if (!found) return
+      setSnapshot({ instances })
+      saveTabs()
+    },
+    updateInstanceState(key, patch) {
+      let found = false
+      const instances = snapshot.instances.map(i => {
+        if (i.key !== key) return i
+        found = true
+        return { ...i, state: { ...i.state, ...patch } }
       })
       if (!found) return
       setSnapshot({ instances })

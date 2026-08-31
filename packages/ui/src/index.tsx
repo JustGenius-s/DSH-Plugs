@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react'
 // DSH-native UI kit for plugins and standalone apps (e.g. Vellum).
 //
 // Two layers:
@@ -85,3 +86,34 @@ export type { RiskConfirmationProps } from './primitives/RiskConfirmation'
 export { Toast } from './primitives/Toast'
 
 export * from './icons/index'
+
+// Conversation-rendering surfaces. These exist only in the official
+// `@deepseek-ai/dsh-client-ui-primitives` bundle (Markdown pipeline, JSON tree,
+// and ANSI terminal rendering), so the shared UI layer forwards them rather
+// than reimplementing them — plugins still import from one boundary.
+import {
+  CodeBlock,
+  JsonBlock,
+  MessageText,
+  TerminalBlock,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+export { CodeBlock, JsonBlock, MessageText, TerminalBlock }
+export { DEFAULT_TERMINAL_MAX_LINES } from '@deepseek-ai/dsh-client-ui-primitives'
+// Renamed on purpose: this package already ships its own lighter
+// `MarkdownText`, and the official one is the streaming-aware renderer with
+// code-copy labels. Exporting it under its own name would shadow ours.
+export { MarkdownText as OfficialMarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+export type {
+  CodeBlockProps,
+  TerminalBlockLabels,
+  TerminalBlockProps,
+  MarkdownCodeLabels,
+  MarkdownFileMentions,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+// `JsonBlock` / `MessageText` do not publish named prop types, so derive them
+// from the components themselves.
+
+// `JsonBlock` / `MessageText` do not publish named prop types, so derive them
+// from the already-exported components.
+export type JsonBlockProps = ComponentProps<typeof JsonBlock>
+export type MessageTextProps = ComponentProps<typeof MessageText>

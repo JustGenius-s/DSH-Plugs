@@ -4,9 +4,12 @@ import { createCodexFeatureManager } from './core/feature-manager'
 import { createConversationCollapseFeature } from './features/conversation-collapse'
 import { createFileLinksFeature } from './features/file-links'
 import { createFilesFeature } from './features/files'
+import { createFullSessionLoadFeature } from './features/full-session-load'
 import { createGitGraphFeature } from './features/git-graph'
 import { createNavigatorFeature } from './features/navigator'
+import { createSideChatFeature } from './features/side-chat'
 import { createSidePanelsFeature } from './features/side-panels'
+import { createStickyUserBubbleFeature } from './features/sticky-user-bubble'
 import { createTerminalFeature } from './features/terminal'
 import { createTerminalControllerStore } from './features/terminal/controller'
 import { createQuickActionsContribution } from './features/quick-actions/contribution'
@@ -66,7 +69,10 @@ export function apply(ctx: ClientContext): void {
   const features = createCodexFeatureManager([
     createConversationCollapseFeature(ctx, scope, t),
     createNavigatorFeature(ctx, scope),
+    createFullSessionLoadFeature(ctx, scope),
+    createStickyUserBubbleFeature(ctx, scope, t),
     createSidePanelsFeature(ctx, scope, t, quickActions),
+    createSideChatFeature(ctx, scope, t),
     createTerminalFeature(ctx, scope, t, terminalControllers),
     createGitGraphFeature(ctx, scope, t),
     createFilesFeature(ctx, scope, t),

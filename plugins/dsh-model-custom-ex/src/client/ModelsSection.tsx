@@ -17,6 +17,7 @@ import type { ReactNode } from 'react'
 import { Button, IconPlusOutline16, Modal } from '@just-genius/dsh-plugin-ui'
 import type { InjectFace } from '@just-genius/dsh-plugin-runtime/client'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
+import { DEFAULTS_NAMESPACE } from '../shared.ts'
 import { deriveKeyRef, messageOf, protocolChoices, providerUsable } from './store.ts'
 import type { ModelsSettingsStore, ProviderRow } from './store.ts'
 import type { ModelsOperations } from './operations.ts'
@@ -70,7 +71,7 @@ interface EditorTarget extends ProviderIdentity {
 /** Values that vary around the shared provider-editor rendering. */
 interface ProviderEditorRenderProps extends Pick<
   ProviderEditorProps,
-  'namespace' | 'schema' | 'operations' | 't' | 'readOnly' | 'onClose'
+  'namespace' | 'defaultsNamespace' | 'schema' | 'operations' | 't' | 'readOnly' | 'onClose'
 > {
   target: EditorTarget
 }
@@ -281,6 +282,10 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
   // one whose schema names the protocols one may speak; without it mounted
   // there is nothing to declare and the entry point stays disabled.
   const protocols = protocolChoices(state.namespaces.get('llm-pi-ai'), schema)
+  // Per-model switch-to defaults live in their own namespace, registered by the
+  // host half. Absent there (or before the first describe) the catalog rows
+  // simply offer no default picker.
+  const defaultsNamespace = state.namespaces.get(DEFAULTS_NAMESPACE)
 
   return (
     <div className={styles['section']}>
@@ -308,6 +313,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
                 {renderProviderEditor({
                   target,
                   namespace,
+                  defaultsNamespace,
                   schema,
                   operations,
                   t,
@@ -393,6 +399,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
                 ? renderProviderEditor({
                   target,
                   namespace,
+                  defaultsNamespace,
                   schema,
                   operations,
                   t,
@@ -432,6 +439,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
                 displayName={addTarget.displayName}
                 hideTitle
                 namespace={addNamespace}
+                defaultsNamespace={defaultsNamespace}
                 schema={schema}
                 settingsPath={addTarget.settingsPath}
                 operations={operations}
@@ -449,6 +457,7 @@ function Loaded({ injected }: { injected: ModelsSectionFace }): ReactNode {
                   protocols={protocols}
                   /* v8 ignore next -- the card only opens from a button disabled without this namespace */
                   revision={state.namespaces.get('llm-pi-ai')?.revision ?? 0}
+                  {...defaultsNamespace === undefined ? {} : { defaultsRevision: defaultsNamespace.revision }}
                   operations={operations}
                   t={t}
                   readOnly={!state.writable}
