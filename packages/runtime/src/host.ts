@@ -48,6 +48,13 @@ export { createUserMessage } from '@deepseek-ai/dsh-llm'
 export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 export type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+/**
+ * Context handed to every `systemPrompt` provider at assembly time.
+ *
+ * Declaration-merged by the agent layer (`agent`), so prompt providers read the
+ * running agent's session through it.
+ */
+export type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 export { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 export type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 export { defineDomain } from '@deepseek-ai/dsh-storage-domain'

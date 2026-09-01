@@ -1,0 +1,9 @@
+# Bundle patch for @just-genius/dsh-multi-repo.
+#
+# Host half persists the multi-folder binding, injects the agent prompt,
+# and serves /dsh-multi-repo/* routes. Browser half intercepts workspace
+# folder adoption and mounts the add dialog + Settings page.
+
+- insert:
+    - id: dsh-multi-repo
+      name: '@just-genius/dsh-multi-repo'
