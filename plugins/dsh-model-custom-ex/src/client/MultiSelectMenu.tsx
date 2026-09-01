@@ -134,3 +134,103 @@ export function MultiSelectMenu(props: MultiSelectMenuProps): ReactNode {
     </label>
   )
 }
+/** Props of {@link SelectMenu}. */
+export interface SelectMenuProps {
+  /** Field label rendered above the trigger. */
+  label: string
+  /** Selectable options in display order. */
+  options: readonly MultiSelectOption[]
+  /** Currently selected value. */
+  value: string
+  /** Replace the selected value and close. */
+  onChange: (value: string) => void
+  /** Disable the trigger (read-only deployment or pending write). */
+  disabled: boolean
+}
+
+/**
+ * Labeled single-select on the same Menu / Pill chrome as
+ * {@link MultiSelectMenu}. Picking a row closes the list.
+ */
+export function SelectMenu(props: SelectMenuProps): ReactNode {
+  const { label, options, value, onChange, disabled } = props
+  const [open, setOpen] = useState(false)
+  const selected = options.find(option => option.value === value)
+
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span
+        style={{
+          color: 'var(--dsw-alias-label-tertiary)',
+          fontSize: 12,
+          lineHeight: '18px',
+        }}
+      >
+        {label}
+      </span>
+      <Menu
+        open={open}
+        items={options.map(option => ({
+          id: option.value,
+          label: option.label,
+          ...option.disabled === true ? { disabled: true } : {},
+        }))}
+        onClose={() => { setOpen(false) }}
+        selectedId={value}
+        onSelect={(next) => {
+          onChange(next)
+          setOpen(false)
+        }}
+        align="start"
+        side="bottom"
+        portal
+        anchor={(
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => { setOpen(current => !current) }}
+            style={{
+              boxSizing: 'border-box',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              width: '100%',
+              minHeight: 32,
+              padding: '4px 8px',
+              border: '1px solid var(--dsw-alias-border-l2)',
+              borderRadius: 8,
+              background: 'var(--dsw-alias-bg-layer-1)',
+              color: 'var(--dsw-alias-label-primary)',
+              fontSize: 13,
+              lineHeight: '20px',
+              cursor: disabled ? 'default' : 'pointer',
+            }}
+          >
+            <span style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0 }}>
+              {selected === undefined
+                ? null
+                : <Pill active>{selected.label}</Pill>}
+            </span>
+            <MenuChevron open={open} />
+          </button>
+        )}
+      />
+    </label>
+  )
+}
+
+function MenuChevron({ open }: { open: boolean }): ReactNode {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        flex: '0 0 auto',
+        color: 'var(--dsw-alias-label-caption)',
+        transform: open ? 'rotate(180deg)' : undefined,
+        transition: 'transform 120ms ease',
+      }}
+    >
+      <IconChevronDownOutline14 />
+    </span>
+  )
+}

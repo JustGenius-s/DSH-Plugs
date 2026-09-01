@@ -22,7 +22,14 @@ import { formatCapacity, parseCapacity } from './DeepSeekModelsEditor.tsx'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import { messageOf } from './store.ts'
 import type { en } from './locales.ts'
-import { MultiSelectMenu } from './MultiSelectMenu.tsx'
+import { MultiSelectMenu, SelectMenu } from './MultiSelectMenu.tsx'
+import {
+  CONTEXT_WINDOW_PRESETS,
+  CapacityCombo,
+  DEFAULT_MAX_TOKENS,
+  MAX_TOKEN_PRESETS,
+} from './CapacityCombo.tsx'
+import { resolveDefaultEffort } from '../shared.ts'
 import styles from './ModelsSection.module.css'
 
 /**
@@ -76,6 +83,30 @@ function effortsOf(model: ModelDraft): Readonly<Record<string, unknown>> {
   return {}
 }
 
+/** Enabled thinking levels in catalog order. */
+function offeredEfforts(model: ModelDraft): readonly string[] {
+  const efforts = effortsOf(model)
+  return THINKING_LEVELS.filter(level => level in efforts)
+}
+
+/**
+ * A recommended switch-to level written on the row itself, when one is
+ * present. Extra keys survive this editor; the official schema does not
+ * persist them back into `llm-pi-ai`.
+ */
+function recommendedEffort(model: ModelDraft): string | undefined {
+  const value = model['defaultEffort']
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/** The concrete switch-to level shown for one row, or nothing when none can be offered. */
+function chosenDefaultEffort(
+  model: ModelDraft,
+  stored: string | undefined,
+): string | undefined {
+  return resolveDefaultEffort(offeredEfforts(model), stored, recommendedEffort(model))
+}
+
 /** What an interrogation needs, taken from the live form. */
 export interface ProbeTarget {
   /** Settings namespace whose adapter family answers. */
@@ -115,10 +146,36 @@ export interface ModelListEditorProps {
   probeBlocked?: keyof typeof en | undefined
   /** Host operations the fetch action calls. */
   operations: ModelsOperations
+  /** Per-model switch-to thinking default, keyed by model id. */
+  defaults?: Readonly<Record<string, string>>
+  /** Replace {@link defaults}; omitted when the host namespace is unavailable. */
+  onDefaultsChange?: (defaults: Record<string, string>) => void
   /** Section copy. */
   t: (key: keyof typeof en) => string
   /** Disable every control (read-only deployment or a pending write). */
   disabled: boolean
+}
+
+/** Per-row switch-to thinking picker; hidden when the model offers no levels. */
+function DefaultEffortMenu(props: {
+  label: string
+  model: ModelDraft
+  stored: string | undefined
+  disabled: boolean
+  onChange: (level: string) => void
+}): ReactNode {
+  const offered = offeredEfforts(props.model)
+  const chosen = chosenDefaultEffort(props.model, props.stored)
+  if (offered.length === 0 || chosen === undefined) return null
+  return (
+    <SelectMenu
+      label={props.label}
+      options={offered.map(level => ({ value: level, label: level }))}
+      value={chosen}
+      onChange={props.onChange}
+      disabled={props.disabled}
+    />
+  )
 }
 
 /** Disclosure chevron; rotates to point down while its row is open. */
@@ -191,7 +248,7 @@ function adopt(candidate: DiscoveredModel): ModelDraft {
  * @returns the model-list editor.
  */
 export function ModelListEditor(props: ModelListEditorProps): ReactNode {
-  const { models, onChange, probe, operations, t, disabled } = props
+  const { models, onChange, probe, operations, defaults = {}, onDefaultsChange, t, disabled } = props
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const [candidates, setCandidates] = useState<readonly DiscoveredModel[] | undefined>(undefined)
@@ -281,6 +338,23 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
     // the schema spells that as `false` rather than an empty-level dict.
     const hasRealLevel = THINKING_LEVELS.some(candidate => candidate !== 'off' && candidate in current)
     patch(index, { reasoningEfforts: hasRealLevel ? current : false })
+    // A level the row no longer offers cannot stay the switch-to default.
+    const modelId = textOf(models[index], 'id')
+    const chosen = defaults[modelId]
+    if (chosen !== undefined && !(chosen in current)) dropDefault(modelId)
+  }
+
+  const setDefaultEffort = (modelId: string, level: string): void => {
+    if (onDefaultsChange === undefined || modelId.length === 0 || level.length === 0) return
+    if (defaults[modelId] === level) return
+    onDefaultsChange({ ...defaults, [modelId]: level })
+  }
+
+  const dropDefault = (modelId: string): void => {
+    if (onDefaultsChange === undefined || !(modelId in defaults)) return
+    const next = { ...defaults }
+    delete next[modelId]
+    onDefaultsChange(next)
   }
 
   const fetchModels = async (): Promise<void> => {
@@ -458,32 +532,24 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
           {expanded.has(index)
             ? (
               <div className={styles['modelAdvanced']}>
-                <label className={styles['modelField']}>
-                  <span className={styles['modelFieldLabel']}>{t('modelContextWindow')}</span>
-                  <input
-                    className={styles['input']}
-                    type="text"
-                    inputMode="numeric"
-                    value={capacityText(model, index, 'contextWindow')}
-                    placeholder={CAPACITY_HINT.contextWindow}
-                    aria-label={`${t('modelContextWindow')} ${index + 1}`}
-                    disabled={disabled}
-                    onChange={(event) => { editCapacity(index, 'contextWindow', event.target.value) }}
-                  />
-                </label>
-                <label className={styles['modelField']}>
-                  <span className={styles['modelFieldLabel']}>{t('modelMaxTokens')}</span>
-                  <input
-                    className={styles['input']}
-                    type="text"
-                    inputMode="numeric"
-                    value={capacityText(model, index, 'maxTokens')}
-                    placeholder={CAPACITY_HINT.maxTokens}
-                    aria-label={`${t('modelMaxTokens')} ${index + 1}`}
-                    disabled={disabled}
-                    onChange={(event) => { editCapacity(index, 'maxTokens', event.target.value) }}
-                  />
-                </label>
+                <CapacityCombo
+                  label={t('modelContextWindow')}
+                  value={capacityText(model, index, 'contextWindow')}
+                  placeholder={CAPACITY_HINT.contextWindow}
+                  presets={CONTEXT_WINDOW_PRESETS}
+                  ariaLabel={`${t('modelContextWindow')} ${index + 1}`}
+                  disabled={disabled}
+                  onChange={(text) => { editCapacity(index, 'contextWindow', text) }}
+                />
+                <CapacityCombo
+                  label={t('modelMaxTokens')}
+                  value={capacityText(model, index, 'maxTokens')}
+                  placeholder={CAPACITY_HINT.maxTokens}
+                  presets={MAX_TOKEN_PRESETS}
+                  ariaLabel={`${t('modelMaxTokens')} ${index + 1}`}
+                  disabled={disabled}
+                  onChange={(text) => { editCapacity(index, 'maxTokens', text) }}
+                />
                 <MultiSelectMenu
                   label={t('modelInputModalities')}
                   options={MODALITIES.map(modality => ({
@@ -504,6 +570,17 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
                   disabled={disabled}
                   emptyLabel={t('multiSelectNone')}
                 />
+                {onDefaultsChange === undefined
+                  ? null
+                  : (
+                    <DefaultEffortMenu
+                      label={t('reasoningDefault')}
+                      model={model}
+                      stored={defaults[textOf(model, 'id')]}
+                      disabled={disabled || textOf(model, 'id').length === 0}
+                      onChange={(level) => { setDefaultEffort(textOf(model, 'id'), level) }}
+                    />
+                  )}
               </div>
             )
             : null}
@@ -513,7 +590,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         type="button"
         className={styles['addModelButton']}
         disabled={disabled}
-        onClick={() => { onChange([...models, { id: '' }]) }}
+        onClick={() => { onChange([...models, { id: '', maxTokens: DEFAULT_MAX_TOKENS }]) }}
       >
         {t('addModel')}
       </button>
