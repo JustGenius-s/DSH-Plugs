@@ -403,6 +403,8 @@ importers:
         specifier: ^18.2.0
         version: 18.3.1
 
+  plugins/dsh-synapse: {}
+
   plugins/dsh-sync:
     dependencies:
       '@just-genius/dsh-plugin-runtime':
