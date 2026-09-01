@@ -1,8 +1,13 @@
 // Native desktop seats + system notifications through window.dshDesktop
 // (owned by DSH-Desktop). No-op in a plain browser. Fiber dispose revokes
 // seats and closes outstanding notifications.
+//
+// The state these seats render is passed in rather than pulled from the bridge:
+// detection is Host-side now, and the hook that polls it (useUpdateState) is
+// the single source of truth for both the card and these seats.
 
-import { bridge, type DesktopMenuItemSpec, type DesktopUpdateState } from './bridge'
+import { bridge, type DesktopMenuItemSpec } from './bridge'
+import type { DesktopUpdateState } from '../shared'
 
 const CONTRIBUTOR = 'desktop-update'
 const NOTIFY_ID = 'update-ready'
@@ -167,53 +172,62 @@ function syncNotify(state: DesktopUpdateState | null): void {
   })
 }
 
-/** Register native seats + update notifications; return a disposer for ctx.effect. */
-export function installDesktopSeats(): () => void {
-  const b = bridge()
-  if (b === undefined || b.updates === undefined) {
-    console.warn('[desktop-update] window.dshDesktop.updates missing; native update wiring not installed')
-    return () => {}
-  }
+/** Actions the seats trigger; the caller owns state and the Host connection. */
+export interface SeatHandlers {
+  /** Re-run detection now. */
+  checkNow: () => void
+  /** Open the App download page. */
+  downloadApp: () => void
+  /** Install the given runtime version. */
+  updateDsh: (version: string) => void
+  /** Restart the desktop app. */
+  relaunch: () => void
+}
 
+/**
+ * Register native seats + update notifications; return a disposer for ctx.effect.
+ *
+ * Seats are installed even without a shell — the state they render comes from
+ * the Host, not from the bridge — but every action no-ops, since each one needs
+ * the shell to carry it out.
+ */
+export function installDesktopSeats(
+  watch: (apply: (state: DesktopUpdateState | null) => void) => () => void,
+  handlers: SeatHandlers,
+): () => void {
+  const b = bridge()
   let alive = true
-  const unsubSeat = b.seats?.onAction((action) => {
+
+  const unsubSeat = b?.seats?.onAction((action) => {
     if (!alive || action.contributor !== CONTRIBUTOR) return
-    if (action.id === 'check-now') void b.updates.checkNow()
-    else if (action.id === 'download-app') void b.updates.downloadApp()
-    else if (action.id === 'update-dsh') void b.updates.updateDsh()
-    else if (action.id === 'relaunch') b.updates.relaunch()
+    if (action.id === 'check-now') handlers.checkNow()
+    else if (action.id === 'download-app') handlers.downloadApp()
+    else if (action.id === 'update-dsh') handlers.updateDsh('')
+    else if (action.id === 'relaunch') handlers.relaunch()
   }) ?? (() => {})
-  const unsubNotify = b.notify?.onAction((action) => {
+
+  const unsubNotify = b?.notify?.onAction((action) => {
     if (!alive || action.contributor !== CONTRIBUTOR) return
     if (action.id !== NOTIFY_ID) return
-    // 需重启时点通知直接 relaunch；否则打开检查结果。
-    void b.updates.getState().then((s) => {
-      if (s?.needsRelaunch) b.updates.relaunch()
-      else void b.updates.checkNow()
-    }).catch(() => { void b.updates.checkNow() })
+    // 点击通知：重新检测一次（需重启时由卡片/菜单的 relaunch 项处理）。
+    handlers.checkNow()
   }) ?? (() => {})
+
   const apply = (state: DesktopUpdateState | null) => {
     void push(state)
     syncNotify(state)
   }
-  const unsubState = b.updates.onState((state) => {
-    if (alive) apply(state)
-  })
-  void b.updates.getState().then((state) => {
-    if (alive) apply(state)
-  }).catch(() => {
-    if (alive) apply(null)
-  })
+  const unwatch = watch(apply)
   void push(null)
 
   return () => {
     alive = false
+    unwatch()
     unsubSeat()
     unsubNotify()
-    unsubState()
     lastNotifyKey = ''
-    void b.seats?.revoke('applicationMenu', CONTRIBUTOR)
-    void b.seats?.revoke('tray', CONTRIBUTOR)
-    void b.notify?.close(CONTRIBUTOR)
+    void b?.seats?.revoke('applicationMenu', CONTRIBUTOR)
+    void b?.seats?.revoke('tray', CONTRIBUTOR)
+    void b?.notify?.close(CONTRIBUTOR)
   }
 }

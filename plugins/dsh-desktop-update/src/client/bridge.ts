@@ -1,35 +1,12 @@
-// Shared DSH-Desktop preload surface. Absent in a plain browser.
-// Mirrors DSH-Desktop `src/api.ts`: updates / seats / notify. No Electron types.
-
-export interface DesktopUpdateInfo {
-  current: string
-  latest: string
-  url?: string
-}
-
-/** DSH 运行时更新渠道：npm dist-tag（latest/next/alpha）或按精确版本（custom）。 */
-export type DshChannel = 'latest' | 'next' | 'alpha' | 'custom'
-
-export interface DesktopUpdateConfig {
-  checkApp: boolean
-  checkDsh: boolean
-  dshChannel?: DshChannel
-  dshVersion?: string
-}
-
-export interface DesktopUpdateState {
-  app: DesktopUpdateInfo | null
-  dsh: DesktopUpdateInfo | null
-  checking: boolean
-  /** 正在执行运行时升级（pnpm add）。旧壳可能缺此字段，按 false 处理。 */
-  updatingDsh?: boolean
-  /** 更新进度/结果文案；空闲时为 null。 */
-  updateMessage?: string | null
-  /** 新运行时已装好，需 relaunch 才生效。 */
-  needsRelaunch?: boolean
-  config: DesktopUpdateConfig
-  versions: { app: string; dsh: string | null }
-}
+// The DSH-Desktop preload surface, as this plugin uses it.
+//
+// The shell is an EXECUTOR: it detects nothing now (detection lives in this
+// plugin's Host half, see src/updater.ts). What remains here is what only a
+// packaged desktop app can do — report its own version, run `pnpm add` for the
+// runtime, open the download page, relaunch — plus the two native UI families
+// (seats, notify) that are inherently shell-owned.
+//
+// Absent in a plain browser; every call site checks `bridge() === undefined`.
 
 export type DesktopUpdateKind = 'app' | 'dsh'
 
@@ -86,14 +63,13 @@ export interface DesktopNotifyResult {
 
 export interface DshDesktop {
   updates: {
-    getState(): Promise<DesktopUpdateState>
-    onState(listener: (state: DesktopUpdateState) => void): () => void
-    checkNow(): Promise<DesktopUpdateState>
+    /** The shell's packaged version; '' when unknown. */
+    appVersion(): Promise<string>
+    /** Open the App release download page (GitHub Releases). */
     downloadApp(): Promise<void>
-    updateDsh(): Promise<void>
-    setDshChannel(channel: DshChannel, version?: string): Promise<DesktopUpdateState>
-    skipVersion(kind: DesktopUpdateKind): Promise<void>
-    setGate(kind: DesktopUpdateKind, enabled: boolean): Promise<DesktopUpdateState>
+    /** Install a DSH runtime version in place; resolves when pnpm finishes. */
+    updateDsh(version: string): Promise<void>
+    /** Restart the app. */
     relaunch(): void
   }
   seats: {
