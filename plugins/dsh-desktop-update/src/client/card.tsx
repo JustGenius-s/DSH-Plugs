@@ -2,13 +2,17 @@
 // Plugins section's configurable tab (`settings.plugin.item`).
 // Chrome comes from @just-genius/dsh-plugin-ui (the official PluginCard look:
 // collapsible header, staged edits, save/discard footer). Writes go through
-// ctx.settingsScope (generic settings RPC → settings.yaml); DSH-Desktop's
-// main process watches the same file, so both write paths converge. The
-// version line + manual check ride the preload bridge and only appear inside
-// the desktop shell. On hosts that do not serve the namespace (pre-rc.7, or
-// a remote browser in memory mode) the card leaves no trace.
+// ctx.settingsScope (generic settings RPC → settings.yaml).
+//
+// The version line and the update actions read state from this plugin's Host
+// half (detection lives there now), not from the preload bridge. Executing an
+// update still goes through the shell, because only it can run `pnpm add`,
+// open the download page, and relaunch — but the outcome is reported back to
+// the Host so every window sees the same progress. Everything degrades
+// gracefully: without a shell the actions hide, and without a Host-served
+// namespace the card leaves no trace.
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useState, useSyncExternalStore } from 'react'
 import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { Menu, IconChevronDownOutline14 } from '@just-genius/dsh-plugin-ui'
 import type { MenuEntry } from '@just-genius/dsh-plugin-ui'
@@ -25,23 +29,19 @@ import {
   SettingsCard,
   SwitchField,
 } from '@just-genius/dsh-plugin-ui'
-import { bridge, type DesktopUpdateState, type DshChannel } from './bridge'
+import { bridge } from './bridge'
+import type { UpdateStore } from './update-store'
+import type { DesktopUpdateConfig, DshChannel } from '../shared'
 import { ensureCardStyles } from './styles'
 
 ensureCardStyles()
-
-/** Shape of the `desktop-update` settings section (mirrors Config in src/index.ts). */
-export interface DesktopUpdateConfig {
-  checkApp: boolean
-  checkDsh: boolean
-  dshChannel?: DshChannel
-  dshVersion?: string
-}
 
 /** Card props: locale `t` from the slot entry, scope from the entry's inject. */
 export interface UpdateCardProps {
   t: (key: string) => string
   scope: SettingsScope<DesktopUpdateConfig>
+  /** Shared Host-state feed (see update-store.ts). */
+  store: UpdateStore
 }
 
 const CHANNEL_OPTIONS: readonly { value: DshChannel; label: string }[] = [
@@ -52,37 +52,35 @@ const CHANNEL_OPTIONS: readonly { value: DshChannel; label: string }[] = [
 ]
 
 export function UpdateCard(props: UpdateCardProps) {
-  const { t, scope } = props
+  const { t, scope, store } = props
   const subscribe = useCallback((cb: () => void) => scope.subscribe(cb), [scope])
   const getSnapshot = useCallback(() => scope.getSnapshot(), [scope])
   const snap = useSyncExternalStore(subscribe, getSnapshot)
+
+  const subscribeStore = useCallback((cb: () => void) => store.subscribe(() => { cb() }), [store])
+  const getStoreSnapshot = useCallback(() => store.get(), [store])
 
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<DesktopUpdateConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)
 
-  const [state, setState] = useState<DesktopUpdateState | null>(null)
+  // Detection is Host-side; `state` is the Host's published snapshot, shared
+  // with the native seats. The Host refreshes on its own interval and on
+  // demand, so consumers only have to keep up.
+  const state = useSyncExternalStore(subscribeStore, getStoreSnapshot)
   const [checking, setChecking] = useState(false)
   const [channelOpen, setChannelOpen] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<'ok' | 'suppressed' | 'failed' | null>(null)
   const [updating, setUpdating] = useState(false)
 
-  useEffect(() => {
-    const b = bridge()
-    if (b === undefined) return
-    let alive = true
-    void b.updates.getState().then((s) => { if (alive) setState(s) }).catch(() => {})
-    const off = b.updates.onState((s) => { if (alive) setState(s) })
-    return () => { alive = false; off() }
-  }, [])
-
-  // 主进程广播的 updatingDsh 为准；本地 updating 兜底防连点。
-  const busyUpdating = Boolean(state?.updatingDsh) || updating
-  const needsRelaunch = Boolean(state?.needsRelaunch)
-  const updateMessage = state?.updateMessage ?? null
-  const canUpdateDsh = state?.dsh != null && !busyUpdating
+  // Host 广播的 updatingDsh 为准；本地 updating 兜底防连点。
+  const busyUpdating = Boolean(state.updatingDsh) || updating
+  const checkingNow = checking || state.checking
+  const needsRelaunch = state.needsRelaunch
+  const updateMessage = state.updateMessage
+  const canUpdateDsh = state.dsh !== null && !busyUpdating
 
   // Namespace not served by this Host: render nothing rather than a dead card.
   if (snap.status === 'unavailable') return null
@@ -121,14 +119,9 @@ export function UpdateCard(props: UpdateCardProps) {
     ])
       .then(() => {
         setDraft(null)
-        // 渠道变更后立即让主进程按新渠道重查一轮。
-        const b = bridge()
-        if (b !== undefined) {
-          void b.updates
-            .setDshChannel(staged.dshChannel ?? 'latest', staged.dshVersion ?? '')
-            .then((s) => setState(s))
-            .catch(() => {})
-        }
+        // 无需再通知主进程改渠道：Host 半侧自己 watch 这个 settings 命名空间，
+        // 配置提交后会自动按新渠道重查一轮。
+        store.checkNow()
       })
       .catch(() => { setFailed(true) })
       .finally(() => { setSaving(false) })
@@ -136,14 +129,12 @@ export function UpdateCard(props: UpdateCardProps) {
 
   const discard = (): void => { setDraft(null) }
 
-  const checkNow = (): void => {
-    const b = bridge()
-    if (b === undefined) return
+  const runCheck = (): void => {
+    if (checkingNow) return
     setChecking(true)
-    void b.updates.checkNow()
-      .then((s) => setState(s))
-      .catch(() => {})
-      .finally(() => setChecking(false))
+    store.checkNow()
+    // 给 Host 一个检测窗口再松开按钮；结果由下一次轮询带回。
+    window.setTimeout(() => { setChecking(false) }, 1500)
   }
 
   const testNotify = (): void => {
@@ -164,13 +155,13 @@ export function UpdateCard(props: UpdateCardProps) {
       .finally(() => { setTesting(false) })
   }
 
+  // 执行仍然必须过壳（只有它能跑 pnpm add / 开下载页 / 重启），但结果回报给
+  // Host：进度跨窗口一致，刷新页面也不会丢。
   const updateDshNow = (): void => {
-    const b = bridge()
-    if (b === undefined || !canUpdateDsh) return
+    const target = state.dsh?.latest
+    if (target === undefined || !canUpdateDsh) return
     setUpdating(true)
-    void b.updates.updateDsh()
-      .catch(() => {})
-      .finally(() => { setUpdating(false) })
+    void store.updateDsh(target).finally(() => { setUpdating(false) })
   }
 
   const relaunchNow = (): void => {
@@ -196,7 +187,7 @@ export function UpdateCard(props: UpdateCardProps) {
       pending={dirty ? <PendingBadge>{t('card.unsaved')}</PendingBadge> : undefined}
     >
       {!writable ? <p className="dsh-du-readonly" role="status">{t('card.readOnly')}</p> : null}
-      {state !== null && (
+      {(state.shell || state.versions.dsh !== null) && (
         <Field>
           <div className="dsh-du-versions">
             <span>
@@ -209,8 +200,8 @@ export function UpdateCard(props: UpdateCardProps) {
                   : '',
               ].filter((s) => s !== '').join(' · ')}
             </span>
-            <ActionButton disabled={checking || busyUpdating} onClick={checkNow}>
-              {checking ? t('action.checking') : t('action.check')}
+            <ActionButton disabled={checkingNow || busyUpdating} onClick={runCheck}>
+              {checkingNow ? t('action.checking') : t('action.check')}
             </ActionButton>
           </div>
           {(canUpdateDsh || busyUpdating || needsRelaunch || updateMessage !== null) && (
@@ -243,6 +234,11 @@ export function UpdateCard(props: UpdateCardProps) {
           )}
         </Field>
       )}
+      {!state.shell && (state.app !== null || state.dsh !== null) ? (
+        <Field>
+          <FieldHint>{t('card.noShellHint')}</FieldHint>
+        </Field>
+      ) : null}
       <Field>
         <div className="dsh-du-versions">
           <span>

@@ -10,8 +10,11 @@
 import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import { CLIENT_SERVICES, getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 
-import { UpdateCard, type DesktopUpdateConfig } from './card'
+import { UpdateCard } from './card'
+import type { DesktopUpdateConfig } from '../shared'
 import { installDesktopSeats } from './seats'
+import { createUpdateStore } from './update-store'
+import { bridge } from './bridge'
 
 /** Client services this plugin requires before `apply` runs. */
 export const inject = [
@@ -61,6 +64,7 @@ const zh = {
   'action.testNotifyDone': '已发送测试通知 ✓',
   'action.testNotifySuppressed': '通知被系统拦截（shown=false），请检查系统通知权限。',
   'action.testNotifyFailed': '发送测试通知失败。',
+  'card.noShellHint': '检测到新版本，请在 DSH-Desktop 中安装。',
   'action.updateDsh': '更新运行时',
   'action.updatingDsh': '更新中…',
   'action.relaunch': '立即重启',
@@ -101,6 +105,7 @@ const en: Record<keyof typeof zh, string> = {
   'action.testNotifyDone': 'Test notification sent ✓',
   'action.testNotifySuppressed': 'Notification was suppressed (shown=false). Check notification permission.',
   'action.testNotifyFailed': 'Failed to send test notification.',
+  'card.noShellHint': 'Update available. Open DSH-Desktop to install it.',
   'action.updateDsh': 'Update runtime',
   'action.updatingDsh': 'Updating…',
   'action.relaunch': 'Restart now',
@@ -113,7 +118,24 @@ export function apply(ctx: ClientContext): void {
   // the built-in LocaleNamespaceMap.
   ctx.effect(() => ctx.locale.register(NS, 'zh', zh), 'desktop-update: zh dictionary')
   ctx.effect(() => ctx.locale.register(NS, 'en', en), 'desktop-update: en dictionary')
-  ctx.effect(() => installDesktopSeats(), 'desktop-update: native seats')
+  // One store shared by the card and the native seats: both render the Host's
+  // published state, and both drive executes through the shell.
+  const store = createUpdateStore()
+  ctx.effect(() => () => store.dispose(), 'desktop-update: state store')
+
+  ctx.effect(
+    () =>
+      installDesktopSeats(
+        (apply) => store.subscribe(apply),
+        {
+          checkNow: () => { store.checkNow() },
+          downloadApp: () => { void bridge()?.updates.downloadApp().catch(() => {}) },
+          updateDsh: (version) => { void store.updateDsh(version) },
+          relaunch: () => { bridge()?.updates.relaunch() },
+        },
+      ),
+    'desktop-update: native seats',
+  )
 
   // Bound on this fiber: disposal, invalidation subscriptions, and the
   // initial Host read are owned by the binder's ctx.effect.
@@ -126,7 +148,7 @@ export function apply(ctx: ClientContext): void {
         // Plugin-owned dictionary namespace; widen as with the free-form
         // locale register overload above.
         locale: NS as never,
-        inject: () => ({ scope }),
+        inject: () => ({ scope, store }),
       },
       UpdateCard as never,
     ),
