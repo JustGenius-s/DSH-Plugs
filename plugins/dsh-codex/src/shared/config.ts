@@ -15,9 +15,19 @@ export interface QuickAction {
   steps: QuickActionStep[]
 }
 
+/** When the pinned user bubble is shown: only while a turn is running, or always. */
+export type StickyUserBubbleMode = 'running' | 'always'
+
 export interface DshCodexConfig {
   navigatorEnabled: boolean
   conversationCollapseEnabled: boolean
+  /** Pin the newest user message to the top of the conversation while scrolling. */
+  stickyUserBubbleEnabled: boolean
+  stickyUserBubbleMode: StickyUserBubbleMode
+  /** Drain the history window until the session has no older pages. */
+  fullSessionLoadEnabled: boolean
+  /** Cap on in-window user messages while full-session load is on (inclusive). */
+  fullSessionLoadLimit: number
   terminalEnabled: boolean
   gitGraphEnabled: boolean
   filesEnabled: boolean
@@ -42,9 +52,18 @@ export interface DshCodexConfig {
 export const PANEL_LAUNCHER_WIDTH_MIN = 140
 export const PANEL_LAUNCHER_WIDTH_MAX = 400
 
+/** Inclusive bounds for full-session-load's user-message cap. */
+export const FULL_SESSION_LOAD_LIMIT_MIN = 5
+export const FULL_SESSION_LOAD_LIMIT_MAX = 200
+export const FULL_SESSION_LOAD_LIMIT_PRESETS = [10, 15, 25, 50] as const
+
 export const DEFAULT_CONFIG: DshCodexConfig = {
   navigatorEnabled: true,
   conversationCollapseEnabled: true,
+  stickyUserBubbleEnabled: false,
+  stickyUserBubbleMode: 'running',
+  fullSessionLoadEnabled: false,
+  fullSessionLoadLimit: 25,
   terminalEnabled: true,
   gitGraphEnabled: true,
   filesEnabled: true,
@@ -67,5 +86,13 @@ export function clampPanelLauncherWidth(value: number): number {
   return Math.min(
     PANEL_LAUNCHER_WIDTH_MAX,
     Math.max(PANEL_LAUNCHER_WIDTH_MIN, Math.round(value)),
+  )
+}
+
+export function clampFullSessionLoadLimit(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_CONFIG.fullSessionLoadLimit
+  return Math.min(
+    FULL_SESSION_LOAD_LIMIT_MAX,
+    Math.max(FULL_SESSION_LOAD_LIMIT_MIN, Math.round(value)),
   )
 }
