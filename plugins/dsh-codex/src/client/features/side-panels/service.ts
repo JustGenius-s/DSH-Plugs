@@ -17,6 +17,7 @@
 
 import type { PanelIconName } from './icons'
 import { createSnapshotChannel } from '../../core/observable'
+import { tabInsertIndex } from './tab-order'
 
 /** One open panel instance: a tab in the strip. */
 export interface SidePanelInstance {
@@ -415,9 +416,12 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
       }
       const instance: SidePanelInstance = { key: nextKey(id), panelId: id }
       if (state !== undefined) instance.state = state
+      // Land next to the active tab (see tab-order.ts) rather than at the end.
+      const instances = [...snapshot.instances]
+      instances.splice(tabInsertIndex(snapshot.instances, snapshot.activeKey), 0, instance)
       setSnapshot({
         open: true,
-        instances: [...snapshot.instances, instance],
+        instances,
         activeKey: instance.key,
       })
       writeStorage(OPEN_KEY, '1')

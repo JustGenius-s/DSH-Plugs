@@ -382,6 +382,12 @@ export function GitChangesView(props: GitChangesViewProps) {
         onDiscard={(file) => setDiscardFile(file)}
         onStageDirChange={(path, stage) => void run(stage ? 'stage' : 'unstage', undefined, path)}
         onDiscardDir={(path) => setDiscardDir(path)}
+        // Same confirmed flow the overflow menu uses: the acknowledgement
+        // checkbox is the guard, so the header button cannot one-click it.
+        onDiscardAll={() => {
+          setAcknowledged(false)
+          setDiscardOpen(true)
+        }}
         onFilesChange={onFilesChange}
       />
       <Menu

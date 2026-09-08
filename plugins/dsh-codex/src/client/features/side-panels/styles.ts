@@ -7,8 +7,9 @@
 // Surfaces, inks, borders and motion ride the same `--dsw-*` design tokens as
 // DSH's own left sidebar column, so the panel tracks the active theme with no
 // hardcoded colors. The chrome is the AppFrame sidebar track — fill is
-// `--dsw-specific-sidebar-fill`, the column divider is `--dsw-alias-border-l1`,
-// and there is no drop shadow, matching `.pI_x6G_sidebarCol`. Header padding
+// `--dsw-specific-sidebar-fill` and the column divider is the same hairline
+// the left sidebar draws, `.5px solid --dsw-alias-border-l3` (DSH's
+// `.pI_x6G_sidebarCol`), with no drop shadow. Header padding
 // (14/12/12), the 28px round close button and its hover fill still come from
 // ui-conversation's DetailsPanel. The resize hit strip matches AppFrame's
 // sidebar handle: an 8px, pill-less col-resize strip centered on the panel's
@@ -27,7 +28,7 @@ body[data-dsh-side-panels-dragging] #root{transition:none}
    panel slide as one piece. Overflow stays visible here so the 8px
    resize strip can hang 4px past the left border; the inner clip
    wrapper is what hides content as the track shrinks. */
-.dsh-side-panels{position:fixed;top:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;background:var(--dsw-specific-sidebar-fill);border-left:1px solid var(--dsw-alias-border-l1);box-shadow:none;pointer-events:auto;font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary);transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out),border-left-color var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
+.dsh-side-panels{position:fixed;top:0;right:0;bottom:0;z-index:40;display:flex;flex-direction:column;min-width:0;background:var(--dsw-specific-sidebar-fill);border-left:.5px solid var(--dsw-alias-border-l3);box-shadow:none;pointer-events:auto;font-family:var(--dsw-font-family);color:var(--dsw-alias-label-primary);transition:width var(--ds-transition-duration-slow) var(--ds-ease-in-out),border-left-color var(--ds-transition-duration-slow) var(--ds-ease-in-out)}
 .dsh-side-panels[data-collapsed]{border-left-color:transparent;pointer-events:none}
 .dsh-side-panels-inner{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;height:100%;overflow:hidden}
 .dsh-side-panels-resize{position:absolute;left:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:2;touch-action:none}
@@ -100,10 +101,13 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
 .dsh-side-panels-tab-label{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsh-side-panels-tab-icon{display:inline-flex;flex:none;width:14px;height:14px;align-items:center;justify-content:center}
 .dsh-side-panels-tab-icon>svg{width:14px;height:14px}
-/* Bare glyph, not a button plate: no hover fill and no round background —
-   hovering only brightens the ink. Sized to the 14px glyph it holds. */
-.dsh-side-panels-tab-close{display:grid;place-items:center;flex:none;width:14px;height:14px;padding:0;border:none;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;opacity:0}
-.dsh-side-panels-tab:hover .dsh-side-panels-tab-close{opacity:1}
+/* Close affordance: absolutely positioned over the caption's tail so it
+   reserves no width (the tab is exactly as wide as its label), on the solid
+   hover plate token — an opaque chip, so the covered caption cannot show
+   through. The ink brightens on hover, and keyboard focus reveals the button
+   too. */
+.dsh-side-panels-tab-close{position:absolute;right:0;top:50%;transform:translateY(-50%);display:grid;place-items:center;width:18px;height:18px;padding:0;border:none;border-radius:5px;background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-tertiary);cursor:pointer;opacity:0}
+.dsh-side-panels-tab:hover .dsh-side-panels-tab-close,.dsh-side-panels-tab-close:focus-visible{opacity:1}
 .dsh-side-panels-tab-close:hover{color:var(--dsw-alias-label-primary)}
 
 /* Tab drag-reorder: touch-action none so pointer capture sees the move; the
@@ -131,10 +135,11 @@ body[data-dsh-side-panels-dragging] .dsh-side-panels{transition:none}
    hover fill, so the on-state reads as held, not just hovered. */
 .dsh-side-panels-icon-button[aria-pressed=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 
-/* New-instance menu: the DSH menu dropdown surface (Menu.module.css). */
+/* New-instance menu: the shared menu card (Menu.module.css) — panel fill and
+   the same 8/6 radii, so it matches the kit's menus instead of drifting. */
 .dsh-side-panels-add{position:relative;flex:none;display:flex}
-.dsh-side-panels-add-menu{position:absolute;top:calc(100% + 4px);right:0;z-index:42;box-sizing:border-box;display:flex;flex-direction:column;min-width:164px;max-width:280px;padding:4px;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3)}
-.dsh-side-panels-add-item{display:flex;align-items:center;gap:8px;width:100%;min-height:34px;padding:4px 8px;border:none;border-radius:10px;background:transparent;cursor:pointer;font-family:inherit;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);text-align:left}
+.dsh-side-panels-add-menu{position:absolute;top:calc(100% + 4px);right:0;z-index:42;box-sizing:border-box;display:flex;flex-direction:column;min-width:164px;max-width:280px;padding:4px;border:.5px solid var(--dsw-alias-border-l3);border-radius:8px;background:var(--dsw-specific-sidebar-fill);box-shadow:var(--dsw-shadow-lv3)}
+.dsh-side-panels-add-item{display:flex;align-items:center;gap:8px;width:100%;min-height:34px;padding:4px 8px;border:none;border-radius:6px;background:transparent;cursor:pointer;font-family:inherit;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary);text-align:left}
 .dsh-side-panels-add-item:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-side-panels-add-icon{display:inline-flex;flex:none;width:16px;height:16px;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary)}
 .dsh-side-panels-add-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

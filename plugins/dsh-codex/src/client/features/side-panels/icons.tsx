@@ -140,6 +140,36 @@ export function PanelIconGraph(props: PanelIconProps) {
 }
 
 /**
+ * Working-tree changes: the Lucide `diff` mark (plus over a rule), used
+ * VERBATIM rather than redrawn in this set's fill-type language — the native
+ * sheet has no +/- glyph, and at the 16px row this 24-grid 2px stroke lands at
+ * ~1.33px, the same weight as the hand-drawn glyphs beside it. The deliberate
+ * exception to the fill-type rule is why this one renders its own <svg>
+ * instead of `Glyph`.
+ */
+export function PanelIconChanges(props: PanelIconProps) {
+  const { size = 16, className } = props
+  return (
+    <svg
+      width={size}
+      height={size}
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M12 3v14" />
+      <path d="M5 10h14" />
+      <path d="M5 21h14" />
+    </svg>
+  )
+}
+
+/**
  * The named glyphs a panel can request by string. Panels report a name
  * (`icon: 'terminal'`) so the host owns the drawing and every panel row stays
  * on one visual language; a panel needing something else passes a thunk.
@@ -149,10 +179,12 @@ export function PanelIconGraph(props: PanelIconProps) {
  * marks DSH already uses for these meanings (checklist reads as a command
  * list, which is what a command panel shows; the branch mark is the canonical
  * source-control glyph). Globe and checklist are 14-grid glyphs upstream; the
- * size prop below still renders them at the row's 16px box.
+ * size prop below still renders them at the row's 16px box. `changes` is the
+ * Lucide diff mark above — the one glyph in this set that is stroke-type.
  */
 export const PANEL_ICONS = {
   terminal: PanelIconTerminal,
+  changes: PanelIconChanges,
   git: IconBranchOutline16,
   files: IconFolderOpenOutline16,
   browser: IconGlobeOutline14,

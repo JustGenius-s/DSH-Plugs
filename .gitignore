@@ -1,5 +1,6 @@
 node_modules/
 .pnpm-store/
+.pnpm-home/
 lib/
 dist/
 *.tsbuildinfo

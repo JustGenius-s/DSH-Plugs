@@ -17,7 +17,7 @@ import type { ReactNode } from 'react'
 import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import {
   IconChevronRightOutline14,
-  IconCloseFill14, IconCloseOutline16, IconPlusOutline16, Menu, Tooltip,
+  IconCloseOutline16, IconPlusOutline16, Menu, Tooltip,
   type MenuEntry,
 } from '@just-genius/dsh-plugin-ui'
 import {
@@ -619,7 +619,7 @@ export function SidePanelsShell(props: ShellProps) {
                   title={t('aria.closeTab')}
                   onClick={() => store.closeInstance(instance.key)}
                 >
-                  <IconCloseFill14 size={14} />
+                  <IconCloseOutline16 size={12} />
                 </button>
               </div>
             )

@@ -67,6 +67,11 @@ export interface GitGraphDetailProps {
   onStageDirChange?: (path: string, stage: boolean) => void
   /** Tree mode: discard every change under a directory (Changes side only). */
   onDiscardDir?: (path: string) => void
+  /**
+   * Section-header action on the unstaged group: discard every change at once
+   * (untracked files are deleted). Omitting it hides the button.
+   */
+  onDiscardAll?: () => void
   /** Reports the fetched list so the parent can react to group counts. */
   onFilesChange?: (files: readonly GitChangeFile[]) => void
   /**
@@ -90,7 +95,7 @@ export function refBadgeLabel(ref: GitGraphRef): string {
 }
 
 export function GitGraphDetail(props: GitGraphDetailProps) {
-  const { cwd, sha, title, refs, onClose, t, onOpenFile, onOpenPreview, display = 'flat', onStageChange, onStageAll, onUnstageAll, onDiscard, onStageDirChange, onDiscardDir, onFilesChange, refreshSeq = 0 } = props
+  const { cwd, sha, title, refs, onClose, t, onOpenFile, onOpenPreview, display = 'flat', onStageChange, onStageAll, onUnstageAll, onDiscard, onStageDirChange, onDiscardDir, onDiscardAll, onFilesChange, refreshSeq = 0 } = props
   const [files, setFiles] = useState<readonly GitChangeFile[] | null>(null)
   const [error, setError] = useState<string | undefined>()
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
@@ -214,6 +219,7 @@ export function GitGraphDetail(props: GitGraphDetailProps) {
             files={unstagedFiles}
             stageAction="stage"
             onStageAll={onStageAll}
+            onDiscardAll={onDiscardAll}
             {...listProps}
           />
         </>
@@ -242,8 +248,10 @@ function ChangeSection(props: {
   onDiscardDir?: (path: string) => void
   /** Header hover action matching stageAction's direction (all files). */
   onStageAll?: () => void
+  /** Extra header hover action: discard every change in this group. */
+  onDiscardAll?: () => void
 }) {
-  const { label, files, stageAction, onStageAll, t, ...listProps } = props
+  const { label, files, stageAction, onStageAll, onDiscardAll, t, ...listProps } = props
   if (files.length === 0) return null
   const allLabel = stageAction === 'stage' ? 'gitGraph.stageAll' : 'gitGraph.unstageAll'
   return (
@@ -251,6 +259,17 @@ function ChangeSection(props: {
       <div className="dsh-git-graph-detail-section">
         <span className="dsh-git-graph-detail-section-label">{label}</span>
         <span className="dsh-git-graph-detail-section-count">{files.length}</span>
+        {onDiscardAll === undefined ? null : (
+          <button
+            type="button"
+            className="dsh-git-graph-detail-section-action"
+            aria-label={t('gitGraph.discardAll')}
+            title={t('gitGraph.discardAll')}
+            onClick={onDiscardAll}
+          >
+            <IconUndo size={16} />
+          </button>
+        )}
         {onStageAll === undefined ? null : (
           <button
             type="button"
@@ -457,6 +476,11 @@ function IconFileCode(props: { size?: number }) {
 /**
  * Undo (discard) glyph, hand-drawn to the DSH fill-type spec (16px grid,
  * 1.3px stroke equivalent) — the primitives sheet has no discard glyph.
+ *
+ * The mark is scaled 1.16x about the centre so its 11.1px box matches the
+ * 13px optical size of the plus/minus glyphs it sits beside (the header's
+ * stage action); at 16px an unscaled mark read a size smaller than its
+ * neighbour. The scale is a group transform, so the arcs stay true.
  */
 function IconUndo(props: { size?: number }) {
   const size = props.size ?? 16
@@ -468,15 +492,17 @@ function IconUndo(props: { size?: number }) {
       fill="none"
       aria-hidden="true"
     >
-      <path
-        d="M5.9 2.2 2.2 5.9l3.7 3.7.9-.9-2.8-2.8 2.8-2.8z"
-        fill="currentColor"
-      />
-      <path d="M4.2 5.25h5.3v1.3H4.2z" fill="currentColor" />
-      <path
-        d="M9.5 5.25a3.75 3.75 0 0 1 3.75 3.75v.65a3.75 3.75 0 0 1-3.75 3.75H7.6v-1.3h1.9a2.45 2.45 0 0 0 2.45-2.45v-.65a2.45 2.45 0 0 0-2.45-2.45z"
-        fill="currentColor"
-      />
+      <g transform="translate(-1.28 -1.28) scale(1.16)">
+        <path
+          d="M5.9 2.2 2.2 5.9l3.7 3.7.9-.9-2.8-2.8 2.8-2.8z"
+          fill="currentColor"
+        />
+        <path d="M4.2 5.25h5.3v1.3H4.2z" fill="currentColor" />
+        <path
+          d="M9.5 5.25a3.75 3.75 0 0 1 3.75 3.75v.65a3.75 3.75 0 0 1-3.75 3.75H7.6v-1.3h1.9a2.45 2.45 0 0 0 2.45-2.45v-.65a2.45 2.45 0 0 0-2.45-2.45z"
+          fill="currentColor"
+        />
+      </g>
     </svg>
   )
 }

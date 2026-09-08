@@ -9,9 +9,9 @@
 // with raw keystroke forwarding; the canvas switches to that surface while
 // active, matching Warp's AltScreen.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent, ClipboardEvent as ReactClipboardEvent } from 'react'
-import { createPortal } from 'react-dom'
+import { Menu, type MenuEntry } from '@just-genius/dsh-plugin-ui'
 import { Terminal } from '@xterm/xterm'
 import type {
   BlockContext,
@@ -1034,27 +1034,14 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     setContextMenu({ x: event.clientX, y: event.clientY })
   }, [])
 
-  // Close the context menu on outside click, Escape, scroll, or a selection
-  // change (the selection it acted on is gone, so the menu must not linger).
+  // Outside click and Escape belong to the shared Menu. The terminal keeps
+  // only the scroll dismissal: scrolling moves the selection the menu acts on,
+  // and a menu left floating over unrelated text would be lying.
   useEffect(() => {
     if (contextMenu === null) return
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target
-      if (target instanceof Element && target.closest('.dsh-warp-terminal-context-menu') !== null) return
-      setContextMenu(null)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setContextMenu(null)
-    }
     const onScroll = () => setContextMenu(null)
-    window.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('keydown', onKeyDown)
     window.addEventListener('scroll', onScroll, true)
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('scroll', onScroll, true)
-    }
+    return () => window.removeEventListener('scroll', onScroll, true)
   }, [contextMenu])
 
   // Add the current selection to the conversation as a @终端 chip; clears the
@@ -1083,6 +1070,23 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     })
     setContextMenu(null)
   }, [copySelection, schedulePaint])
+
+  // The selection menu's rows, in the shared menu's own vocabulary.
+  const contextMenuItems = useMemo((): readonly MenuEntry[] => {
+    const items: MenuEntry[] = [{ id: 'copy', label: t('context.copy') }]
+    if (onAddToContext !== undefined) {
+      items.push({ id: 'add-to-context', label: t('context.addToChat') })
+    }
+    return items
+  }, [onAddToContext, t])
+
+  const onContextMenuSelect = useCallback((id: string): void => {
+    if (id === 'copy') {
+      copySelectionFromMenu()
+      return
+    }
+    if (id === 'add-to-context') addSelectionToContext()
+  }, [copySelectionFromMenu, addSelectionToContext])
 
   // Copy on Cmd/Ctrl+C when there is a selection (then clear it). Without a
   // selection the key falls through so Ctrl+C still reaches a running command.
@@ -1503,19 +1507,23 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       )}
         </div>
       </div>
-      {contextMenu !== null && createPortal(
-        <div className="dsh-warp-terminal-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }}>
-          <button type="button" className="dsh-warp-terminal-context-item" onClick={copySelectionFromMenu}>
-            {t('context.copy')}
-          </button>
-          {onAddToContext !== undefined && (
-            <button type="button" className="dsh-warp-terminal-context-item" onClick={addSelectionToContext}>
-              {t('context.addToChat')}
-            </button>
-          )}
-        </div>,
-        document.body,
-      )}
+      {/* The selection menu is the shared DSH Menu — portaled and anchored at
+          the cursor, so it matches the files and git-graph menus instead of
+          carrying its own card. */}
+      <Menu
+        open={contextMenu !== null}
+        portal
+        dense
+        anchor={<span className="dsh-warp-terminal-menu-anchor" aria-hidden="true" />}
+        getAnchorRect={() => (
+          contextMenu === null
+            ? null
+            : new DOMRect(contextMenu.x, contextMenu.y, 1, 1)
+        )}
+        items={contextMenuItems}
+        onSelect={onContextMenuSelect}
+        onClose={() => setContextMenu(null)}
+      />
     </div>
   )
 }

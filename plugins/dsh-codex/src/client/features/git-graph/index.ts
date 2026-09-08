@@ -28,7 +28,7 @@ export function createGitGraphFeature(
       // instance shows the working-tree changes; the Graph button opens a
       // second instance of the SAME panel rendering the commit graph.
       const disposeDescriptor = ctx.sidePanels.describe(PANEL_ID, {
-        icon: 'git',
+        icon: 'changes',
         multi: true,
       })
       const openFile = (file: string, sha?: string): void => {
