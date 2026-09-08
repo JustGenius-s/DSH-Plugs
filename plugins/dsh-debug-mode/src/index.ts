@@ -7,7 +7,17 @@ import { defineTool } from '@just-genius/dsh-plugin-runtime/host'
 import { HOST_SERVICES, errorMessage, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
 import { DEBUG_POLICY } from './policy.ts'
 import {
+  appendLogFile,
+  clearLogFile,
+  installDebugKit,
+  loadLogFile,
+  type DebugKit,
+} from './kit.ts'
+import {
+  CLEAR_PATH,
+  DEBUG_KIT_DIR,
   DEBUG_LOG,
+  DEBUG_LOG_FILE,
   LOGS_PATH,
   MAX_INGEST_BATCH,
   MAX_INGEST_LINE,
@@ -26,7 +36,7 @@ import {
 import type { DebugProjection } from './types.ts'
 
 export type { DebugProjection } from './types.ts'
-export { DEBUG_LOG, LOGS_PATH, REPRO_PATH, STATE_PATH, WAIT_FOR_REPRO } from './shared.ts'
+export { CLEAR_PATH, DEBUG_LOG, LOGS_PATH, REPRO_PATH, STATE_PATH, WAIT_FOR_REPRO } from './shared.ts'
 
 export const name = 'dsh-debug-mode'
 export const inject = [
@@ -48,6 +58,8 @@ interface SessionDebugState {
   wanted: boolean | null
   wait: DebugReproWait | null
   logs: DebugLogEntry[]
+  /** Workspace kit written on /debug; null when the session has no cwd. */
+  kit: DebugKit | null
   /** Last mode value narrated into the model context for this process lifetime. */
   toldActive: boolean | undefined
 }
@@ -65,15 +77,16 @@ interface ReproResult {
   logs: string
 }
 
-const WAIT_DESCRIPTION = 'Use only in debug mode. Present numbered reproduction steps and wait until the user presses Proceed or Mark as fixed. '
-  + 'Send the COMPLETE steps as markdown, starting with a # heading that names them. '
-  + 'After they finish, read verdict/notes/logs in the tool result and continue from that evidence.'
+const WAIT_DESCRIPTION = 'Debug mode only. Markdown starting with # Reproduction Steps, then a numbered list. '
+  + 'Remind the user to restart anything that must load new probes. Do not ask them to type done. '
+  + 'Call this and stop. After Proceed/fixed, read verdict/notes/logs and continue from evidence.'
 
 const EMPTY_VIEW: DebugProjection = {
   active: false,
   pending: false,
   wait: null,
   logs: [],
+  logFile: null,
 }
 
 export function apply(ctx: Context): void {
@@ -125,7 +138,7 @@ export function apply(ctx: Context): void {
       const state = store.get(sessionId)
       if (state === undefined) return ''
       const on = state.wanted ?? state.active
-      return on ? formatIngestBlock(ingestSink(ctx, sessionId)) : ''
+      return on ? formatIngestBlock(ingestSink(ctx, sessionId), state.kit) : ''
     },
   })
 
@@ -154,12 +167,13 @@ export function apply(ctx: Context): void {
           }
         }
         const outcome = setDebugMode(store, agent, true, sink)
+        attachKit(store, agent.session, sink)
         if (message !== '') {
           agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
         }
         return {
           kind: 'success',
-          text: formatDebugOnCommand(sink, outcome),
+          text: formatDebugOnCommand(outcome, store.get(String(agent.session.id))?.kit ?? null),
         }
       },
     })
@@ -245,7 +259,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: DEBUG_LOG,
-    description: 'Append one line to the Debug Logs dock. Use for hypothesis notes or captured runtime evidence the user should see.',
+    description: 'One-line note in the Debug Logs dock. Your hypotheses only — program evidence must go through the .dsh/debug helper.',
     parameters: {
       message: {
         type: 'string',
@@ -297,6 +311,12 @@ export function apply(ctx: Context): void {
     path: REPRO_PATH,
     handler: (req, res) => handleRepro(ctx, store, waits, req, res),
   }), 'dsh-debug-mode: repro route')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: CLEAR_PATH,
+    handler: (req, res) => handleClear(ctx, store, req, res),
+  }), 'dsh-debug-mode: clear route')
 }
 
 function ensureState(store: Map<string, SessionDebugState>, sessionId: string): SessionDebugState {
@@ -307,6 +327,7 @@ function ensureState(store: Map<string, SessionDebugState>, sessionId: string): 
     wanted: null,
     wait: null,
     logs: [],
+    kit: null,
     toldActive: undefined,
   }
   store.set(sessionId, fresh)
@@ -320,6 +341,7 @@ function viewState(state: SessionDebugState | undefined): DebugProjection {
     pending: state.wanted !== null && state.wanted !== state.active,
     wait: state.wait?.waiting === true ? state.wait : null,
     logs: state.logs,
+    logFile: state.kit?.relLogFile ?? null,
   }
 }
 
@@ -358,6 +380,7 @@ function setDebugMode(
   }
   state.active = active
   state.wanted = null
+  if (active) attachKit(store, session, sink)
   const narration = narrationFor(state, active, sink)
   if (narration !== undefined) {
     state.toldActive = active
@@ -366,6 +389,20 @@ function setDebugMode(
     state.toldActive = active
   }
   return 'committed'
+}
+
+function attachKit(
+  store: Map<string, SessionDebugState>,
+  session: Session,
+  sink: IngestSink,
+): DebugKit | null {
+  const state = ensureState(store, String(session.id))
+  const kit = installDebugKit(session, sink)
+  state.kit = kit
+  if (kit !== null && state.logs.length === 0) {
+    state.logs = loadLogFile(kit)
+  }
+  return kit
 }
 
 function commitWanted(state: SessionDebugState): void {
@@ -382,14 +419,14 @@ function commitWanted(state: SessionDebugState): void {
 function narrationFor(state: SessionDebugState, target: boolean, sink: IngestSink) {
   if (target) {
     if (state.toldActive === true) return undefined
-    const text = formatDebugOnNotice(sink)
+    const text = formatDebugOnNotice()
     return createUserMessage({
       content: [{ type: 'text', text }],
       source: {
         kind: 'plugin',
         plugin: 'dsh-debug-mode',
         form: 'notice',
-        summary: 'Debug mode on — runtime ingest sink attached.',
+        summary: 'Debug mode on.',
       },
     })
   }
@@ -410,49 +447,37 @@ function ingestSink(ctx: Context, sessionId: string): IngestSink {
   }
 }
 
-function formatIngestBlock(sink: IngestSink): string {
-  const example = JSON.stringify({
-    sessionId: sink.sessionId,
-    text: '<one line>',
-    source: 'ingest',
-  })
-  return [
-    'Runtime ingest for this live session (localhost only):',
-    `url: ${sink.url}`,
-    `sessionId: ${sink.sessionId}`,
-    `POST ${sink.url}`,
-    example,
-    'Every program reaches Debug Logs the same way: POST here. Do not treat the current process as a special case.',
-    'Batch with "lines": ["..."]. This HTTP port always records source=ingest.',
-  ].join('\n')
+function formatIngestBlock(sink: IngestSink, kit: DebugKit | null): string {
+  const logFile = kit?.relLogFile ?? DEBUG_LOG_FILE
+  const lines = [
+    'Debug logging for this session (use the kit, do not write HTTP):',
+    `  endpoint: ${sink.url}`,
+    `  sessionId: ${sink.sessionId}`,
+    `  logFile: ${logFile}`,
+    "  JS/TS: import { debugLog } from '<relative>/.dsh/debug/log.mjs'",
+    '  CLI: node .dsh/debug/log.mjs "text"',
+  ]
+  if (kit === null) {
+    lines.push(`Kit missing (no cwd). Last resort POST ${sink.url} {"sessionId","text","source":"ingest"}`)
+  }
+  return lines.join('\n')
 }
 
-function formatDebugOnNotice(sink: IngestSink): string {
-  return [
-    'The user switched this session to debug mode.',
-    '',
-    formatIngestBlock(sink),
-    '',
-    'Put this POST (or an equivalent pipe) in the reproduction steps for every program that must emit runtime evidence. Use debug_log only for your own hypothesis notes.',
-  ].join('\n')
+function formatDebugOnNotice(): string {
+  return 'Debug mode on. Follow the debug policy. Do not acknowledge this notice — start with 3–5 hypotheses, then instrument.'
 }
 
 function formatDebugOnCommand(
-  sink: IngestSink,
   outcome: 'committed' | 'queued' | 'cancelled' | 'noop',
+  kit: DebugKit | null,
 ): string {
   const head = outcome === 'committed'
-    ? 'Debug mode on for this live session only (not persisted across reload).'
+    ? 'Debug mode on (this session only).'
     : outcome === 'queued'
-      ? 'Entering debug mode (applies from the next step).'
+      ? 'Entering debug mode (next step).'
       : 'Debug mode is already on.'
-  return [
-    head,
-    '',
-    formatIngestBlock(sink),
-    '',
-    'Use /debug off to leave.',
-  ].join('\n')
+  const kitLine = kit === null ? '' : ` Helper: ${DEBUG_KIT_DIR}/.`
+  return `${head}${kitLine} /debug off to leave.`
 }
 
 function appendLog(
@@ -469,7 +494,16 @@ function appendLog(
     text: text.trim(),
   }
   state.logs = capLogs([...state.logs, entry])
+  appendLogFile(state.kit, entry)
   return entry
+}
+
+function clearLogs(store: Map<string, SessionDebugState>, session: Session): number {
+  const state = ensureState(store, String(session.id))
+  const cleared = state.logs.length
+  state.logs = []
+  clearLogFile(state.kit)
+  return cleared
 }
 
 function closeOpenWait(store: Map<string, SessionDebugState>, session: Session): void {
@@ -582,6 +616,47 @@ async function handleLogs(
   }
   const entries = lines.map(line => appendLog(store, session, 'ingest', line))
   json(res, 200, { ok: true, value: { recorded: entries.length, entries } })
+}
+
+async function handleClear(
+  ctx: Context,
+  store: Map<string, SessionDebugState>,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (req.method !== 'POST') {
+    json(res, 405, { ok: false, message: 'method not allowed' })
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    json(res, 400, { ok: false, message: errorMessage(error) })
+    return
+  }
+  if (body === null || typeof body !== 'object') {
+    json(res, 400, { ok: false, message: 'invalid body' })
+    return
+  }
+  const sessionId = typeof (body as { sessionId?: unknown }).sessionId === 'string'
+    ? (body as { sessionId: string }).sessionId
+    : ''
+  if (sessionId === '') {
+    json(res, 400, { ok: false, message: 'sessionId is required' })
+    return
+  }
+  const session = ctx.sessions.get(sessionId as never)
+  if (session === undefined) {
+    json(res, 404, { ok: false, message: 'session not found' })
+    return
+  }
+  if (!isActive(store, session)) {
+    json(res, 409, { ok: false, message: 'debug mode is not active' })
+    return
+  }
+  const cleared = clearLogs(store, session)
+  json(res, 200, { ok: true, value: { cleared } })
 }
 
 async function handleRepro(

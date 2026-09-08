@@ -54,6 +54,12 @@
   display: inline-flex;
 }
 
+.clear {
+  margin-left: auto;
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .flag {
   color: var(--dsw-alias-state-error-primary);
 }

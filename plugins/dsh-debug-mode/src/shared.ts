@@ -13,6 +13,15 @@ export const REPRO_PATH = '/dsh-debug-mode/repro'
 /** HTTP path for polling the live (non-persisted) debug projection. */
 export const STATE_PATH = '/dsh-debug-mode/state'
 
+/** HTTP path for clearing the live dock and the workspace log file. */
+export const CLEAR_PATH = '/dsh-debug-mode/clear'
+
+/** Workspace-relative directory written when debug mode turns on. */
+export const DEBUG_KIT_DIR = '.dsh/debug'
+
+/** Workspace-relative JSONL log the host mirrors from memory. */
+export const DEBUG_LOG_FILE = `${DEBUG_KIT_DIR}/debug.log`
+
 /** Keep the projection small enough for frequent polls. */
 export const MAX_DEBUG_LOGS = 200
 
