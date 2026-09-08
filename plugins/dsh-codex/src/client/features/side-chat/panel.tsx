@@ -124,7 +124,9 @@ export function SideChatPanel({
   // already owns one. Guard against double-mount (StrictMode / HMR).
   const forkingRef = useRef(false)
   useEffect(() => {
-    if (parentSessionId === undefined || forkingRef.current) return
+    // The no-session bucket arrives as an empty string, not undefined: forking
+    // from "" would ask the Host for a parent that cannot exist.
+    if (parentSessionId === undefined || parentSessionId === '' || forkingRef.current) return
     if (sideSessionId !== null) return
     forkingRef.current = true
     let alive = true

@@ -54,6 +54,44 @@ class SideChatError extends Error {
   }
 }
 
+/**
+ * Poll `read` until it yields a value or the budget runs out.
+ *
+ * Pure and injectable so it is testable without a Host context: the caller
+ * supplies the read, and may supply the sleep.
+ */
+export async function pollForValue<T>(
+  read: () => T | undefined,
+  options: {
+    timeoutMs: number
+    intervalMs: number
+    sleep?: (ms: number) => Promise<void>
+  },
+): Promise<T | undefined> {
+  const sleep = options.sleep
+    ?? ((ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms) }))
+  const deadline = Date.now() + options.timeoutMs
+  for (;;) {
+    const value = read()
+    if (value !== undefined) return value
+    if (Date.now() >= deadline) return undefined
+    await sleep(options.intervalMs)
+  }
+}
+
+/**
+ * How long `open` waits for its parent session before giving up.
+ *
+ * A side chat is forked from the conversation the user is looking at, but the
+ * panel can mount before that session has entered the Host's store — a page
+ * reload, a session switch, or a cold restore all race the fork. The client
+ * already polls for its own side session to appear (see `waitForListed`);
+ * the Host must do the same for the parent instead of failing the very first
+ * attempt with 404.
+ */
+const PARENT_WAIT_TIMEOUT_MS = 5_000
+const PARENT_POLL_INTERVAL_MS = 100
+
 export interface DshCodexSideChatServer {
   dispose(): void
 }
@@ -180,9 +218,19 @@ export function createDshCodexSideChatServer(
   async function openSideChat(
     parentSessionId: SessionId,
   ): Promise<{ sideSessionId: SessionId; context: SideChatContextState }> {
-    const parent = ctx.sessions.get(parentSessionId)
+    // The parent is the conversation the user is looking at, but the panel can
+    // mount before that session has entered the Host store. Wait a bounded
+    // moment for it rather than failing the very first fork with a 404 — the
+    // client already polls for its own session the same way.
+    const parent = await pollForValue(
+      () => ctx.sessions.get(parentSessionId),
+      { timeoutMs: PARENT_WAIT_TIMEOUT_MS, intervalMs: PARENT_POLL_INTERVAL_MS },
+    )
     if (parent === undefined) {
-      throw new SideChatError(404, `parent session "${parentSessionId}" not found`)
+      throw new SideChatError(
+        404,
+        `parent session "${parentSessionId}" not found (it may have been closed or archived, or has not opened yet)`,
+      )
     }
     const composition = await composeAgentFor(
       ctx,
