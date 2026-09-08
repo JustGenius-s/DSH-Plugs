@@ -1,0 +1,25 @@
+/* Portaled to document.body. z-index 50 sits above Codex's sticky user
+   bubble (45) and the side panel (40), and below image preview (80) and
+   DSH modals (1000). The host stays click-through. */
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100vw - 48px));
+  padding: 7px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-shadow-lv3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12.5px;
+  pointer-events: auto;
+}

@@ -152,9 +152,10 @@ export class WorkspaceStore {
         const workspace = this.dshWorkspace(item.cwd, 'DSH 任务')
         const session = { id: item.id, header: { meta: { cwd: item.cwd }, parentSession: typeof item.parentId === 'string' ? item.parentId : undefined }, title: typeof item.title === 'string' ? item.title : undefined, events: [] }
         const thread = this.dshThread(workspace, session)
-        if (typeof item.title === 'string' && item.title.trim() !== '') {
-          thread.title = item.title.slice(0, MAX_TITLE_LENGTH)
-          thread.dshSessionTitle = thread.title
+        const title = usableSessionTitle(item.title)
+        if (title !== null) {
+          thread.title = title
+          thread.dshSessionTitle = title
         }
       }
       return this.list()
@@ -269,6 +270,7 @@ export class WorkspaceStore {
       for (const event of events ?? []) {
         if (event.seq >= replayFrom) this.projectEventInto(workspace, thread, event)
       }
+      repairTurnQuestions(thread, events ?? [], replayFrom)
       return structuredClone(thread)
     }, { deferred: true })
   }
@@ -292,6 +294,7 @@ export class WorkspaceStore {
       const workspace = this.dshWorkspace(sessionCwd(session), workspaceTitle)
       const thread = this.dshThread(workspace, session)
       for (const event of events) this.projectEventInto(workspace, thread, event)
+      repairTurnQuestions(thread, events)
       return structuredClone(thread)
     }, { deferred: true })
   }
@@ -441,8 +444,8 @@ export class WorkspaceStore {
   dshThread(workspace, session) {
     let thread = workspace.threads.find(item => item.dshSessionId === session.id)
     if (thread !== undefined) {
-      if (typeof session.title === 'string' && session.title.trim() !== '') {
-        const title = session.title.slice(0, MAX_TITLE_LENGTH)
+      const title = usableSessionTitle(session.title)
+      if (title !== null) {
         thread.title = title
         thread.dshSessionTitle = title
       }
@@ -462,14 +465,16 @@ export class WorkspaceStore {
     const siblings = workspace.threads.filter(item => item.sourceParentSessionId === parentSessionId)
     const now = new Date().toISOString()
     const rawSeed = session.inheritedEventCount ?? session.header?.seedLength ?? session.seedBoundary
+    const sessionTitle = usableSessionTitle(session.title)
+    const parentTitle = usableSessionTitle(parent?.title)
     thread = {
       id: randomUUID(),
-      title: typeof session.title === 'string' && session.title.trim() !== '' ? session.title.slice(0, MAX_TITLE_LENGTH) : (parent === undefined ? 'DSH 会话' : `${parent.title} 分支`),
+      title: sessionTitle ?? parentTitle ?? '等待用户提问',
       parentId: parent?.id ?? null,
       sourceParentSessionId: parentSessionId,
       sourceSeedLength: Number.isSafeInteger(rawSeed) && rawSeed >= 0 ? rawSeed : null,
       dshSessionId: session.id,
-      dshSessionTitle: typeof session.title === 'string' ? session.title.slice(0, MAX_TITLE_LENGTH) : null,
+      dshSessionTitle: sessionTitle,
       color: TOPIC_COLORS[workspace.threads.length % TOPIC_COLORS.length],
       // DSH projection stores only a neutral semantic anchor. The visual map
       // lays out visible cards from the current conversation graph each render,
@@ -501,8 +506,11 @@ export class WorkspaceStore {
    */
   projectEventInto(workspace, thread, event) {
     if (event.type === 'session/title' && typeof event.data?.title === 'string') {
-      thread.title = event.data.title.slice(0, MAX_TITLE_LENGTH)
-      thread.dshSessionTitle = thread.title
+      const title = usableSessionTitle(event.data.title)
+      if (title !== null) {
+        thread.title = title
+        thread.dshSessionTitle = title
+      }
       thread.updatedAt = new Date(event.time).toISOString()
       workspace.updatedAt = thread.updatedAt
       return
@@ -519,17 +527,29 @@ export class WorkspaceStore {
       ? this.takePendingProcess(thread, event.data?.turn, event.data?.step)
       : []
     if (projection.kind === 'user') {
-      thread.turns.push({
-        seq: event.seq,
-        at,
-        question: cardText(projection.text, CARD_QUESTION_LENGTH),
-        answer: null,
-        answerSeq: null,
-        error: null,
-        processCount: 0,
-        processIds: [],
-      })
-      if (thread.dshSessionTitle === null) {
+      const question = cardText(projection.text, CARD_QUESTION_LENGTH)
+      // A placeholder turn (a reply that arrived before any human message, or
+      // a fork still waiting on its first prompt) is not a card of its own:
+      // filling it keeps one turn per question instead of leaving 当前会话 and
+      // the real question as two separate cards.
+      const last = thread.turns.at(-1)
+      if (last !== undefined && isPlaceholderTurn(last)) {
+        last.seq = event.seq
+        last.at = at
+        last.question = question
+      } else {
+        thread.turns.push({
+          seq: event.seq,
+          at,
+          question,
+          answer: null,
+          answerSeq: null,
+          error: null,
+          processCount: 0,
+          processIds: [],
+        })
+      }
+      if (thread.dshSessionTitle === null || isSessionLabelQuestion(thread.dshSessionTitle)) {
         thread.title = titleFromText(projection.text)
         thread.dshSessionTitle = thread.title
       }
@@ -556,7 +576,7 @@ export class WorkspaceStore {
     const turn = {
       seq: null,
       at,
-      question: thread.dshSessionTitle ?? thread.title ?? '会话',
+      question: '等待用户提问',
       answer: null,
       answerSeq: null,
       error: null,
@@ -695,6 +715,11 @@ function normalizeState(value) {
   // Normalize in place, so a hand-edited or partially written v5 file loads
   // instead of crashing the canvas.
   if (state.version === 5 && normalizeTurns(state.workspaces)) migrated = true
+  // Cards stored by an older build can carry a generated session label or a
+  // harness-injected block as their title. Both are repaired on load so the
+  // canvas shows only real user questions.
+  if (state.version === 5 && rewriteSessionLabelQuestions(state.workspaces)) migrated = true
+  if (state.version === 5 && dropInjectedTurns(state.workspaces)) migrated = true
   return { state, migrated }
 }
 
@@ -742,16 +767,24 @@ function collapseMessagesToTurns(workspaces) {
       for (let index = 0; index < messages.length; index++) {
         const message = messages[index]
         if (message.kind === 'user') {
-          turns.push({
-            seq: Number.isSafeInteger(message.sourceSeq) ? message.sourceSeq : null,
-            at: typeof message.at === 'string' ? message.at : thread.updatedAt,
-            question: cardText(message.text, CARD_QUESTION_LENGTH),
-            answer: null,
-            answerSeq: null,
-            error: null,
-            processCount: 0,
-            processIds: [],
-          })
+          const question = cardText(message.text, CARD_QUESTION_LENGTH)
+          const last = turns.at(-1)
+          if (last !== undefined && isPlaceholderTurn(last)) {
+            last.seq = Number.isSafeInteger(message.sourceSeq) ? message.sourceSeq : last.seq
+            last.at = typeof message.at === 'string' ? message.at : last.at
+            last.question = question
+          } else {
+            turns.push({
+              seq: Number.isSafeInteger(message.sourceSeq) ? message.sourceSeq : null,
+              at: typeof message.at === 'string' ? message.at : thread.updatedAt,
+              question,
+              answer: null,
+              answerSeq: null,
+              error: null,
+              processCount: 0,
+              processIds: [],
+            })
+          }
           continue
         }
         const turn = turns.at(-1)
@@ -763,7 +796,7 @@ function collapseMessagesToTurns(workspaces) {
           turns.push({
             seq: null,
             at: typeof message.at === 'string' ? message.at : thread.updatedAt,
-            question: thread.dshSessionTitle ?? thread.title ?? '会话',
+            question: '等待用户提问',
             answer: message.kind === 'error' ? null : cardText(message.text, CARD_ANSWER_LENGTH),
             answerSeq: message.kind === 'error' || !Number.isSafeInteger(message.sourceSeq) ? null : message.sourceSeq,
             error: message.kind === 'error' ? cardText(message.text, CARD_ANSWER_LENGTH) : null,
@@ -861,8 +894,8 @@ function requiredText(value, maxLength, field) {
 function projectableEvent(event) {
   switch (event.type) {
     case 'user/message': {
-      const text = contentText(event.data.content)
-      return isRuntimeContextText(text) ? null : noteProjection('user', text)
+      if (!isHumanUserEvent(event)) return null
+      return noteProjection('user', userMessageText(event))
     }
     case 'assistant/message':
       return noteProjection('assistant', contentText(event.data?.message?.content))
@@ -985,8 +1018,91 @@ export function isSubagentSession(session) {
 export function isSessionLabelQuestion(text) {
   if (typeof text !== 'string') return false
   const trimmed = text.trim()
+  if (trimmed === '' || trimmed === '会话' || trimmed === 'DSH 会话') return true
   if (trimmed === '当前会话' || trimmed === '等待用户提问') return true
   return trimmed.endsWith('分支')
+}
+
+/**
+ * A DSH session title worth storing.
+ *
+ * The harness generates names like 当前会话 and appends " 分支" to every fork's
+ * title. Copying those onto a thread would put the harness's own label on the
+ * canvas as if it were content, so they are rejected here and the thread keeps
+ * its current title until a real first question arrives.
+ */
+function usableSessionTitle(value) {
+  if (typeof value !== 'string') return null
+  const title = value.trim().slice(0, MAX_TITLE_LENGTH)
+  return title === '' || isSessionLabelQuestion(title) ? null : title
+}
+
+/** A card the user never asked for: a generated label standing in for a question. */
+function isPlaceholderTurn(turn) {
+  return turn != null && isSessionLabelQuestion(turn.question)
+}
+
+/**
+ * Re-title the placeholder cards of one thread from its own event log.
+ *
+ * A reply can be projected before the question that opened its turn (a fork
+ * replayed from a boundary, or a mid-turn replay), which leaves a card titled
+ * 等待用户提问. The log still holds the real prompt, so each placeholder is
+ * matched with the next human message that no other card already claims.
+ */
+function repairTurnQuestions(thread, events, replayFrom = 0) {
+  if (thread == null) return
+  const from = Number.isSafeInteger(replayFrom) ? replayFrom : 0
+  const humans = (Array.isArray(events) ? events : [])
+    .filter(event => isHumanUserEvent(event) && event.seq >= from)
+    .sort((left, right) => left.seq - right.seq)
+  let index = 0
+  for (const turn of thread.turns ?? []) {
+    if (typeof turn.question === 'string' && !isPlaceholderTurn(turn)) {
+      const match = humans.findIndex(event => event.seq === turn.seq)
+      if (match >= index) index = match + 1
+      continue
+    }
+    const human = humans[index]
+    if (human === undefined) {
+      turn.question = '等待用户提问'
+      continue
+    }
+    index += 1
+    turn.seq = human.seq
+    turn.question = cardText(userMessageText(human), CARD_QUESTION_LENGTH)
+  }
+}
+
+/** Drop already-stored cards whose title is injected harness text. */
+function dropInjectedTurns(workspaces) {
+  let changed = false
+  for (const workspace of workspaces ?? []) {
+    for (const thread of workspace.threads ?? []) {
+      const turns = thread.turns
+      if (!Array.isArray(turns) || turns.length === 0) continue
+      const kept = turns.filter(turn => !isRuntimeContextText(turn?.question))
+      if (kept.length === turns.length) continue
+      thread.turns = kept
+      changed = true
+    }
+  }
+  return changed
+}
+
+/** Re-title stored cards that carry a generated session label. */
+function rewriteSessionLabelQuestions(workspaces) {
+  let changed = false
+  for (const workspace of workspaces ?? []) {
+    for (const thread of workspace.threads ?? []) {
+      for (const turn of thread.turns ?? []) {
+        if (!isSessionLabelQuestion(turn.question)) continue
+        turn.question = '等待用户提问'
+        changed = true
+      }
+    }
+  }
+  return changed
 }
 
 /**
@@ -1252,6 +1368,35 @@ function noteProjection(kind, text) {
   return { kind, text: `${normalized.slice(0, MAX_PROJECTION_LENGTH)}${PROJECTION_TRUNCATED_SUFFIX}` }
 }
 
+function userMessageText(event) {
+  return contentText(event?.data?.content ?? event?.data?.message?.content)
+}
+
+function userMessageSourceKind(event) {
+  return event?.data?.source?.kind ?? event?.data?.message?.source?.kind
+}
+
+/**
+ * Whether a `user/message` event is a prompt the human actually sent.
+ *
+ * DSH reuses the user role for several kinds of injected text: runtime-context
+ * snapshots, <system-reminder> blocks, checkpoint condensations, policy-change
+ * notices, background-job and subagent notifications. All of them reach the log
+ * as user-role messages, and every one of them was showing up on the map as its
+ * own card — including the 当前会话 cards in the screenshot, which opened a
+ * turn before the user's real first message landed.
+ */
+export function isHumanUserEvent(event) {
+  if (event?.type !== 'user/message') return false
+  const kind = userMessageSourceKind(event)
+  if (kind !== undefined && kind !== 'user') return false
+  return isHumanUserText(userMessageText(event))
+}
+
+export function isHumanUserText(text) {
+  return typeof text === 'string' && text.trim() !== '' && !isRuntimeContextText(text)
+}
+
 function isRuntimeContextText(text) {
   if (typeof text !== 'string') return false
   const trimmed = text.trimStart()
@@ -1259,7 +1404,15 @@ function isRuntimeContextText(text) {
   // runtime-context snapshot and <system-reminder> blocks. None of them is a
   // real user turn, so they must not become their own conversation card.
   if (trimmed.startsWith('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.')) return true
-  return /^<(system-reminder|system|context|environment|reminder)\b[^>]*>/i.test(trimmed)
+  if (trimmed.startsWith('This is an automatically generated checkpoint')) return true
+  if (trimmed.startsWith('The approval policy changed from')) return true
+  if (trimmed.startsWith('You are repeating the exact same tool call')) return true
+  if (trimmed.startsWith('## Main conversation context')) return true
+  if (trimmed.startsWith('Background subagent')) return true
+  if (/^background job /i.test(trimmed)) return true
+  if (/^Cordis (?:run|update)\b/.test(trimmed)) return true
+  if (trimmed.startsWith('The user stopped Cordis') || trimmed.startsWith('The user manually ran Cordis')) return true
+  return /^<(system-reminder|system|context|environment|reminder|goal_round|goal_complete)\b[^>]*>/i.test(trimmed)
 }
 
 function isRuntimeContextMessage(message) {

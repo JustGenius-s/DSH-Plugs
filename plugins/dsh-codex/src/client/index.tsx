@@ -1,12 +1,10 @@
 import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import { CLIENT_SERVICES, getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { createCodexFeatureManager } from './core/feature-manager'
-import { createConversationCollapseFeature } from './features/conversation-collapse'
 import { createFileLinksFeature } from './features/file-links'
 import { createFilesFeature } from './features/files'
 import { createFullSessionLoadFeature } from './features/full-session-load'
 import { createGitGraphFeature } from './features/git-graph'
-import { createNavigatorFeature } from './features/navigator'
 import { createSideChatFeature } from './features/side-chat'
 import { createSidePanelsFeature } from './features/side-panels'
 import { createStickyUserBubbleFeature } from './features/sticky-user-bubble'
@@ -68,8 +66,6 @@ export function apply(ctx: ClientContext): void {
   )
 
   const features = createCodexFeatureManager([
-    createConversationCollapseFeature(ctx, scope, t),
-    createNavigatorFeature(ctx, scope),
     createFullSessionLoadFeature(ctx, scope),
     createStickyUserBubbleFeature(ctx, scope, t),
     createSidePanelsFeature(ctx, scope, t, quickActions),

@@ -1,7 +1,10 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react'
-import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import type {
+  SettingsScope,
+  UseChat,
+} from '@just-genius/dsh-plugin-runtime/client'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import { pinnedUserKey, promptImageCount, promptImageSrcs, promptTextOf, userRowOf } from './model'
@@ -9,7 +12,15 @@ import { ensureStickyBubbleStyles } from './styles'
 
 interface StickyUserBubbleProps {
   sessionId: string
-  useSession: (selector: (snapshot: any) => any) => any
+  /**
+   * Session LIFECYCLE facts only (`running`). Chat rows are NOT here at 0.1.2:
+   * they ride `useChat`. Reading `order`/`nodes` off this hook returned
+   * `undefined` on every render, which silently emptied this bubble (the old
+   * flat `snapshot.chat` is gone).
+   */
+  useSession: (selector: (snapshot: { running?: boolean }) => boolean) => boolean
+  /** Chat rows. Contributed by ui-chat, so it requires that package injected. */
+  useChat: UseChat
   scope?: SettingsScope<DshCodexConfig>
   t: (key: CodexKey) => string
 }
@@ -145,7 +156,7 @@ function StickyThumb(props: {
 }
 
 export function StickyUserBubble(props: StickyUserBubbleProps) {
-  const { useSession, scope, t } = props
+  const { useSession, useChat, scope, t } = props
   const scopeSnapshot = useSyncExternalStore(
     scope === undefined ? () => () => {} : listener => scope.subscribe(listener),
     scope === undefined ? () => undefined : () => scope.getSnapshot(),
@@ -156,8 +167,11 @@ export function StickyUserBubble(props: StickyUserBubbleProps) {
   const mode = scopeSnapshot?.value?.stickyUserBubbleMode
     ?? DEFAULT_CONFIG.stickyUserBubbleMode
   const running = useSession((snapshot: { running?: boolean }) => snapshot?.running === true)
-  const order = useSession((snapshot: any) => snapshot?.chat?.order)
-  const nodes = useSession((snapshot: any) => snapshot?.chat?.nodes)
+  // Chat rows ride the `chat` target (`useChat`), not the Session lifecycle
+  // snapshot. The old top-level `snapshot.chat` is gone at 0.1.2; reading it
+  // through `useSession` returned `undefined` and emptied this bubble.
+  const order = useChat(snapshot => snapshot.order)
+  const nodes = useChat(snapshot => snapshot.nodes)
 
   const hostRef = useRef<HTMLSpanElement | null>(null)
   const pinRef = useRef<HTMLDivElement | null>(null)
@@ -174,7 +188,12 @@ export function StickyUserBubble(props: StickyUserBubbleProps) {
   const entries = useMemo(() => {
     const list: Array<{ key: string; label: string; imageCount: number }> = []
     for (const key of order ?? []) {
-      const node = nodes?.get?.(key)
+      // Narrowed through a structural read: `ChatNodeStore.get` hands back the
+      // view node, whose `kind`/`data` pair only exists once narrowed to a
+      // registered renderer kind (the `ChatNode` union). The payload shape is
+      // the part this feature reads, so a structural check keeps it honest
+      // without importing the union's kind vocabulary.
+      const node = nodes?.get?.(key) as { kind?: string; data?: unknown } | undefined
       if (node?.kind !== 'user') continue
       const imageCount = promptImageCount(node.data)
       list.push({

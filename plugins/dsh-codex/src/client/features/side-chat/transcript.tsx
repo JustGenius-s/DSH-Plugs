@@ -145,7 +145,13 @@ function callArgsRaw(block: ToolCallBlock): string {
  */
 function resultText(node: ToolResultNode): string {
   const parts: string[] = []
-  for (const block of node.content) {
+  // A running call has no content yet — the field does not exist until the
+  // result lands, so iterating `node.content` directly crashed the transcript
+  // with "Cannot read properties of undefined (reading 'length')". Guard at
+  // runtime without touching the declared type: ToolResultNode's shape is what
+  // the settled/in-flight narrowing below depends on.
+  const content: readonly unknown[] = Array.isArray(node.content) ? node.content : []
+  for (const block of content) {
     const item = block as { type?: string; text?: string }
     if (item.type === 'text') parts.push(String(item.text ?? ''))
     else parts.push(JSON.stringify(block, null, 2))

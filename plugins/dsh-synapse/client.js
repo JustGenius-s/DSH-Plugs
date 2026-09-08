@@ -249,6 +249,14 @@ window.__ModuleLoader__.load({
     }
     function SynapseTurnPane({ watch, ctx, onClose, onOpenInDialog }) {
       const [, setTick] = React.useState(0)
+      const transcriptRef = React.useRef(null)
+      const scrollTopRef = React.useRef(0)
+      const watchKey = `${watch.sessionId}:${watch.seq ?? ''}:${watch.turnIndex ?? ''}`
+      const lastWatchKeyRef = React.useRef(watchKey)
+      if (lastWatchKeyRef.current !== watchKey) {
+        lastWatchKeyRef.current = watchKey
+        scrollTopRef.current = 0
+      }
       React.useEffect(() => {
         try { ctx.sessions.open(watch.sessionId) } catch { /* session gone */ }
         let unsubscribe = () => {}
@@ -271,6 +279,10 @@ window.__ModuleLoader__.load({
         bind()
         return () => { window.clearTimeout(timer); unsubscribe() }
       }, [watch.sessionId])
+      React.useLayoutEffect(() => {
+        const node = transcriptRef.current
+        if (node instanceof HTMLElement) node.scrollTop = scrollTopRef.current
+      })
       const scope = ctx.sessions.scope(watch.sessionId)
       const session = scope === undefined ? undefined : ctx.sessions.sessionOf(scope)
       const snapshot = session?.getSnapshot()
@@ -289,7 +301,11 @@ window.__ModuleLoader__.load({
         session === undefined
           ? h('div', { className: 'dsh-codex-sidechat-empty-panel' }, h('p', null, '正在打开这一轮…'))
           : h('div', { className: 'dsh-codex-sidechat-transcript-wrap' },
-              h('div', { className: 'dsh-codex-sidechat-transcript' },
+              h('div', {
+                className: 'dsh-codex-sidechat-transcript',
+                ref: transcriptRef,
+                onScroll: event => { scrollTopRef.current = event.currentTarget.scrollTop },
+              },
                 nodes.map((node, index) => h(ChatNodeView, { key: node.key ?? String(index), node })),
                 running ? h('div', { key: 'running', className: 'dsh-codex-sidechat-turn-status', role: 'status' }, 'Deep diving…') : null,
                 nodes.length === 0 && !running
@@ -404,7 +420,7 @@ window.__ModuleLoader__.load({
       '.dsh-codex-sidechat-empty-panel { flex:1;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px }',
       '.dsh-codex-sidechat-empty-panel p { margin:0 }',
       '.dsh-codex-sidechat-transcript-wrap { position:relative;flex:1;min-height:0;display:flex;flex-direction:column }',
-      '.dsh-codex-sidechat-transcript { flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px;container-type:inline-size }',
+      '.dsh-codex-sidechat-transcript { flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px;container-type:inline-size;overflow-anchor:none;scrollbar-gutter:stable }',
       '/* User bubble — one-to-one with the main chat\\\'s gdEzaW_bubble. */ .dsh-codex-sidechat-user { flex-direction:column;align-items:flex-end;gap:6px;display:flex }',
       '.dsh-codex-sidechat-user-bubble { background:var(--dsw-specific-bubble);max-width:min(525px,82%);color:var(--dsw-alias-label-primary);border-radius:22px;padding:10px 16px;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word }',
       '/* Assistant markdown — Sxvs8a: 16/28, 16px stack gap. */ .dsh-codex-sidechat-md { color:var(--dsw-alias-label-primary);flex-direction:column;font-size:16px;line-height:28px;display:flex }',
@@ -816,7 +832,7 @@ window.__ModuleLoader__.load({
         '.dsh-synapse-view.has-turn-pane .dsh-synapse-frame{margin-right:min(460px,42%)}',
         '.dsh-synapse-turn-pane{position:absolute;top:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;width:min(460px,42%);min-width:320px;min-height:0;max-height:100%;overflow:hidden;border-left:1px solid var(--dsw-alias-border-l2,#e7edf3);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#172033)}',
         '.dsh-synapse-turn-pane .dsh-codex-sidechat-transcript-wrap{flex:1;min-height:0;overflow:hidden}',
-        '.dsh-synapse-turn-pane .dsh-codex-sidechat-transcript{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}',
+        '.dsh-synapse-turn-pane .dsh-codex-sidechat-transcript{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;scrollbar-gutter:stable}',
         '.dsh-synapse-turn-pane .dsh-codex-sidechat-empty-panel{flex:1;min-height:0}',
         '.dsh-synapse-turn-pane-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;padding:12px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,#e7edf3)}',
         '.dsh-synapse-turn-pane-meta{display:flex;align-items:center;gap:8px;min-width:0}',
@@ -992,6 +1008,28 @@ window.__ModuleLoader__.load({
             const snapshot = ctx.sessions.list.getSnapshot()
             send('synapse:created-session', { requestId: event.data.requestId, session: { id, title: snapshot.byId[id]?.displayTitle ?? '新会话', cwd: snapshot.byId[id]?.cwd ?? cwd ?? null } })
           }).catch(() => { send('synapse:bridge-error', { requestId: event.data.requestId, message: '会话创建失败，请先选择工作目录' }) })
+          return
+        }
+        if (event.data.type === 'synapse:add-to-notes') {
+          const requestId = event.data.requestId
+          const body = typeof event.data.body === 'string' ? event.data.body : ''
+          const tags = Array.isArray(event.data.tags) ? event.data.tags.filter(tag => typeof tag === 'string') : ['会话地图']
+          if (body.trim() === '') return send('synapse:bridge-error', { requestId, message: '笔记内容为空' })
+          fetch('/quick-notes/note', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'create', body, tags }),
+          }).then(async response => {
+            if (!response.ok) throw new Error('添加笔记失败')
+            const snapshot = await response.json()
+            const createdId = typeof snapshot?.createdId === 'string' ? snapshot.createdId : ''
+            if (createdId !== '' && snapshot != null) {
+              window.dispatchEvent(new CustomEvent('dsh-quick-notes:import', { detail: { createdId, snapshot } }))
+            }
+            send('synapse:note-saved', { requestId, createdId })
+          }).catch(error => {
+            send('synapse:bridge-error', { requestId, message: error instanceof Error ? error.message : '添加笔记失败' })
+          })
         }
       }
       const onKeyDown = event => {

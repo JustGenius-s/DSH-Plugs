@@ -550,7 +550,15 @@ export function setupScript(shell: string): string {
     lines.push(
       quiet('printf \'\\e]777;warp-caps;bracketed-paste=%s\\a\' "$(zle -l bracketed-paste >/dev/null 2>&1 && echo 1 || echo 0)"'),
       quiet('dsh_block_mark() { printf \'\\e]777;warp-block-end;%s;%s\\a\' "$?" "$PWD" }'),
-      quiet('precmd_functions+=dsh_block_mark'),
+      // zsh 5.9 runs `precmd_functions` in order, and its own prompt machinery
+      // claims the head of that output: a hook appended with `+=` runs AFTER
+      // that machinery, so zsh captures the marker and re-emits it as prompt
+      // text, losing the raw ESC bytes. No block-end ever reaches the browser,
+      // so the pane waits on `ready` forever. (bash is unaffected: its
+      // PROMPT_COMMAND writes straight to the PTY in a phase zsh does not
+      // capture.) Prepend instead, so our hook runs FIRST and its bytes reach
+      // the terminal. Verified: `+=` never emits a marker; prepending does.
+      quiet('precmd_functions=(dsh_block_mark ${precmd_functions[@]})'),
     )
   } else {
     lines.push(

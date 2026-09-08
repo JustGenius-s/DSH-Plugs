@@ -1,0 +1,10 @@
+# Bundle patch for @just-genius/dsh-workspace-plus.
+#
+# Host half persists multi-folder bindings, injects the agent prompt, and
+# serves /dsh-workspace-plus/* routes (adopt, binding, open-in-explorer).
+# Browser half intercepts workspace folder adoption, mounts the add/edit
+# dialog, decorates workspace rows, and adds row menus.
+
+- insert:
+    - id: dsh-workspace-plus
+      name: '@just-genius/dsh-workspace-plus'

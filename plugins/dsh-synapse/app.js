@@ -4,6 +4,13 @@ const LEGACY_CARD_POSITIONS_KEY = 'dsh-synapse:card-positions'
 const CARD_POSITIONS_KEY = 'dsh-synapse:card-positions:v3'
 const COLLAPSED_CARDS_KEY = 'dsh-synapse:collapsed-cards:v1'
 const QUICK_PHRASES_KEY = 'dsh-synapse:quick-phrases:v1'
+const INSPECTOR_WIDTH_KEY = 'dsh-synapse:inspector-width:v1'
+const INSPECTOR_TOC_WIDTH_KEY = 'dsh-synapse:inspector-toc-width:v1'
+const INSPECTOR_DEFAULT_WIDTH = 460
+const INSPECTOR_MIN_WIDTH = 360
+const INSPECTOR_TOC_DEFAULT_WIDTH = 240
+const INSPECTOR_TOC_MIN_WIDTH = 180
+const INSPECTOR_TOC_MAX_WIDTH = 480
 const DEFAULT_QUICK_PHRASES = ['展开说明', '举例', '通俗易懂', '对比解释']
 const MAX_QUICK_PHRASES = 12
 const MAX_QUICK_PHRASE_LENGTH = 16
@@ -43,6 +50,18 @@ const savedCollapsedCards = (() => {
     const value = JSON.parse(localStorage.getItem(COLLAPSED_CARDS_KEY) ?? '[]')
     return Array.isArray(value) ? value.filter(item => typeof item === 'string') : []
   } catch { return [] }
+})()
+const savedInspectorWidth = (() => {
+  try {
+    const value = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY))
+    return Number.isFinite(value) && value >= INSPECTOR_MIN_WIDTH ? value : INSPECTOR_DEFAULT_WIDTH
+  } catch { return INSPECTOR_DEFAULT_WIDTH }
+})()
+const savedInspectorTocWidth = (() => {
+  try {
+    const value = Number(localStorage.getItem(INSPECTOR_TOC_WIDTH_KEY))
+    return Number.isFinite(value) && value >= INSPECTOR_TOC_MIN_WIDTH ? value : INSPECTOR_TOC_DEFAULT_WIDTH
+  } catch { return INSPECTOR_TOC_DEFAULT_WIDTH }
 })()
 const CARD_WIDTH = 310
 const CARD_HEIGHT = 276
@@ -147,7 +166,10 @@ const state = {
   expandedMessageIds: new Set(),
   canvasCards: undefined, canvasCardsById: undefined, canvasGraph: undefined, mountedCardIds: new Set(), canvasNeedsCenter: false,
   detailScrollByThread: new Map(), detailThreadId: null, detailTargetCardId: null,
-  inspectorCardId: null, inspectorOpening: false, inspectorScrollByCard: new Map(),
+  inspectorCardId: null, inspectorOpening: false, inspectorScrollByCard: new Map(), inspectorScrollRestoring: false,
+  inspectorTocOpen: false, inspectorNoteSave: null,
+  inspectorWidth: savedInspectorWidth, inspectorExpanded: false, inspectorTocWidth: savedInspectorTocWidth,
+  dshWorkspacesFingerprint: '', workspaceThreadsFingerprint: '',
 }
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]))
@@ -170,6 +192,83 @@ function persistCollapsedCards() {
 
 function persistQuickPhrases() {
   try { localStorage.setItem(QUICK_PHRASES_KEY, JSON.stringify(state.quickPhrases)) } catch { /* Private browsing may disable local storage. */ }
+}
+
+function persistInspectorLayout() {
+  try {
+    localStorage.setItem(INSPECTOR_WIDTH_KEY, String(state.inspectorWidth))
+    localStorage.setItem(INSPECTOR_TOC_WIDTH_KEY, String(state.inspectorTocWidth))
+  } catch { /* Private browsing may disable local storage. */ }
+}
+
+function inspectorMaxWidth() {
+  const view = document.querySelector('.canvas-view')
+  return view instanceof HTMLElement && view.clientWidth > 0 ? view.clientWidth : window.innerWidth
+}
+
+function clampInspectorWidth(width) {
+  const max = Math.max(INSPECTOR_MIN_WIDTH, inspectorMaxWidth())
+  return Math.min(max, Math.max(INSPECTOR_MIN_WIDTH, Math.round(Number(width) || INSPECTOR_DEFAULT_WIDTH)))
+}
+
+function clampInspectorTocWidth(width) {
+  const inspector = document.querySelector('.card-inspector')
+  const available = inspector instanceof HTMLElement && inspector.clientWidth > 0
+    ? inspector.clientWidth - 360
+    : INSPECTOR_TOC_MAX_WIDTH
+  const max = Math.max(INSPECTOR_TOC_MIN_WIDTH, Math.min(INSPECTOR_TOC_MAX_WIDTH, available))
+  return Math.min(max, Math.max(INSPECTOR_TOC_MIN_WIDTH, Math.round(Number(width) || INSPECTOR_TOC_DEFAULT_WIDTH)))
+}
+
+function applyInspectorTocLayout() {
+  const width = clampInspectorTocWidth(state.inspectorTocWidth)
+  const inspector = document.querySelector('.card-inspector')
+  const toc = document.querySelector('.card-inspector-toc')
+  if (inspector instanceof HTMLElement) inspector.style.setProperty('--inspector-toc-width', `${width}px`)
+  if (toc instanceof HTMLElement) toc.style.setProperty('--inspector-toc-width', `${width}px`)
+}
+
+function applyInspectorLayout() {
+  const width = clampInspectorWidth(state.inspectorWidth)
+  const view = document.querySelector('.canvas-view')
+  const inspector = document.querySelector('.card-inspector')
+  const shell = document.querySelector('.synapse-shell')
+  if (view instanceof HTMLElement) {
+    view.classList.toggle('inspector-expanded', state.inspectorExpanded)
+    if (state.inspectorExpanded) view.style.removeProperty('--inspector-width')
+    else view.style.setProperty('--inspector-width', `${width}px`)
+  }
+  if (shell instanceof HTMLElement) {
+    if (state.inspectorCardId === null || state.inspectorExpanded) shell.style.removeProperty('--inspector-width')
+    else shell.style.setProperty('--inspector-width', `${width}px`)
+  }
+  if (inspector instanceof HTMLElement) {
+    inspector.classList.toggle('is-expanded', state.inspectorExpanded)
+    inspector.style.width = state.inspectorExpanded ? '100%' : `${width}px`
+  }
+  applyInspectorTocLayout()
+}
+
+function toggleInspectorExpanded() {
+  state.inspectorExpanded = !state.inspectorExpanded
+  persistInspectorLayout()
+  applyInspectorLayout()
+  const button = document.querySelector('[data-action="toggle-inspector-expand"]')
+  if (button instanceof HTMLElement) {
+    const label = state.inspectorExpanded ? '还原' : '铺满'
+    button.classList.toggle('is-active', state.inspectorExpanded)
+    button.setAttribute('aria-label', label)
+    button.setAttribute('title', label)
+    button.setAttribute('aria-pressed', state.inspectorExpanded ? 'true' : 'false')
+    const svg = button.querySelector('svg')
+    if (svg instanceof SVGElement) {
+      svg.innerHTML = state.inspectorExpanded
+        ? '<path d="M6 3.5h6.5V10M3.5 6v6.5H10"/>'
+        : '<path d="M3.5 6.5V3.5h3M12.5 6.5V3.5h-3M3.5 9.5v3h3M12.5 9.5v3h-3"/>'
+    }
+  }
+  const minimap = document.querySelector('.canvas-minimap')
+  if (minimap instanceof HTMLElement) minimap.classList.toggle('is-full', state.inspectorExpanded)
 }
 
 function rememberCardPosition(cardId, position, aliases = []) {
@@ -409,6 +508,29 @@ function deferCanvasRefresh(delay = 700) {
   state.canvasRefreshAfter = Math.max(state.canvasRefreshAfter, Date.now() + delay)
 }
 
+function rememberInspectorScroll(scrollTop) {
+  if (state.inspectorCardId === null || state.inspectorScrollRestoring) return
+  if (typeof scrollTop === 'number' && Number.isFinite(scrollTop)) {
+    state.inspectorScrollByCard.set(state.inspectorCardId, scrollTop)
+    return
+  }
+  const inspector = document.querySelector('.card-inspector-scroll')
+  if (inspector instanceof HTMLElement) state.inspectorScrollByCard.set(state.inspectorCardId, inspector.scrollTop)
+}
+
+function restoreInspectorScroll(scrollTop) {
+  if (scrollTop === null || scrollTop === undefined) return
+  const inspector = document.querySelector('.card-inspector-scroll')
+  if (!(inspector instanceof HTMLElement)) return
+  state.inspectorScrollRestoring = true
+  inspector.scrollTop = scrollTop
+  window.requestAnimationFrame(() => {
+    const next = document.querySelector('.card-inspector-scroll')
+    if (next instanceof HTMLElement) next.scrollTop = scrollTop
+    state.inspectorScrollRestoring = false
+  })
+}
+
 function currentDshWorkspace() {
   const id = state.currentDsh?.id
   return typeof id === 'string' ? state.dshWorkspaces.find(workspace => workspace.sessionIds.includes(id)) : undefined
@@ -527,14 +649,21 @@ async function openDshWorkspace(id, { renderAfter = true, preserveCanvasCamera =
   const threads = await threadsForDshWorkspace(workspace)
   if (load !== state.workspaceLoad) return true
   const nextWorkspaceId = `dsh:${workspace.id}`
+  const nextLayout = threadsLayoutFingerprint(threads)
+  const sameLayout = state.workspace?.id === nextWorkspaceId && nextLayout === state.workspaceThreadsFingerprint
   if (state.workspace?.id !== nextWorkspaceId && !preserveCanvasCamera) resetCanvasCamera()
   state.workspace = { id: nextWorkspaceId, title: workspace.title, cwd: workspace.path, threads }
+  state.workspaceThreadsFingerprint = nextLayout
   const currentThread = currentDshThread(state.workspace.threads)
   state.activeId = currentThread?.id ?? (state.workspace.threads.some(thread => thread.id === state.activeId) ? state.activeId : state.workspace.threads[0]?.id ?? null)
-  if (currentThread !== undefined) revealConversationThread(conversationCards(visibleThreads()), currentThread.id)
-  if (renderAfter && canReplaceView()) render()
+  const revealed = currentThread !== undefined && revealConversationThread(conversationCards(visibleThreads()), currentThread.id)
+  // List ticks and the 1s poll reopen this workspace constantly. Remounting
+  // the canvas there is what snapped the card inspector back to the top and
+  // flashed every card scrollbar. Same graph → keep the live DOM.
+  if (renderAfter && (!sameLayout || revealed) && canReplaceView()) render()
+  const historySize = state.historyBySession.size
   await Promise.all(state.workspace.threads.map(thread => loadThreadHistory(thread, false)))
-  if (renderAfter && load === state.workspaceLoad && canReplaceView()) render()
+  if (renderAfter && !sameLayout && state.historyBySession.size !== historySize && load === state.workspaceLoad && canReplaceView()) render()
   return true
 }
 
@@ -555,6 +684,27 @@ async function openCurrentWorkspace({ preserveCanvasCamera = false } = {}) {
  */
 function summariesFingerprint(summaries) {
   return summaries.map(summary => `${summary.id}:${summary.title}:${summary.cwd ?? ''}:${summary.threadCount}`).join('|')
+}
+
+function workspacesFingerprint(workspaces) {
+  return (workspaces ?? []).map(workspace => `${workspace.id}:${workspace.title}:${workspace.path ?? ''}:${(workspace.sessionIds ?? []).join(',')}`).join('|')
+}
+
+function threadsLayoutFingerprint(threads) {
+  return (threads ?? []).map(thread => {
+    const turns = Array.isArray(thread.turns) ? thread.turns : []
+    return `${thread.id}:${thread.parentId ?? ''}:${thread.dshSessionId ?? ''}:${turns.map((turn, index) => `${turn.seq ?? `i${index}`}:${turn.pending ? 1 : 0}`).join(',')}`
+  }).join('|')
+}
+
+function nextLiveCardAnswer({ hasContent, hasPending, liveText, nextText }) {
+  const text = typeof nextText === 'string' ? nextText : ''
+  if (text === '') {
+    if (hasContent) return hasPending ? { action: 'keep' } : { action: 'append-pending' }
+    return { action: 'pending' }
+  }
+  if (liveText === text) return { action: 'keep' }
+  return { action: 'replace', text }
 }
 
 async function refreshSummaries({ renderAfter = true } = {}) {
@@ -760,23 +910,108 @@ function inlineMarkdown(text) {
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
 }
 
-const tableCells = line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+const tableCells = line => {
+  const trimmed = String(line ?? '').trim()
+  if (trimmed === '' || !trimmed.includes('|')) return []
+  return trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+}
 
 const isTableDelimiter = line => {
   const cells = tableCells(line)
-  return cells.length > 0 && cells.every(cell => /^:?-+:?$/.test(cell))
+  return cells.length > 0 && cells.every(cell => /^:?-+:?$/.test(cell.replace(/\s+/g, '')))
 }
 
+const tableAlignments = line => tableCells(line).map(cell => {
+  const mark = cell.replace(/\s+/g, '')
+  const left = mark.startsWith(':')
+  const right = mark.endsWith(':')
+  if (left && right) return 'center'
+  if (right) return 'right'
+  return 'left'
+})
+
+const isStructuralBoundary = line => /^(#{1,6})\s+/.test(line)
+  || /^[-*+]\s+/.test(line)
+  || /^\d+[.)]\s+/.test(line)
+
+const isTableRow = line => {
+  if (typeof line !== 'string' || isStructuralBoundary(line)) return false
+  return tableCells(line).length >= 2
+}
+
+function renderMarkdownTable(headerLine, bodyLines, alignments) {
+  const headers = tableCells(headerLine)
+  if (headers.length === 0) return ''
+  const aligns = Array.isArray(alignments) ? alignments : headers.map(() => 'left')
+  const alignClass = index => {
+    const align = aligns[index] ?? 'left'
+    return align === 'left' ? '' : ` class="md-table-${align}"`
+  }
+  const cellsOf = row => headers.map((_, index) => tableCells(row)[index] ?? '')
+  const head = headers.map((cell, index) => `<th${alignClass(index)}>${inlineMarkdown(cell)}</th>`).join('')
+  const body = bodyLines.map(row => `<tr>${cellsOf(row).map((cell, index) => `<td${alignClass(index)}>${inlineMarkdown(cell)}</td>`).join('')}</tr>`).join('')
+  return `<div class="md-table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+}
+
+function takeTable(lines, index) {
+  const line = lines[index]
+  if (!isTableRow(line) || index + 1 >= lines.length) return null
+  const next = lines[index + 1]
+  if (isTableDelimiter(next) && tableCells(next).length > 0) {
+    const alignments = tableAlignments(next)
+    const body = []
+    let cursor = index + 2
+    while (cursor < lines.length && isTableRow(lines[cursor]) && !isTableDelimiter(lines[cursor])) {
+      body.push(lines[cursor])
+      cursor += 1
+    }
+    return { html: renderMarkdownTable(line, body, alignments), next: cursor }
+  }
+  // Fallback: two or more pipe rows with the same column count, even when the
+  // model omitted the GFM delimiter. A single `A | B` line stays a paragraph.
+  const columns = tableCells(line).length
+  if (!isTableRow(next) || isTableDelimiter(next) || tableCells(next).length !== columns) return null
+  const body = [next]
+  let cursor = index + 2
+  while (cursor < lines.length && isTableRow(lines[cursor]) && !isTableDelimiter(lines[cursor]) && tableCells(lines[cursor]).length === columns) {
+    body.push(lines[cursor])
+    cursor += 1
+  }
+  return { html: renderMarkdownTable(line, body), next: cursor }
+}
+
+function headingPlainText(text) {
+  return String(text ?? '').replace(/[`*_~]/g, '').trim()
+}
+
+function markdownHeadings(text) {
+  const headings = []
+  let index = 0
+  const parts = String(text ?? '').split(/```/)
+  for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+    if (partIndex % 2 === 1) continue
+    for (const line of parts[partIndex].split('\n')) {
+      const heading = /^(#{1,6})\s+(.+)$/.exec(line)
+      if (heading === null) continue
+      index += 1
+      headings.push({ id: `md-h-${index}`, level: heading[1].length, text: headingPlainText(heading[2]) })
+    }
+  }
+  return headings
+}
+
+let headingCounter = 0
 function markdownBlock(text) {
   const lines = text.split('\n')
   const output = []
   for (let index = 0; index < lines.length;) {
     const line = lines[index]
     if (line.trim() === '') { index++; continue }
-    const heading = /^(#{1,3})\s+(.+)$/.exec(line)
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line)
     if (heading !== null) {
       const level = heading[1].length
-      output.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`)
+      headingCounter += 1
+      output.push(`<h${level} id="md-h-${headingCounter}">${inlineMarkdown(heading[2])}</h${level}>`)
       index++
       continue
     }
@@ -794,21 +1029,14 @@ function markdownBlock(text) {
       output.push(`<${unordered === null ? 'ol' : 'ul'}>${items.join('')}</${unordered === null ? 'ol' : 'ul'}>`)
       continue
     }
-    // GFM table: a leading-pipe header row followed by a |-delimiter row,
-    // then any number of leading-pipe body rows.
-    if (/^\s*\|/.test(line) && index + 1 < lines.length && isTableDelimiter(lines[index + 1])) {
-      const header = line
-      const body = []
-      index += 2
-      while (index < lines.length && /^\s*\|.*\|\s*$/.test(lines[index])) {
-        body.push(lines[index])
-        index++
-      }
-      output.push(`<table><thead><tr>${tableCells(header).map(cell => `<th>${inlineMarkdown(cell)}</th>`).join('')}</tr></thead><tbody>${body.map(row => `<tr>${tableCells(row).map(cell => `<td>${inlineMarkdown(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`)
+    const table = takeTable(lines, index)
+    if (table !== null) {
+      output.push(table.html)
+      index = table.next
       continue
     }
     const paragraph = []
-    while (index < lines.length && lines[index].trim() !== '' && !/^(#{1,3})\s+/.test(lines[index]) && !/^[-*+]\s+/.test(lines[index]) && !/^\d+[.)]\s+/.test(lines[index])) paragraph.push(lines[index++])
+    while (index < lines.length && lines[index].trim() !== '' && !/^(#{1,6})\s+/.test(lines[index]) && !/^[-*+]\s+/.test(lines[index]) && !/^\d+[.)]\s+/.test(lines[index]) && !isTableRow(lines[index])) paragraph.push(lines[index++])
     // A marker-only line such as PowerShell's "+ " diagnostic is neither a
     // list item nor paragraph content under the rules above. Consume it so
     // the parser always makes progress.
@@ -827,6 +1055,7 @@ function renderMarkdown(text) {
   const key = String(text)
   const cached = markdownCache.get(key)
   if (cached !== undefined) return cached
+  headingCounter = 0
   const parts = key.split(/```/)
   const rendered = parts.map((part, index) => index % 2 === 1
     ? `<pre><code>${escapeHtml(part.replace(/^\w*\n/, ''))}</code></pre>`
@@ -987,7 +1216,18 @@ function conversationCards(threads) {
   for (const thread of threads) {
     // v5: the server already stores one card per turn, so the canvas reads
     // them directly instead of re-deriving turns from a message log.
-    const stored = turnsFor(thread)
+    const liveReply = state.liveReplies.get(thread.dshSessionId)
+    const pendingText = state.pendingReplies?.get(thread.dshSessionId)?.text
+    const inflightQuestion = (typeof liveReply?.question === 'string' && liveReply.question !== '' ? liveReply.question : undefined) ?? pendingText
+    // The map is a picture of what the user asked. A card whose title is a
+    // generated session label (当前会话, "<parent> 分支") or harness-injected
+    // text (checkpoints, runtime context) is not a question anyone asked, so
+    // it never reaches the canvas. The last card is kept when a real prompt is
+    // still in flight: until DSH commits it, that card is the pending question.
+    const stored = turnsFor(thread).filter((storedTurn, turnIndex, list) => {
+      if (isHumanCardQuestion(storedTurn?.question)) return true
+      return turnIndex === list.length - 1 && isHumanCardQuestion(inflightQuestion)
+    })
     const turns = []
     stored.forEach((storedTurn, turnIndex) => {
       const id = `${thread.id}:turn:${storedTurn.seq ?? `i${turnIndex}`}`
@@ -1018,6 +1258,12 @@ function conversationCards(threads) {
     const latestTurn = turns.at(-1)
     if (liveReply?.running && latestTurn !== undefined && (latestTurn.answer === null || latestTurn.answer.pending === true)) latestTurn.answer = { kind: 'assistant', text: liveReply.text, pending: true, at: new Date().toISOString() }
     if (turns.length === 0) {
+      // A brand-new fork is blank for the moments before its first message
+      // lands, and it must stay visible so the user can watch it run. A blank
+      // session with nothing to show any more (an abandoned branch, or one
+      // DSH created and never used) would otherwise litter the map with
+      // 等待用户提问 cards, so only fresh forks keep their placeholder.
+      if (!isFreshBlankFork(thread) && !isHumanCardQuestion(inflightQuestion)) continue
       const id = `${thread.id}:turn:empty`
       const positionKey = `${thread.id}:turn-index:0`
       const naturalPosition = { x: 86, y: 82 }
@@ -1034,10 +1280,7 @@ function conversationCards(threads) {
       naturalPosition,
       position: positionLocked ? savedPosition : naturalPosition,
       positionLocked,
-      // A session with no projected turn yet (created but never asked, or a
-      // fork waiting on its first message) still needs a visible card. Fall
-      // back instead of rendering a literal "undefined" title.
-      question: thread.dshSessionTitle ?? thread.title ?? '等待用户提问',
+      question: cardQuestionOf(thread, null, inflightQuestion),
       answer: null,
       error: null,
       processCount: 0,
@@ -1172,6 +1415,7 @@ function revealConversationThread(cards, threadId) {
     }
   }
   if (changed) persistCollapsedCards()
+  return changed
 }
 
 function canvasConnectors(cards) {
@@ -1372,7 +1616,9 @@ function renderCanvas() {
   state.mountedCardIds = new Set(visible)
   const mounted = cards.filter(card => visible.has(card.id))
   const inspector = state.inspectorCardId === null ? '' : renderCardInspector(state.canvasCardsById.get(state.inspectorCardId))
-  return `<section class="canvas-view"><div class="canvas-viewport"><div class="canvas-content" style="transform:translate(${state.canvasCamera.x}px, ${state.canvasCamera.y}px) scale(${state.zoom})"><svg class="connectors">${canvasConnectors(cards)}</svg><div class="cards-layer">${mounted.map(card => conversationCard(card, graph)).join('')}${draftCard(cards)}</div></div></div>${inspector}</section>`
+  const viewClass = `canvas-view${inspector !== '' && state.inspectorExpanded ? ' inspector-expanded' : ''}`
+  const viewStyle = inspector === '' || state.inspectorExpanded ? '' : ` style="--inspector-width:${clampInspectorWidth(state.inspectorWidth)}px"`
+  return `<section class="${viewClass}"${viewStyle}><div class="canvas-viewport"><div class="canvas-content" style="transform:translate(${state.canvasCamera.x}px, ${state.canvasCamera.y}px) scale(${state.zoom})"><svg class="connectors">${canvasConnectors(cards)}</svg><div class="cards-layer">${mounted.map(card => conversationCard(card, graph)).join('')}${draftCard(cards)}</div></div></div>${inspector}</section>`
 }
 
 function processRecords(process, messageId) {
@@ -1412,8 +1658,40 @@ function inspectorReply(card) {
   return { pending, answerText }
 }
 
-function inspectorNoteBody(card) {
-  return inspectorReply(card).answerText
+function inspectorNoteBody({ question, answer, workspaceTitle, sessionTitle, turnIndex, sessionId }) {
+  const title = String(question ?? '').trim() || '会话回复'
+  const source = [
+    '来源：会话地图',
+    workspaceTitle ? `工作区：${workspaceTitle}` : '',
+    sessionTitle ? `会话：${sessionTitle}` : '',
+    Number.isInteger(turnIndex) ? `轮次：第 ${turnIndex + 1} 轮` : '',
+    sessionId ? `会话 ID：${sessionId}` : '',
+  ].filter(Boolean).join('\n')
+  return `# ${title}\n\n${String(answer ?? '').trim()}\n\n---\n\n${source}\n`
+}
+
+function setInspectorTocOpen(open) {
+  state.inspectorTocOpen = open
+  const toc = document.querySelector('.card-inspector-toc')
+  const toggle = document.querySelector('[data-action="toggle-inspector-toc"]')
+  if (toc instanceof HTMLElement) {
+    toc.hidden = !open
+    toc.classList.toggle('is-open', open)
+  }
+  if (toggle instanceof HTMLElement) {
+    toggle.classList.toggle('is-active', open)
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+  }
+}
+
+function inspectorTocIsDocked() {
+  return state.inspectorExpanded === true && window.matchMedia('(min-width: 761px)').matches
+}
+
+function renderInspectorToc(headings) {
+  if (headings.length === 0 || state.inspectorTocOpen !== true) return ''
+  const items = headings.map(item => `<button type="button" class="card-inspector-toc-item" data-action="jump-heading" data-heading="${escapeHtml(item.id)}" style="--toc-level:${item.level}">${escapeHtml(item.text)}</button>`).join('')
+  return `<nav class="card-inspector-toc is-open" aria-label="目录" style="--inspector-toc-width:${clampInspectorTocWidth(state.inspectorTocWidth)}px"><div class="card-inspector-toc-resize" role="separator" aria-orientation="vertical" aria-label="调整目录宽度" title="拖动调整宽度"></div><div class="card-inspector-toc-list">${items}</div></nav>`
 }
 
 function renderCardInspector(card) {
@@ -1445,7 +1723,20 @@ function renderCardInspector(card) {
   const openDshAction = `<button class="primary" type="button" data-action="open-dsh" data-thread="${thread.id}" data-seq="${Number.isInteger(branchSeq) ? branchSeq : ''}"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M7 3.5H4.5A1.5 1.5 0 0 0 3 5v6.5A1.5 1.5 0 0 0 4.5 13H11a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 3.5h3v3M12.4 3.6 7.5 8.5"/></svg>在 DSH 中打开</button>`
   const removeBranchAction = thread.parentId === null ? '' : `<button type="button" data-action="remove-branch" data-thread="${thread.id}">删除分支</button>`
   const question = detail?.question ?? card.question
-  return `<aside class="card-inspector${state.inspectorOpening ? ' is-opening' : ''}" aria-label="卡片详情" data-inspector-card="${escapeHtml(card.id)}"><header class="card-inspector-head"><div><div class="card-inspector-meta"><span>第 ${card.turnIndex + 1} 轮</span>${errorText === null ? '' : '<span class="card-inspector-error-status">失败</span>'}${process.length > 0 ? `<span>工具 ${process.length}</span>` : ''}</div><h2>${escapeHtml(question)}</h2></div><button class="card-inspector-close" type="button" data-action="close-card-inspector" aria-label="关闭卡片详情" title="关闭"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></header><div class="card-inspector-scroll">${error}${answer}${processRecordsHtml}</div><footer class="card-inspector-actions">${continueAction}${branch}${removeBranchAction}${openDshAction}</footer></aside>`
+  const headings = typeof answerText === 'string' && answerText !== '' ? markdownHeadings(answerText) : []
+  const noteSave = state.inspectorNoteSave?.cardId === card.id ? state.inspectorNoteSave.status : 'idle'
+  const noteBusy = noteSave === 'saving' || answerText === null || answerText === '' || card.answer?.pending === true
+  const noteLabel = noteSave === 'saving' ? '正在添加' : noteSave === 'saved' ? '已添加到笔记' : noteSave === 'error' ? '添加失败' : '添加到笔记'
+  const addToNotes = `<button class="card-inspector-icon-action${noteSave === 'saved' ? ' is-saved' : ''}" type="button" data-action="add-to-notes" data-thread="${thread.id}" data-card="${escapeHtml(card.id)}" aria-label="${noteLabel}" title="${noteLabel}" ${noteBusy ? 'disabled' : ''}><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M4.5 2.5h7A1.5 1.5 0 0 1 13 4v9.5L8 11.2 3 13.5V4A1.5 1.5 0 0 1 4.5 2.5Z"/></svg></button>`
+  const tocButton = headings.length === 0 ? '' : `<button class="card-inspector-icon-action${state.inspectorTocOpen ? ' is-active' : ''}" type="button" data-action="toggle-inspector-toc" aria-expanded="${state.inspectorTocOpen ? 'true' : 'false'}" aria-label="目录" title="目录"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h7"/></svg></button>`
+  const expandLabel = state.inspectorExpanded ? '还原' : '铺满'
+  const expandIcon = state.inspectorExpanded
+    ? '<path d="M6 3.5h6.5V10M3.5 6v6.5H10"/>'
+    : '<path d="M3.5 6.5V3.5h3M12.5 6.5V3.5h-3M3.5 9.5v3h3M12.5 9.5v3h-3"/>'
+  const expandButton = `<button class="card-inspector-icon-action${state.inspectorExpanded ? ' is-active' : ''}" type="button" data-action="toggle-inspector-expand" aria-pressed="${state.inspectorExpanded ? 'true' : 'false'}" aria-label="${expandLabel}" title="${expandLabel}"><svg aria-hidden="true" viewBox="0 0 16 16">${expandIcon}</svg></button>`
+  const inspectorClass = `card-inspector${state.inspectorOpening ? ' is-opening' : ''}${state.inspectorExpanded ? ' is-expanded' : ''}`
+  const inspectorWidth = state.inspectorExpanded ? '100%' : `${clampInspectorWidth(state.inspectorWidth)}px`
+  return `<aside class="${inspectorClass}" aria-label="卡片详情" data-inspector-card="${escapeHtml(card.id)}" style="width:${inspectorWidth}"><div class="card-inspector-resize" role="separator" aria-orientation="vertical" aria-label="调整宽度" title="拖动调整宽度"></div><header class="card-inspector-head"><div><div class="card-inspector-meta"><span>第 ${card.turnIndex + 1} 轮</span>${errorText === null ? '' : '<span class="card-inspector-error-status">失败</span>'}${process.length > 0 ? `<span>工具 ${process.length}</span>` : ''}</div><h2>${escapeHtml(question)}</h2></div><div class="card-inspector-tools">${addToNotes}${tocButton}${expandButton}<button class="card-inspector-close" type="button" data-action="close-card-inspector" aria-label="关闭卡片详情" title="关闭"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></div></header><div class="card-inspector-body"><div class="card-inspector-scroll">${error}${answer}${processRecordsHtml}</div>${renderInspectorToc(headings)}</div><footer class="card-inspector-actions">${continueAction}${branch}${removeBranchAction}${openDshAction}</footer></aside>`
 }
 
 function renderThread() {
@@ -1478,10 +1769,8 @@ function render() {
     const detail = document.querySelector('.detail-scroll')
     if (detail instanceof HTMLElement) state.detailScrollByThread.set(state.detailThreadId, detail.scrollTop)
   }
-  if (state.mode === 'canvas' && state.inspectorCardId !== null) {
-    const inspector = document.querySelector('.card-inspector-scroll')
-    if (inspector instanceof HTMLElement) state.inspectorScrollByCard.set(state.inspectorCardId, inspector.scrollTop)
-  }
+  // Inspector scroll is owned by the scroll listener. Reading scrollTop here
+  // after a remount would capture 0 and pin the drawer to the top.
   state.detailThreadId = state.mode === 'thread' ? state.activeId : null
   const detailScrollTop = state.detailThreadId === null ? null : state.detailScrollByThread.get(state.detailThreadId) ?? null
   const inspectorScrollTop = state.mode === 'canvas' && state.inspectorCardId !== null ? state.inspectorScrollByCard.get(state.inspectorCardId) ?? null : null
@@ -1511,6 +1800,9 @@ function render() {
   const canvasTabs = `<nav class="canvas-tabs" aria-label="会话地图视图"><button class="${state.mode === 'canvas' ? 'active' : ''}" data-action="show-canvas">地图</button><button class="${state.mode === 'thread' ? 'active' : ''}" data-action="show-thread" data-thread="${state.activeId ?? ''}" ${detailAvailable ? '' : 'disabled'}>详情</button></nav>`
   app.innerHTML = `<main class="synapse-shell ${state.sidebarCollapsed ? 'sidebar-collapsed' : ''}"><aside class="sidebar"><div class="sidebar-brand-row"><div class="brand" aria-label="Synapse"><svg class="brand-mark" aria-hidden="true" viewBox="0 0 32 32" fill="none"><path d="M9 10.5 16 7l7 3.5M9 10.5v8L16 22m0-15v15m7-11.5v8L16 22"/><circle cx="9" cy="10" r="2.5"/><circle cx="23" cy="10" r="2.5"/><circle cx="16" cy="23" r="2.5"/></svg><strong>Synapse</strong></div><button class="sidebar-toggle" type="button" data-action="toggle-sidebar" aria-label="${state.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}" title="${state.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="1.75" width="12.5" height="12.5" rx="2.25"/><path d="M6 2v12"/></svg></button></div><button class="new-workspace" type="button" data-action="create-session" ${state.draft !== null ? 'disabled' : ''}><svg class="new-session-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25"/><path d="M8 4.75v6.5M4.75 8h6.5"/></svg><span>新会话</span></button><label class="workspace-label"><span>工作区</span><span class="workspace-select"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 4.75h3l1.2 1.5h6.8v5.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z"/></svg><select data-action="select-workspace" aria-label="选择工作区" ${state.draft !== null ? 'disabled' : ''}>${choices.map(item => `<option value="${item.id}" title="${escapeHtml(item.path ?? item.title)}" ${item.id === selectedWorkspaceId ? 'selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></span></label><div class="sidebar-heading"><span>会话</span></div><nav class="thread-tree">${sidebarThreads.map(thread => `<button class="tree-row ${thread.id === sidebarActiveId ? 'active' : ''}" data-action="select-thread" data-thread="${thread.id}" style="--thread-color:#374151"><span class="tree-dot"></span><span>${escapeHtml(threadListTitle(thread))}</span>${thread.parentId === null ? '' : '<i>分支</i>'}</button>`).join('') || '<p class="tree-empty">暂未同步会话</p>'}</nav></aside><header class="topbar"><div class="view-switch" role="group" aria-label="视图切换"><button data-action="close" type="button" aria-pressed="false">对话</button><button class="active" type="button" aria-pressed="true">会话地图</button></div>${canvasControls}${canvasMinimap}</header><section class="main-stage">${state.error ? `<div class="status-message" role="alert"><span>${escapeHtml(state.error)}</span><button data-action="dismiss-error" aria-label="关闭" title="关闭">×</button></div>` : ''}${canvasTabs}${view}${selectionFollowupButton()}</section></main>`
   installDragging()
+  installInspectorResize()
+  installInspectorTocResize()
+  applyInspectorLayout()
   installCanvasMinimap()
   syncCanvasMinimap()
   cacheCardConnectors()
@@ -1528,10 +1820,7 @@ function render() {
     const nextDetail = document.querySelector('.detail-scroll')
     if (nextDetail instanceof HTMLElement) nextDetail.scrollTop = detailScrollTop
   })
-  if (inspectorScrollTop !== null) window.requestAnimationFrame(() => {
-    const inspector = document.querySelector('.card-inspector-scroll')
-    if (inspector instanceof HTMLElement) inspector.scrollTop = inspectorScrollTop
-  })
+  restoreInspectorScroll(inspectorScrollTop)
   if (state.inspectorOpening) window.requestAnimationFrame(() => {
     document.querySelector('.card-inspector')?.classList.remove('is-opening')
     state.inspectorOpening = false
@@ -1564,6 +1853,12 @@ function openCardInspector(cardId) {
   dismissTurnPane()
   state.inspectorOpening = state.inspectorCardId === null
   state.inspectorCardId = cardId
+  const thread = state.workspace?.threads.find(item => item.id === state.canvasCardsById?.get(cardId)?.dshThreadId)
+  if (thread !== undefined) {
+    void loadThreadHistory(thread, cardId).then(() => {
+      if (state.inspectorCardId === cardId) render()
+    })
+  }
 }
 
 function closeCardInspector({ animate = true } = {}) {
@@ -1574,6 +1869,9 @@ function closeCardInspector({ animate = true } = {}) {
   if (!animate || !(inspector instanceof HTMLElement)) {
     state.inspectorCardId = null
     state.inspectorOpening = false
+    state.inspectorTocOpen = false
+    state.inspectorExpanded = false
+    state.inspectorNoteSave = null
     render()
     return
   }
@@ -1583,6 +1881,9 @@ function closeCardInspector({ animate = true } = {}) {
     if (state.inspectorCardId !== cardId) return
     state.inspectorCardId = null
     state.inspectorOpening = false
+    state.inspectorTocOpen = false
+    state.inspectorExpanded = false
+    state.inspectorNoteSave = null
     render()
   }, 180)
 }
@@ -1670,7 +1971,7 @@ function renderCanvasMinimap() {
     const point = minimapProject(map, draftPosition.x, draftPosition.y)
     draftDot = `<span class="canvas-minimap-card is-draft" data-minimap-card="draft" style="left:${point.x}px;top:${point.y}px;width:${cardSize.w}px;height:${cardSize.h}px"></span>`
   }
-  return `<aside class="canvas-minimap${state.inspectorCardId === null ? '' : ' beside-inspector'}" aria-label="画布缩略图"><div class="canvas-minimap-stage">${dots}${draftDot}<span class="canvas-minimap-view" aria-hidden="true"></span></div></aside>`
+  return `<aside class="canvas-minimap${state.inspectorCardId === null ? '' : ' beside-inspector'}${state.inspectorExpanded ? ' is-full' : ''}" aria-label="画布缩略图"><div class="canvas-minimap-stage">${dots}${draftDot}<span class="canvas-minimap-view" aria-hidden="true"></span></div></aside>`
 }
 
 function syncCanvasMinimap() {
@@ -1792,6 +2093,115 @@ function installDragging() {
   for (const handle of document.querySelectorAll('[data-drag-card]')) bindDragHandle(handle)
 }
 
+function installInspectorResize() {
+  const handle = document.querySelector('.card-inspector-resize')
+  const inspector = document.querySelector('.card-inspector')
+  if (!(handle instanceof HTMLElement) || !(inspector instanceof HTMLElement)) return
+  handle.addEventListener('pointerdown', event => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (state.inspectorExpanded) {
+      state.inspectorExpanded = false
+      inspector.classList.remove('is-expanded')
+      document.querySelector('.canvas-view')?.classList.remove('inspector-expanded')
+      document.querySelector('.canvas-minimap')?.classList.remove('is-full')
+    }
+    const originX = event.clientX
+    const originWidth = inspector.getBoundingClientRect().width
+    inspector.classList.add('is-resizing')
+    document.documentElement.classList.add('is-resizing-inspector')
+    state.dragging = true
+    handle.setPointerCapture(event.pointerId)
+    const move = moveEvent => {
+      state.inspectorWidth = clampInspectorWidth(originWidth + originX - moveEvent.clientX)
+      applyInspectorLayout()
+    }
+    const stop = () => {
+      document.removeEventListener('pointermove', move)
+      document.removeEventListener('pointerup', stop)
+      document.removeEventListener('pointercancel', stop)
+      inspector.classList.remove('is-resizing')
+      document.documentElement.classList.remove('is-resizing-inspector')
+      persistInspectorLayout()
+      state.dragging = false
+      deferCanvasRefresh(120)
+    }
+    document.addEventListener('pointermove', move)
+    document.addEventListener('pointerup', stop)
+    document.addEventListener('pointercancel', stop)
+  })
+}
+
+function installInspectorTocResize() {
+  const handle = document.querySelector('.card-inspector-toc-resize')
+  const toc = document.querySelector('.card-inspector-toc')
+  if (!(handle instanceof HTMLElement) || !(toc instanceof HTMLElement)) return
+  handle.addEventListener('pointerdown', event => {
+    if (!inspectorTocIsDocked()) return
+    event.preventDefault()
+    event.stopPropagation()
+    const originX = event.clientX
+    const originWidth = toc.getBoundingClientRect().width
+    toc.classList.add('is-resizing')
+    document.documentElement.classList.add('is-resizing-inspector')
+    state.dragging = true
+    handle.setPointerCapture(event.pointerId)
+    const move = moveEvent => {
+      state.inspectorTocWidth = clampInspectorTocWidth(originWidth + originX - moveEvent.clientX)
+      applyInspectorTocLayout()
+    }
+    const stop = () => {
+      document.removeEventListener('pointermove', move)
+      document.removeEventListener('pointerup', stop)
+      document.removeEventListener('pointercancel', stop)
+      toc.classList.remove('is-resizing')
+      document.documentElement.classList.remove('is-resizing-inspector')
+      persistInspectorLayout()
+      state.dragging = false
+      deferCanvasRefresh(120)
+    }
+    document.addEventListener('pointermove', move)
+    document.addEventListener('pointerup', stop)
+    document.addEventListener('pointercancel', stop)
+  })
+}
+
+function jumpInspectorHeading(headingId) {
+  const scroller = document.querySelector('.card-inspector-scroll')
+  if (!(scroller instanceof HTMLElement)) return
+  const target = scroller.querySelector(`#${CSS.escape(headingId)}`)
+  if (!(target instanceof HTMLElement)) return
+  const nextTop = Math.max(0, target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 12)
+  rememberInspectorScroll(nextTop)
+  scroller.scrollTo({ top: nextTop, behavior: 'smooth' })
+}
+
+async function saveInspectorToNotes(card) {
+  if (state.inspectorNoteSave?.status === 'saving') return
+  const reply = inspectorReply(card)
+  if (reply.pending || reply.answerText === '') return
+  const thread = state.workspace?.threads.find(item => item.id === card.dshThreadId)
+  const detail = thread === undefined ? null : historyForCard(thread, card.id)
+  const body = inspectorNoteBody({
+    question: detail?.question ?? card.question,
+    answer: reply.answerText,
+    workspaceTitle: currentDshWorkspace()?.title ?? state.workspace?.title ?? '',
+    sessionTitle: thread === undefined ? '' : threadListTitle(thread),
+    turnIndex: card.turnIndex,
+    sessionId: thread?.dshSessionId ?? '',
+  })
+  state.inspectorNoteSave = { cardId: card.id, status: 'saving' }
+  render()
+  try {
+    await dshRpc('synapse:add-to-notes', { body, tags: ['会话地图'] })
+    state.inspectorNoteSave = { cardId: card.id, status: 'saved' }
+    render()
+  } catch {
+    state.inspectorNoteSave = { cardId: card.id, status: 'error' }
+    render()
+  }
+}
+
 function canvasViewport(target) {
   return target instanceof Element ? target.closest('.canvas-viewport') : null
 }
@@ -1910,7 +2320,7 @@ function queueSelectionFollowup() {
 
 app.addEventListener('pointerdown', event => {
   const viewport = canvasViewport(event.target)
-  if (!(viewport instanceof HTMLElement) || event.target instanceof Element && event.target.closest('.thread-card, button, textarea, select')) return
+  if (!(viewport instanceof HTMLElement) || event.target instanceof Element && event.target.closest('.thread-card, button, textarea, select, .card-inspector')) return
   event.preventDefault()
   const origin = { x: event.clientX, y: event.clientY, camera: { ...state.canvasCamera } }
   let pendingCamera = null
@@ -1952,6 +2362,10 @@ app.addEventListener('pointerdown', event => {
 // way any scrollable surface behaves. Zooming is Ctrl/⌘ + wheel (trackpad
 // pinch) and the +/- buttons in the topbar.
 app.addEventListener('wheel', event => {
+  if (event.target instanceof Element && event.target.closest('.card-inspector')) {
+    deferCanvasRefresh()
+    return
+  }
   const viewport = canvasViewport(event.target)
   if (!(viewport instanceof HTMLElement)) return
   // A trackpad pinch arrives as a wheel event with ctrlKey set, and it must be
@@ -1999,19 +2413,33 @@ app.addEventListener('pointerdown', event => {
   else hideSelectionFollowup()
 })
 app.addEventListener('pointerup', queueSelectionFollowup)
-app.addEventListener('scroll', hideSelectionFollowup, true)
+app.addEventListener('scroll', event => {
+  hideSelectionFollowup()
+  if (event.target instanceof HTMLElement && event.target.classList.contains('card-inspector-scroll')) {
+    rememberInspectorScroll(event.target.scrollTop)
+    deferCanvasRefresh(400)
+  }
+}, true)
 document.addEventListener('selectionchange', queueSelectionFollowup)
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || state.mode !== 'canvas' || state.inspectorCardId === null) return
   event.preventDefault()
+  if (state.inspectorTocOpen) {
+    setInspectorTocOpen(false)
+    render()
+    return
+  }
   closeCardInspector({ animate: false })
 })
 
 app.addEventListener('click', async event => {
+  if (state.inspectorTocOpen && !inspectorTocIsDocked() && event.target instanceof Element && event.target.closest('.card-inspector-toc, [data-action="toggle-inspector-toc"]') === null) {
+    setInspectorTocOpen(false)
+  }
   const button = event.target.closest('[data-action]')
   if (!(button instanceof HTMLElement)) {
     const card = event.target instanceof Element ? event.target.closest('.thread-card[data-thread]:not(.draft-card)') : null
-    if (!(card instanceof HTMLElement) || event.target instanceof Element && event.target.closest('.node-handle, textarea, select, form')) return
+    if (!(card instanceof HTMLElement) || event.target instanceof Element && event.target.closest('.node-handle, textarea, select, form, a')) return
     // A double-click selects a word and a drag selects a range; neither is a
     // select-click, so leave the selection intact instead of re-rendering.
     if (event.detail > 1) return
@@ -2026,7 +2454,6 @@ app.addEventListener('click', async event => {
     openCardInspector(cardId)
     state.error = ''
     render()
-    void loadThreadHistory(thread)
     // Bidirectional current-session sync: switch DSH's current session
     // without closing the map; the client confirms via synapse:current-session.
     if (thread.dshSessionId !== null) {
@@ -2064,6 +2491,26 @@ app.addEventListener('click', async event => {
     }
     if (button.dataset.action === 'close') post('synapse:close')
     if (button.dataset.action === 'close-card-inspector') { closeCardInspector(); return }
+    if (button.dataset.action === 'toggle-inspector-toc') {
+      setInspectorTocOpen(!state.inspectorTocOpen)
+      render()
+      return
+    }
+    if (button.dataset.action === 'toggle-inspector-expand') {
+      toggleInspectorExpanded()
+      return
+    }
+    if (button.dataset.action === 'jump-heading' && button.dataset.heading !== undefined) {
+      jumpInspectorHeading(button.dataset.heading)
+      if (!inspectorTocIsDocked()) setInspectorTocOpen(false)
+      return
+    }
+    if (button.dataset.action === 'add-to-notes') {
+      const cardId = button.dataset.card ?? state.inspectorCardId
+      const card = cardId === null || cardId === undefined ? undefined : state.canvasCardsById?.get(cardId)
+      if (card !== undefined) void saveInspectorToNotes(card)
+      return
+    }
     if (button.dataset.action === 'toggle-sidebar') { state.sidebarCollapsed = !state.sidebarCollapsed; render() }
     if (button.dataset.action === 'create-session') openNewSession()
     if (button.dataset.action === 'open-current' && state.currentDsh !== null) post('synapse:open-session', { sessionId: state.currentDsh.id })
@@ -2196,14 +2643,23 @@ window.addEventListener('message', event => {
     return
   }
   if (data.type === 'synapse:workspaces') {
-    state.dshWorkspaces = Array.isArray(data.workspaces) ? data.workspaces.filter(workspace => typeof workspace?.id === 'string' && typeof workspace.title === 'string' && Array.isArray(workspace.sessionIds)) : []
+    const next = Array.isArray(data.workspaces) ? data.workspaces.filter(workspace => typeof workspace?.id === 'string' && typeof workspace.title === 'string' && Array.isArray(workspace.sessionIds)) : []
+    const fingerprint = workspacesFingerprint(next)
+    const unchanged = fingerprint === state.dshWorkspacesFingerprint
+    state.dshWorkspaces = next
+    state.dshWorkspacesFingerprint = fingerprint
+    // Session-list ticks reuse this message. Reloading the workspace on every
+    // chunk remounted the inspector and every card — same class of bug as
+    // current-session rebuilding the canvas during a live turn.
+    if (unchanged && state.workspace !== null) return
     const current = currentDshWorkspace()
     if (current !== undefined && current.id !== state.selectedDshWorkspaceId) void openDshWorkspace(current.id).catch(setError)
     else if (state.selectedDshWorkspaceId !== null) void openDshWorkspace(state.selectedDshWorkspaceId).catch(setError)
     else if (canReplaceView()) render()
   }
   if (data.type === 'synapse:current-session') {
-    const previousId = state.currentDsh?.id
+    const previous = state.currentDsh
+    const previousId = previous?.id
     // The canvas is scoped to the current session, so a switch replaces its
     // whole content: the old camera would point at coordinates that no longer
     // hold anything. Re-center unless the switch was triggered from inside the
@@ -2234,7 +2690,9 @@ window.addEventListener('message', event => {
         }
       }).catch(setError)
     }
-    else if (canReplaceView()) render()
+    else if ((previous?.title !== data.session?.title || previous?.cwd !== data.session?.cwd) && canReplaceView()) {
+      render()
+    }
   }
   if (data.type === 'synapse:live-reply' && typeof data.sessionId === 'string') {
     const thread = state.workspace?.threads.find(item => item.dshSessionId === data.sessionId)
@@ -2253,7 +2711,7 @@ window.addEventListener('message', event => {
       }
     }
   }
-  if (data.type === 'synapse:forked-session' || data.type === 'synapse:created-session' || data.type === 'synapse:message-sent' || data.type === 'synapse:archived-session') settleRpc(data.requestId, data.session ?? data)
+  if (data.type === 'synapse:forked-session' || data.type === 'synapse:created-session' || data.type === 'synapse:message-sent' || data.type === 'synapse:archived-session' || data.type === 'synapse:note-saved') settleRpc(data.requestId, data.session ?? data)
   if (data.type === 'synapse:bridge-error') { settleRpc(data.requestId, undefined, new Error(data.message)); if (data.requestId === undefined) setError(data.message) }
 })
 
@@ -2289,10 +2747,26 @@ function applyLiveReplyToCard(sessionId) {
   if (!(card instanceof HTMLElement)) return
   const answer = card.querySelector('.thread-answer')
   if (!(answer instanceof HTMLElement)) return
-  const text = live.text
-  answer.innerHTML = text.trim() === ''
-    ? '<p class="thread-answer-pending">正在回复</p>'
-    : `${renderMarkdown(text)}<p class="thread-answer-pending">正在回复</p>`
+  const pending = '<p class="thread-answer-pending">正在回复</p>'
+  const decision = nextLiveCardAnswer({
+    hasContent: answer.childElementCount > 0,
+    hasPending: answer.querySelector('.thread-answer-pending') !== null,
+    liveText: answer.dataset.liveText,
+    nextText: live.text,
+  })
+  if (decision.action === 'keep') return
+  if (decision.action === 'append-pending') {
+    answer.insertAdjacentHTML('beforeend', pending)
+    return
+  }
+  if (decision.action === 'pending') {
+    answer.innerHTML = pending
+    return
+  }
+  const scrollTop = answer.scrollTop
+  answer.innerHTML = `${renderMarkdown(decision.text)}${pending}`
+  answer.dataset.liveText = decision.text
+  answer.scrollTop = scrollTop
 }
 function scheduleLiveRender() {
   if (liveRenderTimer !== 0 || !canReplaceView()) return

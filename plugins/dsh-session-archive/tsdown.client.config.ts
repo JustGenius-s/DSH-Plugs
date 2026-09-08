@@ -13,7 +13,13 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
-  deps: { neverBundle: true, alwaysBundle: ['@just-genius/dsh-plugin-ui'] },
+  // DSH's browser module table only materializes platform seeds and declared
+  // client injections. Shared workspace helpers are build-time libraries, so
+  // leaving the runtime package external would emit an unresolvable require().
+  deps: {
+    neverBundle: true,
+    alwaysBundle: ['@just-genius/dsh-plugin-ui', /^@just-genius\/dsh-plugin-runtime(?:\/|$)/],
+  },
   outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
   banner: {
     js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {

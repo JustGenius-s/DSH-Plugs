@@ -147,6 +147,41 @@ test('opens the clicked card in a tool-aware detail inspector', async () => {
   assert.match(styles, /\.card-inspector \{ top: auto; width: 100%/)
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/)
   assert.match(styles, /\.thread-meta \.card-process-count/)
+
+  assert.match(inspector, /data-action="toggle-inspector-toc"/)
+  assert.match(inspector, /data-action="toggle-inspector-expand"/)
+  assert.match(inspector, /data-action="add-to-notes"/)
+  assert.match(inspector, /card-inspector-resize/)
+  assert.match(inspector, /card-inspector-tools/)
+  assert.match(inspector, /card-inspector-body/)
+  assert.match(inspector, /\$\{addToNotes\}\$\{tocButton\}/)
+  assert.match(source, /function clampInspectorWidth/)
+  assert.match(source, /function installInspectorResize/)
+  assert.match(source, /function installInspectorTocResize/)
+  assert.match(source, /function inspectorTocIsDocked/)
+  assert.match(source, /dsh-synapse:inspector-width:v1/)
+  assert.match(source, /dsh-synapse:inspector-toc-width:v1/)
+  assert.doesNotMatch(source, /dsh-synapse:inspector-expanded:v1/)
+  assert.match(source, /state\.inspectorExpanded = false/)
+  assert.match(source, /state\.inspectorTocOpen !== true/)
+  assert.match(source, /synapse:add-to-notes/)
+  assert.match(source, /function jumpInspectorHeading/)
+  assert.match(source, /rememberInspectorScroll\(nextTop\)/)
+  assert.match(source, /scroller\.querySelector\(`#\$\{CSS\.escape\(headingId\)}`\)/)
+  const client = await readFile(new URL('../client.js', import.meta.url), 'utf8')
+  assert.match(client, /synapse:add-to-notes/)
+  assert.match(client, /dsh-quick-notes:import/)
+  assert.match(styles, /\.card-inspector-toc/)
+  assert.match(styles, /\.card-inspector-toc\.is-open \{ display: grid/)
+  assert.match(styles, /\.card-inspector-toc\[hidden\] \{ display: none/)
+  assert.match(styles, /\.card-inspector-body/)
+  assert.match(styles, /\.card-inspector-resize/)
+  assert.match(styles, /\.card-inspector\.is-expanded/)
+  assert.match(styles, /\.card-inspector-toc-resize/)
+  assert.match(styles, /--inspector-toc-width/)
+  assert.match(styles, /align-content: start/)
+  assert.match(styles, /cursor: ew-resize/)
+  assert.match(styles, /\.card-inspector-answer h1 \{/)
 })
 
 test('switching the workspace in the map syncs DSH to its first session', async () => {
@@ -159,10 +194,12 @@ test('switching the workspace in the map syncs DSH to its first session', async 
 
 test('renders markdown tables and allows higher canvas zoom', async () => {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
-  const markdown = source.slice(source.indexOf('function markdownBlock'), source.indexOf('function overlapsCard'))
+  const markdown = source.slice(source.indexOf('const tableCells'), source.indexOf('function overlapsCard'))
 
+  assert.match(markdown, /md-table-wrap/)
   assert.match(markdown, /<table><thead>/)
   assert.match(markdown, /isTableDelimiter/)
+  assert.match(markdown, /function takeTable/)
   // Zoom bounds are named constants, not the upstream 0.6-4 literals, and
   // clamp every zoom path (buttons, pinch, fit) even without the injection.
   assert.match(source, /const MIN_ZOOM = 0\.2/)
@@ -534,6 +571,9 @@ test('renders a card turn with the dsh-codex side-chat look', async () => {
   assert.match(source, /\.dsh-synapse-turn-pane\{[^}]*position:absolute;top:0;right:0;bottom:0/)
   assert.match(source, /\.dsh-synapse-turn-pane\{[^}]*max-height:100%;overflow:hidden/)
   assert.match(source, /\.dsh-synapse-turn-pane \.dsh-codex-sidechat-transcript\{[^}]*overflow-y:auto/)
+  assert.match(source, /transcriptRef/)
+  assert.match(source, /scrollTopRef/)
+  assert.match(source, /onScroll: event => \{ scrollTopRef\.current = event\.currentTarget\.scrollTop \}/)
 
   // One turn is sliced from the live session chat — the same nodes side-chat
   // renders — not from Synapse's projected messages.
@@ -606,6 +646,7 @@ test('the card inspector scrolls its body instead of clipping it', async () => {
   assert.match(scroll, /min-height: 0/)
   assert.match(scroll, /overflow-y: auto/)
   assert.match(scroll, /overscroll-behavior: contain/)
+  assert.match(scroll, /overflow-anchor: none/)
   // A visible scrollbar: thin, and styled in WebKit.
   assert.match(scroll, /scrollbar-width: thin/)
   assert.match(css, /\.card-inspector-scroll::-webkit-scrollbar-thumb/)
@@ -809,6 +850,32 @@ test('re-centers the camera when the current session replaces the canvas', async
   assert.match(current, /resetCanvasCamera\(\)/)
   assert.match(current, /state\.mapCardSessionSwitches\.delete\(data\.session\?\.id\)/)
   assert.match(current, /focusActiveCard\(\)/)
+  assert.match(current, /previous\?\.title !== data\.session\?\.title/)
+  assert.doesNotMatch(current, /else if \(canReplaceView\(\)\) render\(\)/)
+})
+
+test('list ticks do not remount the canvas or pin the inspector to the top', async () => {
+  const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
+  const workspaces = source.slice(source.indexOf("data.type === 'synapse:workspaces'"), source.indexOf("data.type === 'synapse:current-session'"))
+  const open = source.slice(source.indexOf('async function openDshWorkspace'), source.indexOf('async function openCurrentWorkspace'))
+  const render = source.slice(source.indexOf('function render() {'), source.indexOf('function renderPreservingDetailScroll'))
+  const wheel = source.slice(source.indexOf("app.addEventListener('wheel'"), source.indexOf("app.addEventListener('click'"))
+  const live = source.slice(source.indexOf('function applyLiveReplyToCard'), source.indexOf('function scheduleLiveRender'))
+
+  assert.match(source, /function workspacesFingerprint/)
+  assert.match(source, /function threadsLayoutFingerprint/)
+  assert.match(source, /function nextLiveCardAnswer/)
+  assert.match(source, /function rememberInspectorScroll/)
+  assert.match(source, /function restoreInspectorScroll/)
+  assert.match(workspaces, /if \(unchanged && state\.workspace !== null\) return/)
+  assert.match(open, /sameLayout/)
+  assert.match(open, /if \(renderAfter && \(!sameLayout \|\| revealed\) && canReplaceView\(\)\) render\(\)/)
+  assert.doesNotMatch(render, /state\.inspectorScrollByCard\.set\(state\.inspectorCardId, inspector\.scrollTop\)/)
+  assert.match(render, /restoreInspectorScroll\(inspectorScrollTop\)/)
+  assert.match(source, /event\.target\.classList\.contains\('card-inspector-scroll'\)/)
+  assert.match(wheel, /closest\('\.card-inspector'\)/)
+  assert.match(live, /nextLiveCardAnswer\(/)
+  assert.match(live, /answer\.scrollTop = scrollTop/)
 })
 
 test('does not ship a card archive action', async () => {
