@@ -136,8 +136,13 @@ export function sideChatTitleOf(session: Session): string | undefined {
   return `${text.slice(0, SIDE_CHAT_TITLE_MAX)}…`
 }
 
-/** Compose the child agent under the parent's preset, mirroring host fork behavior. */
-async function composeAgentFor(
+/**
+ * Compose the child agent under the parent's preset, mirroring host fork behavior.
+ *
+ * Exported so the stale-preset fallback is testable without a Host: both the
+ * preset registry and the logger arrive through `ctx`.
+ */
+export async function composeAgentFor(
   ctx: Context,
   presetId: string | undefined,
 ): Promise<{ agentPreset?: string; setup: (agentCtx: Context) => Promise<void> }> {
@@ -145,12 +150,25 @@ async function composeAgentFor(
   if (presets === undefined || presetId === undefined) {
     return { setup: async () => {} }
   }
-  const resolvedId = (await presets.resolve(presetId)).id
-  return {
-    agentPreset: resolvedId,
-    setup: async (agentCtx: Context) => {
-      await presets.mount(agentCtx, resolvedId)
-    },
+  // Best-effort: the parent's preset decides which tools and prompt sections
+  // the side agent gets, but a preset that no longer resolves (renamed,
+  // deleted, or a root that failed to scan) must not block opening the side
+  // chat — a default agent is perfectly usable. `presets.resolve()` THROWS for
+  // an unknown id, so this is the only thing standing between a stale preset
+  // and a 500, which is exactly how a side chat became impossible to open.
+  try {
+    const resolvedId = (await presets.resolve(presetId)).id
+    return {
+      agentPreset: resolvedId,
+      setup: async (agentCtx: Context) => {
+        await presets.mount(agentCtx, resolvedId)
+      },
+    }
+  } catch (error: unknown) {
+    ctx.logger.warn(
+      `[dsh-codex] side chat preset "${presetId}" did not resolve, using the default agent: ${String(error)}`,
+    )
+    return { setup: async () => {} }
   }
 }
 
