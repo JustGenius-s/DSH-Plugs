@@ -12,7 +12,11 @@ The consolidated Codex shell: Codex-style message navigation, Cursor-style per-t
 
 ### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
 
-Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with **Proceed** / **Mark as fixed**. Mode/wait/logs stay in process memory for the live session only (not written to the durable session log).
+Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the composer, and a reproduction-steps card with **Proceed** / **Mark as fixed**. Instrumentation goes through a workspace helper under `.dsh/debug/`; the dock can be cleared; runtime lines are mirrored to `.dsh/debug/debug.log`. Mode/wait stay in process memory for the live session only (not written to the durable session log).
+
+### [@just-genius/dsh-flow](plugins/dsh-flow)
+
+Leader-plans / subagent-executes orchestration, **off until you run `/flow`**. Once on, the main agent only plans — it lays work out as a DAG with `flow.plan`, each node is dispatched to its own child agent, and it reshapes the graph mid-flight with `flow.patch` (retry with a revised prompt, skip, insert a corrective step) as results land. Execution tools (`edit`/`write`/`bash`) are genuinely removed from the Leader while the mode is on; read-only tools stay. A dedicated **Flow** tab beside Chat draws the live graph with React Flow: node colour = status, edges = dependencies, click a node for its brief, result, and failure reason. Leave with `/flow off` (which also cancels running children).
 
 ### [@just-genius/dsh-multi-repo](plugins/dsh-multi-repo)
 
