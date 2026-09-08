@@ -1,1 +1,11 @@
-When creating a plugin, check whether each required package dependency already has a shared layer under `packages/`, and use that shared layer instead of depending on official packages directly.
+## Plugin Dependencies
+- Prefer the shared layer under `packages/` over a direct official dependency.
+
+## Code
+- Test functions and interfaces only — never render components or assert the DOM.
+- Move UI logic into a plain function before testing it.
+- Keep tests in the package-level `test/` directory, not `src/`.
+
+## Dependency Updates
+- Update dependencies at most weekly, then record the date below.
+- Last updated: to be filled in after the first dependency update (format: YYYY-MM-DD).

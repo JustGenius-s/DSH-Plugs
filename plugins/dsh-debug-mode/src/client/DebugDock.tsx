@@ -9,20 +9,21 @@ import styles from './DebugDock.module.css'
 export interface DebugDockInjected {
   sessionId: string
   resolveRepro: (action: DebugReproAction, notes: string) => Promise<string | null>
+  clearLogs: () => Promise<string | null>
 }
 
 export type DebugDockProps = PropsRuntime<'conversation.input.dock'>
   & DebugDockInjected
   & PropsLocale<'debug'>
 
-export function DebugDock({ sessionId, useInput, inputActions, resolveRepro, t }: DebugDockProps) {
+export function DebugDock({ sessionId, useInput, inputActions, resolveRepro, clearLogs, t }: DebugDockProps) {
   const debug = useDebugState(sessionId)
   const on = debug.pending ? !debug.active : debug.active
   if (!on) return null
 
   return (
     <div className={styles.dock}>
-      <LogCard logs={debug.logs} t={t} />
+      <LogCard logs={debug.logs} clearLogs={clearLogs} t={t} />
       {debug.wait !== null && (
         <ReproCard
           waitId={debug.wait.id}
@@ -39,18 +40,35 @@ export function DebugDock({ sessionId, useInput, inputActions, resolveRepro, t }
 
 function LogCard({
   logs,
+  clearLogs,
   t,
 }: {
   logs: readonly DebugLogEntry[]
+  clearLogs: () => Promise<string | null>
   t: (key: DebugKey) => string
 }) {
   const scroller = useRef<HTMLDivElement>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const node = scroller.current
     if (node === null) return
     node.scrollTop = node.scrollHeight
   }, [logs.length])
+
+  const clear = () => {
+    if (busy || logs.length === 0) return
+    setBusy(true)
+    setError(null)
+    clearLogs().then((failure) => {
+      setBusy(false)
+      if (failure !== null) setError(failure)
+    }, (reason) => {
+      setBusy(false)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
 
   return (
     <section className={styles.card} aria-label={t('logs.title')}>
@@ -59,6 +77,17 @@ function LogCard({
           <LogGlyph />
         </span>
         {t('logs.title')}
+        <Button
+          variant="ghost"
+          size="sm"
+          className={styles.clear}
+          disabled={busy || logs.length === 0}
+          aria-label={t('logs.clear.aria')}
+          title={t('logs.clear.aria')}
+          onClick={clear}
+        >
+          {t('logs.clear')}
+        </Button>
       </header>
       <div className={styles.logBody} ref={scroller}>
         {logs.length === 0 ? (
@@ -70,6 +99,7 @@ function LogCard({
           </div>
         ))}
       </div>
+      {error !== null && <div className={styles.feedback} role="status">{error || t('logs.clear.failed')}</div>}
     </section>
   )
 }

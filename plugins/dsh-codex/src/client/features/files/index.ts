@@ -101,7 +101,7 @@ export function createFilesFeature(
                 highlightThemeLight: config.highlightThemeLight,
                 highlightThemeDark: config.highlightThemeDark,
                 visible: props.visible !== false,
-                onAddToChat: (path) => insertFileReference(ctx, props.sessionId, path),
+                onAddToChat: (path, kind) => insertFileReference(ctx, props.sessionId, path, kind),
                 onAddComment: (comment) => reviewComments.insert(props.sessionId, comment),
               }
               return createElement(FilesPanel, panelProps)

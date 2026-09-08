@@ -1,0 +1,494 @@
+/* Flow tab. Every colour resolves through a --dsw-* token so light and dark
+   both stay correct without a second copy of the palette. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 10px;
+  padding: 16px 18px;
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.badge[data-status='running'] {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.badge[data-status='settled'] {
+  border-color: var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.modeToggle {
+  margin-left: auto;
+  padding: 2px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.modeToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.emptyActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.meter {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--dsw-alias-bg-skeleton);
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  background: var(--dsw-alias-state-success-primary);
+  transition: width 200ms ease-out;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.confirmBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-state-business-tertiary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.confirmText {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Status dot: the one place status becomes a colour. */
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-caption);
+  flex: 0 0 auto;
+}
+
+.statusDot[data-status='pending'] { background: var(--dsw-alias-label-caption); }
+.statusDot[data-status='ready'] { background: var(--dsw-alias-state-warn-primary); }
+.statusDot[data-status='running'] {
+  background: var(--dsw-alias-state-business-primary);
+  animation: flowPulse 1.2s ease-in-out infinite;
+}
+.statusDot[data-status='expanded'] { background: var(--dsw-alias-state-business-primary); }
+.statusDot[data-status='done'] { background: var(--dsw-alias-state-success-primary); }
+.statusDot[data-status='failed'] { background: var(--dsw-alias-state-error-primary); }
+.statusDot[data-status='skipped'] { background: var(--dsw-alias-label-dimmed); }
+
+@keyframes flowPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.degraded,
+.error {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  border: 1px solid var(--dsw-alias-state-warn-secondary);
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.error {
+  border-color: var(--dsw-alias-state-error-secondary);
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.body {
+  display: flex;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.graph {
+  width: 100%;
+  height: 100%;
+}
+
+.graphCompact :global(.react-flow__node.selected)::before {
+  display: none;
+}
+
+.dots {
+  color: var(--dsw-alias-border-l2);
+}
+
+.minimap {
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+}
+
+/* --- node card --- */
+
+.node {
+  width: 240px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+.node:hover {
+  border-color: var(--dsw-alias-border-l4);
+}
+
+.node[data-selected='true'] {
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 2px var(--dsw-alias-state-business-tertiary);
+}
+
+.node[data-status='running'] {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.node[data-status='expanded'] {
+  border-color: var(--dsw-alias-state-business-secondary);
+  border-style: dashed;
+}
+
+.node[data-status='done'] {
+  border-color: var(--dsw-alias-state-success-secondary);
+}
+
+.node[data-status='failed'] {
+  border-color: var(--dsw-alias-state-error-secondary);
+}
+
+.node[data-status='skipped'] {
+  opacity: 0.6;
+}
+
+.nodeHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nodeTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeStatus {
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  flex: 0 0 auto;
+}
+
+.nodeId {
+  font-size: 10px;
+  color: var(--dsw-alias-label-caption);
+  font-family: var(--dsw-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.attempts {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 16px;
+  background: var(--dsw-alias-bg-overlay);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.diagnostic,
+.summary,
+.note,
+.running {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.diagnostic {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* The latest progress note under a running node: quieter than the status
+   line, clamped to two lines so a chatty child cannot stretch the card. */
+.note {
+  -webkit-line-clamp: 2;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.running {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-state-business-primary);
+  -webkit-line-clamp: 1;
+}
+
+.spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--dsw-alias-state-business-tertiary);
+  border-top-color: var(--dsw-alias-state-business-primary);
+  animation: flowSpin 700ms linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes flowSpin {
+  to { transform: rotate(360deg); }
+}
+
+.handle {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+/* --- edges --- */
+
+.edgeIdle :global(.react-flow__edge-path),
+.edgeDone :global(.react-flow__edge-path),
+.edgeRunning :global(.react-flow__edge-path),
+.edgeFailed :global(.react-flow__edge-path),
+.edgeSkipped :global(.react-flow__edge-path) {
+  stroke-width: 1.5;
+}
+
+.edgeIdle :global(.react-flow__edge-path) { stroke: var(--dsw-alias-border-l4); }
+.edgeDone :global(.react-flow__edge-path) { stroke: var(--dsw-alias-state-success-secondary); }
+.edgeRunning :global(.react-flow__edge-path) { stroke: var(--dsw-alias-state-business-primary); }
+.edgeFailed :global(.react-flow__edge-path) { stroke: var(--dsw-alias-state-error-secondary); }
+.edgeSkipped :global(.react-flow__edge-path) {
+  stroke: var(--dsw-alias-border-l3);
+  stroke-dasharray: 3 3;
+}
+
+/* --- detail pane --- */
+
+.detail {
+  flex: 0 0 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow-y: auto;
+}
+
+.detailHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.detailTitle {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.close:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.meta > div {
+  display: flex;
+  gap: 8px;
+}
+
+.meta dt {
+  flex: 0 0 62px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.meta dd {
+  margin: 0;
+  min-width: 0;
+  word-break: break-all;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.detailSection h4 {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.brief {
+  margin: 0;
+  padding: 8px 9px;
+  border-radius: 6px;
+  background: var(--dsw-alias-markdown-code-block);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 190px;
+  overflow-y: auto;
+  font-family: var(--dsw-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-caption);
+}
+
+/* --- empty state --- */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.emptyText {
+  margin: 0;
+  max-width: 460px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.empty code,
+.hint code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--dsw-alias-markdown-inline-code);
+  font-family: var(--dsw-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}

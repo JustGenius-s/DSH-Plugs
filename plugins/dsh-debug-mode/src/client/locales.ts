@@ -4,6 +4,9 @@ export type DebugKey =
   | 'chip.failed'
   | 'logs.title'
   | 'logs.empty'
+  | 'logs.clear'
+  | 'logs.clear.aria'
+  | 'logs.clear.failed'
   | 'repro.title'
   | 'repro.proceed'
   | 'repro.fixed'
@@ -17,6 +20,9 @@ export const zh: Record<DebugKey, string> = {
   'chip.failed': '退出 debug mode 失败',
   'logs.title': 'Debug Logs',
   'logs.empty': 'Waiting for log entries…',
+  'logs.clear': '清空',
+  'logs.clear.aria': '清空 Debug Logs',
+  'logs.clear.failed': '清空日志失败',
   'repro.title': 'Reproduction Steps',
   'repro.proceed': 'Proceed',
   'repro.fixed': 'Mark as fixed',
@@ -31,6 +37,9 @@ export const en: Record<DebugKey, string> = {
   'chip.failed': 'failed to exit debug mode',
   'logs.title': 'Debug Logs',
   'logs.empty': 'Waiting for log entries…',
+  'logs.clear': 'Clear',
+  'logs.clear.aria': 'Clear Debug Logs',
+  'logs.clear.failed': 'failed to clear logs',
   'repro.title': 'Reproduction Steps',
   'repro.proceed': 'Proceed',
   'repro.fixed': 'Mark as fixed',

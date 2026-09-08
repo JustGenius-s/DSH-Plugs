@@ -131,8 +131,10 @@ function ensureHeader(text: string): string {
 
 function setDisabled(raw: string, disabled: boolean): string {
   const value = disabled ? 'true' : 'false'
+  // Preserve the trailing whitespace (including the newline) so the following
+  // block is not glued onto this line.
   if (/^\s+disabled:\s*/m.test(raw)) {
-    return raw.replace(/^\s+disabled:\s*(true|false)\s*$/m, `  disabled: ${value}`)
+    return raw.replace(/^(\s+disabled:\s*)(true|false)(\s*)$/m, `$1${value}$3`)
   }
   return raw.replace(/\s*$/, '\n') + `  disabled: ${value}\n`
 }

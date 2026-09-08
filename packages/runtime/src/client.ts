@@ -268,6 +268,13 @@ export const CLIENT_SERVICES = {
   remoteLlm: 'remote.llm',
   remotePluginInventory: 'remote.pluginInventory',
   remoteSettings: 'remote.settings',
+  /**
+   * The `session` Remote namespace (`ctx.remote.session`). Since DSH 0.1.3 the
+   * chat view resolves file links through `session/openWorkspacePath` instead of
+   * the client-side `workspaces.openPath`, so a plugin patching the path opener
+   * must inject this namespace.
+   */
+  remoteSession: 'remote.session',
   sessions: 'sessions',
   slots: 'slots',
   settingsScope: 'settingsScope',

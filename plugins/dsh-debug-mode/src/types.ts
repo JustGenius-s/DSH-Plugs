@@ -9,4 +9,6 @@ export interface DebugProjection {
   pending: boolean
   wait: DebugReproWait | null
   logs: readonly DebugLogEntry[]
+  /** Workspace-relative JSONL path, when a debug kit was installed. */
+  logFile: string | null
 }

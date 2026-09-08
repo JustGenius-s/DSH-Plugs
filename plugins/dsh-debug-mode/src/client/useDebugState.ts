@@ -10,6 +10,7 @@ const EMPTY: DebugProjection = {
   pending: false,
   wait: null,
   logs: [],
+  logFile: null,
 }
 
 /** Poll the host-only debug projection for one session (state is not persisted). */

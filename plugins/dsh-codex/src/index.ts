@@ -12,6 +12,7 @@ import {
 } from './shared/config'
 import { createDshCodexGitGraphServer } from './host/git-graph/server'
 import { createDshCodexSideChatServer } from './host/side-chat/server'
+import { createDshCodexFilesServer } from './host/files/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
@@ -92,4 +93,9 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
     const server = createDshCodexSideChatServer(ctx)
     return () => server.dispose()
   }, 'dsh-codex: side-chat routes')
+
+  ctx.effect(() => {
+    const server = createDshCodexFilesServer(ctx)
+    return () => server.dispose()
+  }, 'dsh-codex: files routes')
 }

@@ -3,10 +3,37 @@ import { createUserMessage, type StreamChunk } from '@just-genius/dsh-plugin-run
 import { execGit } from './git-exec'
 
 const GIT_TIMEOUT_MS = 15_000
-const LLM_TIMEOUT_MS = 60_000
 const MAX_BUFFER = 8 * 1024 * 1024
 /** Diff budget fed to the model; longer diffs are truncated with a notice. */
 const MAX_DIFF_CHARS = 12_000
+
+/**
+ * Response budget for one generate call, reasoning included.
+ *
+ * A reasoning model spends this on its thinking first: measured against
+ * `hy4-dev`, a small diff burned ~3.9k characters of reasoning before writing
+ * its first visible character, and only finished at 8k. A 1k budget therefore
+ * always returned nothing — not because the model refused, but because it ran
+ * out of room mid-thought.
+ */
+const LLM_MAX_TOKENS = 16_384
+/**
+ * Wall-clock budget for the whole generate call.
+ *
+ * Successful generations measured 54–83s on `hy4-dev`, so a 60s cap cancelled
+ * a noticeable share of otherwise healthy calls — and the cancellation looked
+ * like "nothing happened", since an aborted stream is treated as a quiet
+ * client-side cancel.
+ */
+const LLM_TIMEOUT_MS = 180_000
+
+/** Failure the caller turns into a visible, retryable message. */
+export class CommitMessageFailure extends Error {
+  constructor(message: string, readonly kind: 'truncated' | 'empty' | 'model') {
+    super(message)
+    this.name = 'CommitMessageFailure'
+  }
+}
 
 const SYSTEM_PROMPT = [
   'You write git commit messages.',
@@ -53,7 +80,14 @@ export async function generateCommitMessage(
     if (signal.aborted) abort.abort()
     else signal.addEventListener('abort', onOuterAbort, { once: true })
   }
-  const timer = setTimeout(() => abort.abort(), LLM_TIMEOUT_MS)
+  // The caller's signal and this timer abort through one controller, so
+  // distinguish them by cause: a client that wandered off must stay quiet,
+  // while our own cap is a failure the user is waiting on and needs named.
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    abort.abort()
+  }, LLM_TIMEOUT_MS)
   try {
     const stream = llm.stream({
       provider: selection.provider,
@@ -63,31 +97,72 @@ export async function generateCommitMessage(
         content: [{ type: 'text', text: prompt }],
         source: { kind: 'user' },
       })],
-      maxTokens: 1024,
+      maxTokens: LLM_MAX_TOKENS,
       signal: abort.signal,
     })
     return await collectText(stream)
+  } catch (error) {
+    if (timedOut && isAbortFailure(error)) {
+      throw new CommitMessageFailure(
+        `the model did not finish within ${Math.round(LLM_TIMEOUT_MS / 1000)}s`,
+        'model',
+      )
+    }
+    throw error
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', onOuterAbort)
   }
 }
 
-/** Assemble the visible text of one model stream, surfacing failures. */
+/**
+ * Assemble the visible text of one model stream, surfacing failures.
+ *
+ * A `max-tokens` finish is a budget failure, not an empty model answer: saying
+ * otherwise sent every truncation down a dead end ("the model returned an
+ * empty message") when the real fix was a larger budget. Reasoning text is
+ * kept as a last resort because a thinking model's draft often already
+ * contains the finished one-liner before the budget ran out.
+ */
 async function collectText(stream: AsyncIterable<StreamChunk>): Promise<string> {
   let text = ''
+  let reasoning = ''
+  let truncated = false
   for await (const chunk of stream) {
-    if (chunk.type === 'block-end' && chunk.block.type === 'text') {
-      text += chunk.block.text
-    } else if (chunk.type === 'finish' && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
-      throw new Error(chunk.reason.failure.message)
+    if (chunk.type === 'block-end') {
+      if (chunk.block.type === 'text') text += chunk.block.text
+      else if (chunk.block.type === 'reasoning') reasoning += chunk.block.text
+    } else if (chunk.type === 'finish') {
+      const { kind } = chunk.reason
+      if (kind === 'error' || kind === 'aborted') {
+        throw new CommitMessageFailure(chunk.reason.failure.message, 'model')
+      }
+      if (kind === 'max-tokens') truncated = true
     }
   }
-  const result = text.trim().replace(/^```[a-z]*\n?|\n?```$/g, '').trim()
-  if (result.length === 0) {
-    throw new Error('the model returned an empty message')
+  const result = cleanMessage(text) ?? cleanMessage(reasoning)
+  if (result === undefined) {
+    throw new CommitMessageFailure(
+      truncated
+        ? 'the model ran out of room while thinking and wrote no commit message'
+        : 'the model returned an empty message',
+      truncated ? 'truncated' : 'empty',
+    )
   }
   return result
+}
+
+/** Strip fences and surrounding noise; undefined when nothing usable remains. */
+function cleanMessage(raw: string): string | undefined {
+  const result = raw.trim().replace(/^```[a-z]*\n?|\n?```$/g, '').trim()
+  return result.length === 0 ? undefined : result
+}
+
+/** Whether one thrown failure is our own abort surfacing through the stream. */
+function isAbortFailure(error: unknown): boolean {
+  if (error instanceof CommitMessageFailure) return false
+  const text = error instanceof Error ? error.message : String(error)
+  return /abort|cancel/i.test(text)
 }
 
 /** Staged diff when present, else the worktree diff plus untracked names. */

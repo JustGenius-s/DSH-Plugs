@@ -219,7 +219,12 @@ export function GitChangesView(props: GitChangesViewProps) {
       if (!result.ok) {
         // Aborted fetch surfaces as a TypeError / AbortError — stay quiet.
         if (/abort|cancel/i.test(result.message)) return
-        showToast(result.message, 'error')
+        // A generation failure is a model-side outcome, so it says what to do
+        // next rather than leaking a raw provider string at the user.
+        showToast(
+          result.code === 'generate' ? t('gitGraph.generateFailed') : result.message,
+          'error',
+        )
         return
       }
       setMessage(result.message)

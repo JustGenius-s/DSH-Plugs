@@ -3,7 +3,7 @@ import { CLIENT_SERVICES, getRemote } from '@just-genius/dsh-plugin-runtime/clie
 import { DebugChip } from './DebugChip.tsx'
 import { DebugDock } from './DebugDock.tsx'
 import { en, zh, type DebugKey } from './locales.ts'
-import { REPRO_PATH, type DebugReproAction } from '../shared.ts'
+import { CLEAR_PATH, REPRO_PATH, type DebugReproAction } from '../shared.ts'
 import { postResult } from '@just-genius/dsh-plugin-runtime/client'
 
 declare module '@just-genius/dsh-plugin-runtime/client' {
@@ -49,6 +49,7 @@ export function apply(ctx: ClientContext): void {
     inject: (sessionId) => ({
       sessionId: String(sessionId),
       resolveRepro: (action: DebugReproAction, notes: string) => postJson(REPRO_PATH, { sessionId, action, notes }),
+      clearLogs: () => postJson(CLEAR_PATH, { sessionId }),
     }),
   }, DebugDock as never))
 }

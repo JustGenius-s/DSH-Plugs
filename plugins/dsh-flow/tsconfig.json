@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}

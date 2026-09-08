@@ -59,9 +59,16 @@ export interface GitGraphOk {
   hasMore: boolean
 }
 
+/**
+ * One failed panel request.
+ *
+ * `generate` is distinct from `git` because a failed commit-message
+ * generation is retryable and needs a different sentence than a git failure;
+ * folding it into `git` made every generation failure read like a broken repo.
+ */
 export interface GitGraphErr {
   ok: false
-  code: 'no-cwd' | 'not-git' | 'git' | 'bad-request'
+  code: 'no-cwd' | 'not-git' | 'git' | 'bad-request' | 'generate'
   message: string
 }
 
