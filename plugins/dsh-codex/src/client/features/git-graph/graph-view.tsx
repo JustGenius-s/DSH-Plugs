@@ -8,6 +8,7 @@ import {
 import {
   DEFAULT_GRAPH_LIMIT,
   GIT_GRAPH_PATH,
+  type GitGraphErr,
   type GitGraphRef,
   type GitGraphResponse,
   type GitGraphRow,
@@ -56,7 +57,7 @@ export interface GitGraphViewProps {
 
 interface GraphState {
   status: 'idle' | 'loading' | 'ready' | 'error'
-  code?: 'no-cwd' | 'not-git' | 'git' | 'bad-request'
+  code?: GitGraphErr['code']
   message?: string
   head?: string
   branch?: string

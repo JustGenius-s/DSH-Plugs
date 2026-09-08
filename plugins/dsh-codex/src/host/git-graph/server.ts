@@ -29,7 +29,7 @@ import {
 import { runGraphAction } from './actions'
 import { loadChangeFiles, loadFile, loadFileDiff, loadTree, searchTree } from './browse'
 import { clampLimit, clampSkip, loadCommitBody, loadGraphLog } from './log'
-import { generateCommitMessage } from './message'
+import { CommitMessageFailure, generateCommitMessage } from './message'
 import { handleWatch } from './watch'
 
 export interface DshCodexGitGraphServer {
@@ -342,7 +342,7 @@ async function handleMessage(ctx: Context, req: IncomingMessage, res: ServerResp
     return
   }
   // Drop the model stream as soon as the browser aborts (panel switch,
-  // navigation, or a superseded generate). Otherwise a 60s LLM call keeps
+  // navigation, or a superseded generate). Otherwise a long LLM call keeps
   // running and makes follow-up git actions feel frozen.
   const abort = new AbortController()
   const onClose = (): void => abort.abort()
@@ -354,6 +354,13 @@ async function handleMessage(ctx: Context, req: IncomingMessage, res: ServerResp
     json(res, 200, value)
   } catch (error) {
     if (abort.signal.aborted || res.writableEnded) return
+    // Only a client-driven cancel stays in the `git` bucket, where the panel
+    // deliberately keeps quiet. A generation that failed on its own is named
+    // as such so the user sees a reason instead of a spinner that stops.
+    if (error instanceof CommitMessageFailure) {
+      json(res, 200, fail('generate', error.message))
+      return
+    }
     const text = errorMessage(error)
     if (/aborted|abort/i.test(text)) {
       json(res, 499, fail('git', 'generation cancelled'))
