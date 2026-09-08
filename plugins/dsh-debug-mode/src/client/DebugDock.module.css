@@ -40,7 +40,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 6px 14px;
   font-size: 13px;
   font-weight: 600;
   line-height: 18px;
@@ -88,21 +88,57 @@
   letter-spacing: .04em;
 }
 
+/* One logcat-style row: a time chip, a coloured source chip, then the message
+   inline after them. Inline (not flex columns) on purpose: a wrapped line
+   returns to the row's left edge instead of hanging under the message. */
 .line {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   padding: 4px 0;
 }
 
-.line + .line {
-  border-top: 1px solid var(--dsw-alias-border-l2);
-}
-
-.lineMeta {
-  color: var(--dsw-alias-label-caption);
+.lineTime,
+.lineSource {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: baseline;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 11px;
   line-height: 16px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.lineTime {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Calendar mark inside the time chip: `middle` centres the box on the parent
+   baseline + half x-height, which stays correct across the mono fallbacks
+   (a hard-coded px offset only centres for one font's metrics). */
+.lineIcon {
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.lineSource {
+  font-weight: 600;
+}
+
+/* Source colours: one per writer, so the eye can pick a stream out of the mix. */
+.sourceAgent {
+  color: var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+}
+
+.sourceUser {
+  color: var(--dsw-alias-state-success-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
+}
+
+.sourceIngest {
+  color: var(--dsw-alias-state-warn-label);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 14%, transparent);
 }
 
 .lineText {

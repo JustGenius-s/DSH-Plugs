@@ -94,7 +94,13 @@ function LogCard({
           <div className={styles.empty}>{t('logs.empty')}</div>
         ) : logs.map((entry) => (
           <div key={entry.id} className={styles.line}>
-            <span className={styles.lineMeta}>{formatTime(entry.at)} · {t(sourceKey(entry.source))}</span>
+            <span className={styles.lineTime}>
+              <CalendarGlyph className={styles.lineIcon} />
+              {formatTime(entry.at)}
+            </span>
+            <span className={styles.lineSource + ' ' + styles[sourceClass(entry.source)]}>
+              {t(sourceKey(entry.source))}
+            </span>
             <span className={styles.lineText}>{entry.text}</span>
           </div>
         ))}
@@ -180,6 +186,13 @@ function sourceKey(source: DebugLogEntry['source']): DebugKey {
   return 'source.user'
 }
 
+/** Chip colour per source (logcat-style colour coding). */
+function sourceClass(source: DebugLogEntry['source']): string {
+  if (source === 'agent') return 'sourceAgent'
+  if (source === 'ingest') return 'sourceIngest'
+  return 'sourceUser'
+}
+
 function formatTime(at: number): string {
   const date = new Date(at)
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -191,6 +204,18 @@ function stripLeadingHeading(text: string): string {
     return lines.slice(1).join('\n').trim() || text
   }
   return text
+}
+
+/** Calendar mark leading the time chip; same 16-grid fill language as LogGlyph. */
+function CalendarGlyph({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="12" height="12" viewBox="0 0 16 16" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M2.8 3.6h10.4v1.1H2.8zM2.8 12.3h10.4v1.1H2.8zM2.8 4.7h1.1v7.6H2.8zM12.1 4.7h1.1v7.6h-1.1zM3.9 6.4h8.2v1.1H3.9zM4.9 1.8h1.1v2.4H4.9zM10 1.8h1.1v2.4H10z"
+      />
+    </svg>
+  )
 }
 
 function LogGlyph() {
