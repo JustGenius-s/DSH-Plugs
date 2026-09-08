@@ -18,6 +18,7 @@ import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
 import { SideChatPanel, type SideChatSessionsFace } from './panel'
 import { ensureSideChatStyles } from './styles'
+import { connectionApiOf } from './connection'
 
 const PANEL_SLOT = 'side.panel'
 const PANEL_ID = 'side-chat'
@@ -26,6 +27,8 @@ const NS = 'settings.codex'
 interface ConnectionFace {
   connection?: { api?: IApiClient }
 }
+
+/** Structural face of the connection service (see ./connection.ts). */
 
 /** Structural face of `ctx.conversation` (subset of IConversation). */
 interface ConversationFace {
@@ -45,7 +48,11 @@ export function createSideChatFeature(
       ensureSideChatStyles()
       const sessions = ctx.sessions as unknown as SideChatSessionsFace
       const store = ctx.sidePanels as SidePanelsStore
-      const api = (ctx as unknown as ConnectionFace).connection?.api
+      // `ConnectionHandle.api` is REQUIRED, so read it through the runtime's
+      // accessor (`ctx.get`, which never throws for an undeclared service)
+      // rather than through an optional chain on the context proxy: a missed
+      // read left the model picker silently stuck on "模型…" forever.
+      const api = connectionApiOf(ctx) as IApiClient | undefined
       // Optional compatibility service: `Context#get()` is the Cordis API for
       // reading a service without an inject requirement. Do not fall back to
       // `ctx.conversation` here; property access is inject-guarded and throws

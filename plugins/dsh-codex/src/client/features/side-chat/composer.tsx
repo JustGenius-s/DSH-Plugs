@@ -131,7 +131,15 @@ export function SideChatComposer({
 
   // Load the model directory once when the api face is available.
   useEffect(() => {
-    if (api === undefined) return
+    // Say so instead of parking on "模型…" forever: a missing api used to be
+    // indistinguishable from a slow lookup, and the picker looked broken.
+    if (api === undefined) {
+      setModels({
+        status: 'error',
+        message: 'connection.api 不可用，无法读取模型目录（检查 dsh.client.inject 是否包含 @deepseek-ai/dsh-client-connection）',
+      })
+      return
+    }
     let alive = true
     void (async () => {
       setModels({ status: 'loading' })
