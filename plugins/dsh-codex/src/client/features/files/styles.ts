@@ -83,7 +83,17 @@ body[data-ds-dark-theme] .dsh-files-code-line.is-find-active-line{background:rgb
 .dsh-files-code-ln{flex:none;position:relative;padding:0 8px 0 12px;text-align:right;color:var(--dsw-alias-label-tertiary,#8b8b90);user-select:none;background:var(--dsw-specific-sidebar-fill)}
 .dsh-files-code-line:hover .dsh-files-code-ln{background:linear-gradient(var(--dsw-alias-interactive-bg-hover),var(--dsw-alias-interactive-bg-hover)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-code-line.is-comment-selected .dsh-files-code-ln{background:linear-gradient(rgba(49,105,218,.10),rgba(49,105,218,.10)),var(--dsw-specific-sidebar-fill)}
-.dsh-files-code-text{flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e8)}
+.dsh-files-code-text{position:relative;flex:1;min-width:0;color:var(--dsw-alias-label-primary,#e6e6e8)}
+/* Read-only caret: the preview is not editable, so this marks the clicked
+   column instead of a browser text cursor. Blinks like VS Code's caret, and
+   goes solid for users who ask for reduced motion. */
+.dsh-files-caret{position:absolute;width:2px;border-radius:1px;background:var(--dsw-alias-state-business-primary,#4176e6);pointer-events:none;user-select:none;animation:dsh-files-caret-blink 1.06s steps(1,end) infinite}
+@keyframes dsh-files-caret-blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.dsh-files-caret{animation:none}}
+.dsh-files-code-line.is-caret-line{background:rgba(128,128,128,.12)}
+.dsh-files-code-line.is-caret-line .dsh-files-code-ln{background:linear-gradient(rgba(128,128,128,.12),rgba(128,128,128,.12)),var(--dsw-specific-sidebar-fill)}
+body[data-ds-dark-theme] .dsh-files-code-line.is-caret-line{background:rgba(255,255,255,.07)}
+body[data-ds-dark-theme] .dsh-files-code-line.is-caret-line .dsh-files-code-ln{background:linear-gradient(rgba(255,255,255,.07),rgba(255,255,255,.07)),var(--dsw-specific-sidebar-fill)}
 .dsh-files-diff-row{display:flex;align-items:flex-start;width:100%;min-width:0;min-height:21px;padding-right:8px;box-sizing:border-box;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
 /* Codex/Pierre gutter utility: the square comment button is mounted inside
    the line-number cell and overlays its number instead of taking a column. */
