@@ -7,27 +7,52 @@
 // instead of the 748px main-column width, but the surfaces, fonts, radii and
 // colors are one-to-one with the main chat.
 
-import { injectStyles } from '@just-genius/dsh-plugin-ui'
+import { fitRulesFor, injectStyles } from '@just-genius/dsh-plugin-ui'
+
+// Assistant answers, tool output and terminal blocks render through the
+// forwarded `dsh-client-ui-primitives` components, whose own CSS modules are
+// NOT injected into a plugin bundle (see packages/ui/src/primitives-fit.ts).
+// Without these rules the browser's defaults apply and a default <pre> never
+// wraps, so any long code line pushes a horizontal scrollbar into the side
+// panel. Scoping the shared fit rules to this feature's own containers keeps
+// every surface reflowing to the panel width.
+const FIT_SELECTORS = [
+  '.dsh-codex-sidechat-md-body',
+  '.dsh-codex-sidechat-toolresult',
+  '.dsh-codex-sidechat-toolrow-body',
+  '.dsh-codex-sidechat-think-body',
+  '.dsh-codex-sidechat-user-bubble',
+  '.dsh-codex-sidechat-irq-body',
+  '.dsh-codex-sidechat-sources',
+  '.dsh-codex-sidechat-empty-context',
+]
 
 const CSS = `
+${fitRulesFor(FIT_SELECTORS)}
 .dsh-codex-sidechat{display:flex;flex-direction:column;flex:1;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}
 .dsh-codex-sidechat-error{display:flex;align-items:center;gap:8px;padding:8px 16px;color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none}
 .dsh-codex-sidechat-error-dismiss{flex:none;border:none;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:20px;padding:0 4px}
 .dsh-codex-sidechat-empty-panel{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}
 .dsh-codex-sidechat-empty-panel p{margin:0}
 
-/* Conversation flow: same vertical rhythm and font as the main chat. */
-.dsh-codex-sidechat-conversation{display:flex;flex-direction:column;flex:1;min-height:0}
-.dsh-codex-sidechat-transcript-wrap{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
-.dsh-codex-sidechat-transcript{flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px;container-type:inline-size}
+/* Conversation flow: same vertical rhythm and font as the main chat.
+   min-width:0 on every level lets the flow shrink below its content's
+   intrinsic width — without it a long code line forces the column wider and
+   the transcript grows a horizontal scrollbar. */
+.dsh-codex-sidechat-conversation{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}
+.dsh-codex-sidechat-transcript-wrap{position:relative;flex:1;min-height:0;min-width:0;display:flex;flex-direction:column}
+/* overflow-x:clip (not hidden) keeps this a pure vertical scroller: clip
+   creates no scroll container, so it cannot be scrolled programmatically and
+   never shows a scrollbar. hidden would still allow programmatic scroll. */
+.dsh-codex-sidechat-transcript{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:clip;padding:16px;display:flex;flex-direction:column;gap:16px;container-type:inline-size}
 
 /* User bubble — one-to-one with the main chat's gdEzaW_bubble. */
-.dsh-codex-sidechat-user{flex-direction:column;align-items:flex-end;gap:6px;display:flex}
+.dsh-codex-sidechat-user{flex-direction:column;align-items:flex-end;gap:6px;display:flex;min-width:0}
 .dsh-codex-sidechat-user-bubble{background:var(--dsw-specific-bubble);max-width:min(525px,82%);color:var(--dsw-alias-label-primary);border-radius:22px;padding:10px 16px;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word}
 
 /* Assistant markdown — Sxvs8a: 16/28, 16px stack gap. */
-.dsh-codex-sidechat-md{color:var(--dsw-alias-label-primary);flex-direction:column;font-size:16px;line-height:28px;display:flex}
-.dsh-codex-sidechat-md-body{flex-direction:column;gap:16px;display:flex}
+.dsh-codex-sidechat-md{color:var(--dsw-alias-label-primary);flex-direction:column;font-size:16px;line-height:28px;display:flex;min-width:0}
+.dsh-codex-sidechat-md-body{flex-direction:column;gap:16px;display:flex;min-width:0}
 .dsh-codex-sidechat-stopped{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-tertiary);border-radius:6px;align-self:flex-start;padding:0 6px;font-size:11px;line-height:18px}
 
 /* Think row — QWLzlG DisclosureRow + sweep while running. */
@@ -42,6 +67,21 @@ const CSS = `
 .dsh-codex-sidechat-think-summary[data-follow-end]{text-overflow:clip}
 .dsh-codex-sidechat-think-body{color:var(--dsw-alias-label-tertiary);white-space:pre-wrap;word-break:break-word;padding:4px 0 4px 22px;font-size:14px;line-height:24px}
 
+/* Forwarded primitive cards (TerminalBlock / CodeBlock / ReadBlock / DiffBlock
+   / SearchBlock from dsh-client-ui-primitives). Their own sheets are now
+   injected, so these rules only ADAPT them to a narrow side panel — they must
+   not restyle them.
+   - Each card reserves its own left inset (terminal: 30px run-state column;
+     read: 48px line-number column). On top of the tool row's 22px indent that
+     is too much of a side panel to spend, so the wrapper reclaims it with a
+     negative margin and the cards keep their internal geometry intact.
+   - Cards get a content height so a long read / diff / search collapses inside
+     its own card instead of pushing the transcript to an unusable length.
+   - min-width:0 lets a card shrink below its content's intrinsic width. */
+.dsh-codex-sidechat-terminal{min-width:0;max-width:100%;margin-left:22px}
+.dsh-codex-sidechat-terminal > *{--dsl-terminal-output-max-height:320px}
+.dsh-codex-sidechat-code{min-width:0;max-width:100%;margin-left:22px}
+
 /* Tool row — o3BgMG DisclosureRow + sweep while running. */
 .dsh-codex-sidechat-toolrow{flex-direction:column;display:flex}
 .dsh-codex-sidechat-toolrow-row{position:relative;overflow:hidden}
@@ -51,6 +91,43 @@ const CSS = `
 .dsh-codex-sidechat-toolrow-title{font-weight:400}
 .dsh-codex-sidechat-toolrow-summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;font-size:14px;line-height:24px;overflow:hidden}
 .dsh-codex-sidechat-toolrow-summary.is-error{color:var(--dsw-alias-state-error-primary)}
+/* Nested-call count: how many child calls this root owns. */
+.dsh-codex-sidechat-toolrow-badge{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-caption);border-radius:6px;flex:none;padding:0 5px;margin-right:8px;font-size:11px;font-weight:600;line-height:18px}
+/* Explicit running marker — the sweep animation alone reads as decoration. */
+.dsh-codex-sidechat-toolrow-state{color:var(--dsw-alias-label-caption);flex:none;margin-right:8px;font-size:12px;line-height:18px}
+.dsh-codex-sidechat-toolrow-body{color:var(--dsw-alias-label-tertiary);white-space:pre-wrap;word-break:break-word;padding:4px 0 4px 22px;font-size:14px;line-height:24px}
+.dsh-codex-sidechat-toolrow-body.is-error{color:var(--dsw-alias-state-error-primary)}
+/* Structured result cards (read / search / web / diff).
+
+   Single source of truth for this class: two same-specificity rules previously
+   split its geometry between them and left these cards misaligned.
+
+   The 22px indent matches .toolrow-body/.think-body, so an expanded card sits
+   one level in from its tool-row title — the same indent the row's own text
+   body uses. DisclosureRow's children slot carries NO padding of its own, so
+   the card needs this indent supplied here; a negative margin here would pull
+   the card outside the content box and pin it to the panel edge.
+
+   The official read card's own 48px line-number gutter is tightened to 36px
+   so a narrow panel keeps more of the code. */
+.dsh-codex-sidechat-toolresult{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:100%;margin-left:22px}
+.dsh-codex-sidechat-toolresult :where(*){--dsl-read-gutter:36px}
+.dsh-codex-sidechat-toolresult-caption{color:var(--dsw-alias-label-caption);font-family:var(--ds-font-family-code);word-break:break-all;font-size:12px;line-height:18px}
+/* Nested tool calls: inset one level under their root. */
+.dsh-codex-sidechat-subcalls{display:flex;flex-direction:column;gap:2px;padding:2px 0 2px 22px;min-width:0}
+/* Web result citations. */
+.dsh-codex-sidechat-sources{display:flex;flex-direction:column;gap:8px;list-style:none;margin:4px 0;padding:0 0 0 22px;min-width:0}
+.dsh-codex-sidechat-source{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dsh-codex-sidechat-source-title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:20px}
+.dsh-codex-sidechat-source-link{color:var(--dsw-alias-state-business-primary);word-break:break-all;font-size:12px;line-height:18px}
+.dsh-codex-sidechat-source-snippet{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}
+/* Injected context / recall rows. */
+.dsh-codex-sidechat-context{flex-direction:column;display:flex}
+/* Durable message images. */
+.dsh-codex-sidechat-images{display:flex;flex-wrap:wrap;gap:6px;padding-top:6px}
+.dsh-codex-sidechat-image{max-width:100%;max-height:220px;border-radius:8px;object-fit:contain}
+.dsh-codex-sidechat-image.is-loading,.dsh-codex-sidechat-image.is-error{display:inline-flex;align-items:center;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-tertiary);padding:8px 10px;font-size:12px;line-height:18px}
+.dsh-codex-sidechat-image.is-error{color:var(--dsw-alias-state-error-primary)}
 @keyframes dsh-codex-sidechat-row-sweep{0%{left:-300px}90%,to{left:100%}}
 @media (prefers-reduced-motion:reduce){
   .dsh-codex-sidechat-think[data-state=running] .dsh-codex-sidechat-think-row:after,
@@ -70,11 +147,20 @@ const CSS = `
 .dsh-codex-sidechat-to-bottom-slot{z-index:8;height:0;pointer-events:none;justify-content:flex-end;display:flex;position:sticky;bottom:16px}
 .dsh-codex-sidechat-to-bottom{border:1px solid var(--dsw-alias-border-l2);width:34px;height:34px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-floating-fill);box-shadow:var(--dsw-shadow-lv2);cursor:pointer;pointer-events:auto;border-radius:100px;justify-content:center;align-items:center;margin-top:-34px;margin-right:8px;padding:0;display:flex}
 .dsh-codex-sidechat-to-bottom:hover{background:var(--dsw-alias-button-floating-hover)}
-.dsh-codex-sidechat-empty{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center}
+/* Empty state: a centered COLUMN. The hero and the context block stack
+   vertically; a row container (the flex default) lays them side-by-side. */
+.dsh-codex-sidechat-empty{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
 .dsh-codex-sidechat-empty-hero{max-width:280px;display:flex;flex-direction:column;align-items:center;gap:8px}
 .dsh-codex-sidechat-empty-icon{color:var(--dsw-alias-label-tertiary);flex:none;margin-bottom:4px}
 .dsh-codex-sidechat-empty-title{margin:0;color:var(--dsw-alias-label-primary);font-size:20px;font-weight:600;line-height:28px}
 .dsh-codex-sidechat-empty-hint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;font-weight:400;line-height:20px}
+/* Inherited-context rows under the empty hero. Centered to match the hero, and
+   capped to the hero's width so the block reads as one grouped unit rather than
+   a full-width band stretching past the centered copy. */
+.dsh-codex-sidechat-empty-context{width:100%;max-width:280px;display:flex;flex-direction:column;gap:4px;text-align:left;min-width:0}
+/* Context badge: whether the main conversation came along. */
+.dsh-codex-sidechat-context-note{display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
+.dsh-codex-sidechat-context-note[data-context=inherited]{color:var(--dsw-alias-label-secondary)}
 
 /* Composer — one-to-one with the main InputBar's uV2eYG_card:
    --dsw-specific-input-major fill, l2-darkmode-thin hairline, 22px radius,

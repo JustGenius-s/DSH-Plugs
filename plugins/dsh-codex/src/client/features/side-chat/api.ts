@@ -7,6 +7,8 @@ import {
   SIDE_CHAT_CLOSE_PATH,
   SIDE_CHAT_LIST_PATH,
   SIDE_CHAT_OPEN_PATH,
+  type SideChatContextState,
+  type SideChatOpenResult,
   type SideChatSummary,
 } from '../../../shared/side-chat'
 
@@ -47,16 +49,25 @@ async function request(path: string, init?: RequestInit): Promise<any> {
 
 /** The plugin's host API surface. */
 export const sideChatApi = {
-  /** Open a blank side chat for a parent session; resolves the new session id. */
-  open(parentSessionId: string): Promise<string> {
+  /**
+   * Open a side chat for a parent session.
+   *
+   * Resolves the new session id plus whether the parent's context came along —
+   * the injected context is not visible in the transcript until the first turn,
+   * so this is the only place the outcome is observable up front.
+   */
+  open(parentSessionId: string): Promise<SideChatOpenResult> {
     return request(SIDE_CHAT_OPEN_PATH, {
       method: 'POST',
       body: JSON.stringify({ parentSessionId }),
-    }).then((payload: { sideSessionId?: unknown }) => {
+    }).then((payload: { sideSessionId?: unknown; context?: unknown }) => {
       if (typeof payload.sideSessionId !== 'string') {
         throw new SideChatApiError(500, 'open response missing sideSessionId')
       }
-      return payload.sideSessionId
+      // `context` is absent on a host built before context inheritance; default
+      // to 'none' so an older host cannot make the panel claim it inherited.
+      const context = payload.context === 'inherited' ? 'inherited' : 'none'
+      return { sideSessionId: payload.sideSessionId, context }
     })
   },
 

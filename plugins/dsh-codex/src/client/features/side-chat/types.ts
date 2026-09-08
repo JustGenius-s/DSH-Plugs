@@ -21,6 +21,10 @@ export interface ToolCallBlock {
   name?: string
   argsRaw?: string
   callId?: string
+  /** Host-computed pending render intent; null = generic JSON card. */
+  callView?: ToolCallView | null
+  /** Child calls owned by this call, in dispatch order. */
+  subCalls?: readonly ToolCallBlock[]
   [key: string]: unknown
 }
 
@@ -30,7 +34,66 @@ export interface ToolResultNode {
   call?: { name?: string; argsRaw?: string; callId?: string }
   content: readonly ContentBlock[]
   error?: { name?: string; code?: string; message?: string }
+  /** Host-computed pending render intent, present when the call is in-window. */
+  callView?: ToolCallView | null
+  /** Host-computed completed render intent; null = generic JSON card. */
+  resultView?: ToolResultView | null
+  /** Child calls owned by this call, in dispatch order. */
+  subCalls?: readonly ToolCallBlock[]
   [key: string]: unknown
+}
+
+/**
+ * Host-computed pending-call render intent, declared structurally.
+ *
+ * The official `ToolCallView` is a tagged union over `card`; only the fields
+ * this feature reads are declared, and the `kind` category is what drives icon
+ * and title selection.
+ */
+export interface ToolCallView {
+  card?: string
+  /** Category for icon/treatment; defaults to `other`. */
+  kind?: string
+  title?: string
+  description?: string
+  command?: string
+  diffs?: readonly { path?: string }[]
+  locations?: readonly { path?: string }[]
+}
+
+/** Host-completed render intent, declared structurally. */
+export interface ToolResultView {
+  card?: string
+  kind?: string
+  title?: string
+  path?: string
+  offset?: number
+  lines?: readonly { number?: number; text?: string }[]
+  totalLines?: number
+  lang?: string
+  /** One file's grouped content matches (`search` card, `shape: 'matches'`). */
+  files?: readonly { path?: string; matches?: readonly unknown[] }[]
+  /** A flat path list (`search` card, `shape: 'paths'`). */
+  paths?: readonly string[]
+  total?: number
+  truncated?: boolean
+  /** Applied file changes (`diff` card): the before/after text the card draws. */
+  diffs?: readonly { path?: string; oldText?: string | null; newText?: string }[]
+  sources?: readonly { url?: string; title?: string; snippet?: string }[]
+  url?: string
+  statusCode?: number
+  output?: string
+  exitCode?: number
+  content?: readonly ContentBlock[]
+}
+
+/** A durable image reference carried by an `image` content block. */
+export interface ImageAttachmentRefLike {
+  attachmentId?: unknown
+  mediaType?: string
+  name?: string
+  width?: number
+  height?: number
 }
 
 /** One node in the rendered conversation tree. */

@@ -19,6 +19,7 @@ import type { ConversationSnapshot } from '@just-genius/dsh-plugin-runtime/clien
 import { sideChatApi } from './api'
 import { SideChatComposer } from './composer'
 import { SideChatTranscript } from './transcript'
+import type { SideChatContextState } from '../../../shared/side-chat'
 
 /** Minimal observable the panel subscribes to (structural subset). */
 interface Observable<T> {
@@ -104,6 +105,9 @@ export function SideChatPanel({
     initialSideSessionId ?? null,
   )
   const [error, setError] = useState<string | null>(null)
+  // Whether the parent's conversation context reached this side chat, as the
+  // host reported it at open time.
+  const [contextState, setContextState] = useState<SideChatContextState | null>(null)
 
   // Persist the owned side session id so a restored tab reconnects to the same
   // live side chat instead of forking a duplicate. Only fires when the id
@@ -126,7 +130,8 @@ export function SideChatPanel({
     let alive = true
     void (async () => {
       try {
-        const id = await sideChatApi.open(parentSessionId)
+        const opened = await sideChatApi.open(parentSessionId)
+        const id = opened.sideSessionId
         if (!alive) {
           // Component unmounted before the fork settled — don't leak the side chat.
           void sideChatApi.close(id).catch(() => {})
@@ -137,6 +142,7 @@ export function SideChatPanel({
           void sideChatApi.close(id).catch(() => {})
           return
         }
+        setContextState(opened.context)
         setSideSessionId(id)
       } catch (cause) {
         if (alive) setError(cause instanceof Error ? cause.message : String(cause))
@@ -227,7 +233,13 @@ export function SideChatPanel({
         </div>
       ) : (
         <div className="dsh-codex-sidechat-conversation">
-          <SideChatTranscript snapshot={snapshot} t={t} />
+          <SideChatTranscript
+            snapshot={snapshot}
+            t={t}
+            sessionId={sideSessionId ?? undefined}
+            api={api as import('./transcript').ImageApi | undefined}
+            contextState={contextState ?? undefined}
+          />
           <SideChatComposer
             session={{
               sessionId: sideSessionId ?? '',

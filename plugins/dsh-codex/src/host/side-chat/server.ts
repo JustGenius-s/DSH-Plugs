@@ -1,14 +1,20 @@
 /**
  * Host half of the dsh-codex side-chat feature.
  *
- * A side chat is a BLANK session that shares the parent's world but NOT its
- * history: it inherits the parent's cwd (so it shares the parent's sandbox),
- * the parent's agent preset composition, and the parent's last logged model
- * selection, but it never loads the parent's conversation log — the side chat
- * starts empty and only contains what is asked inside it. It is an ordinary
- * live agent under the parent's workspace — NOT the active conversation — so
- * the main task keeps running uninterrupted while the side chat answers in its
- * own session.
+ * A side chat shares the parent's world but not its history: it inherits the
+ * parent's cwd (so it shares the parent's sandbox), the parent's agent preset
+ * composition, and the parent's last logged model selection, but it never
+ * loads the parent's conversation log — the side chat's transcript starts empty
+ * and only contains what is asked inside it.
+ *
+ * What it DOES inherit is the parent's CONTEXT: at creation the host builds a
+ * short recall digest of the parent's recent turns and injects it as a
+ * model-facing `plugin` context message, so the side agent answers with the
+ * main task in mind. That digest is context, not history — the side chat's own
+ * log stays a fresh session and nothing is written back to the parent.
+ * It is an ordinary live agent under the parent's workspace — NOT the active
+ * conversation — so the main task keeps running uninterrupted while the side
+ * chat answers in its own session.
  *
  * The host keeps an in-process registry (sideSessionId -> parent) and exposes
  * the lifecycle over `/dsh-codex/side-chat/*` routes plus the `/side` slash
@@ -32,8 +38,10 @@ import {
   SIDE_CHAT_LIST_PATH,
   SIDE_CHAT_OPEN_PATH,
   SIDE_COMMAND,
+  type SideChatContextState,
   type SideChatSummary,
 } from '../../shared/side-chat'
+import { buildParentContextMessage } from './context'
 
 /** Structured failure for the /side-chat routes. */
 class SideChatError extends Error {
@@ -108,6 +116,45 @@ async function composeAgentFor(
   }
 }
 
+/**
+ * Hand the parent's recent conversation to a freshly created side chat.
+ *
+ * Injects the digest as NON-WAKING model-facing context (`agent.inject`, which
+ * targets the next step boundary without waking the driver), so the side chat's
+ * transcript stays blank and no turn opens until the user asks something inside
+ * it. It is claimed at the side agent's first pre-step — the same boundary the
+ * system prompt is assembled at — so the context is present for the very first
+ * request the side agent makes.
+ *
+ * Best-effort by design: a digest failure must never block opening a side chat,
+ * since the parent's context is an enhancement the side chat can work without.
+ *
+ * @param ctx - host context (agent registry lookup).
+ * @param sideSessionId - the side chat that should receive the context.
+ * @param parent - the live parent session to summarize.
+ * @returns whether the context actually reached the side agent.
+ */
+function inheritParentContext(
+  ctx: Context,
+  sideSessionId: SessionId,
+  parent: Session,
+): SideChatContextState {
+  try {
+    const title = ctx.get('sessionTitle')?.get(parent)?.title
+    const message = buildParentContextMessage(parent, title)
+    if (message === undefined) return 'none'
+    const agent = ctx.agents.get(sideSessionId)
+    if (agent === undefined) return 'none'
+    agent.inject(message)
+    return 'inherited'
+  } catch (error: unknown) {
+    ctx.logger.warn(
+      `[dsh-codex] side chat "${sideSessionId}" could not inherit parent context: ${String(error)}`,
+    )
+    return 'none'
+  }
+}
+
 export function createDshCodexSideChatServer(
   ctx: Context,
 ): DshCodexSideChatServer {
@@ -119,10 +166,20 @@ export function createDshCodexSideChatServer(
     parentSessionId: SessionId
     createdAt: number
     handle: unknown
+    context: SideChatContextState
   }>()
 
-  /** Create a side chat for a parent session. */
-  async function openSideChat(parentSessionId: SessionId): Promise<SessionId> {
+  /**
+   * Create a side chat for a parent session.
+   *
+   * Reports the context outcome alongside the new id: the injected context only
+   * reaches the durable log once the first turn claims it, so the client cannot
+   * discover it from the transcript and would otherwise show an empty chat with
+   * no sign of what came along.
+   */
+  async function openSideChat(
+    parentSessionId: SessionId,
+  ): Promise<{ sideSessionId: SessionId; context: SideChatContextState }> {
     const parent = ctx.sessions.get(parentSessionId)
     if (parent === undefined) {
       throw new SideChatError(404, `parent session "${parentSessionId}" not found`)
@@ -146,12 +203,19 @@ export function createDshCodexSideChatServer(
         : { agentOptions: inheritedAgentOptions(parent) }),
       setup: composition.setup,
     })
+
+    // Hand the parent's context to the side agent. Built BEFORE the inject and
+    // from the parent's own log, then queued as non-waking model-facing
+    // context: the side chat's transcript stays blank and no turn opens until
+    // the user asks something inside it.
+    const context = inheritParentContext(ctx, childId, parent)
     registry.set(childId, {
       parentSessionId,
       createdAt: Date.now(),
       handle,
+      context,
     })
-    return childId
+    return { sideSessionId: childId, context }
   }
 
   /** List side chats of one parent, newest first. */
@@ -167,6 +231,7 @@ export function createDshCodexSideChatServer(
         createdAt: record.createdAt,
         running: agent?.status === 'running',
         title: side === undefined ? '' : (sideChatTitleOf(side) ?? ''),
+        context: record.context,
       })
     }
     return rows.sort((a, b) => b.createdAt - a.createdAt)
@@ -250,8 +315,11 @@ export function createDshCodexSideChatServer(
         if (typeof parentSessionId !== 'string') {
           throw new SideChatError(400, 'missing string field: parentSessionId')
         }
-        const sideSessionId = await openSideChat(parentSessionId as SessionId)
-        writeJson(res, 200, { sideSessionId })
+        const opened = await openSideChat(parentSessionId as SessionId)
+        writeJson(res, 200, {
+          sideSessionId: opened.sideSessionId,
+          context: opened.context,
+        })
       } catch (error) {
         handleRouteError(ctx, res, error)
       }
@@ -308,10 +376,12 @@ export function createDshCodexSideChatServer(
     recordInput: false,
     handler: async (invocation: CommandInvocation): Promise<{ kind: 'success'; text: string }> => {
       const parentSessionId = invocation.agent.session.id
-      const sideSessionId = await openSideChat(parentSessionId)
+      const opened = await openSideChat(parentSessionId)
       return {
         kind: 'success',
-        text: `已打开侧边对话（${sideSessionId}），可在侧边面板中继续提问。`,
+        text: opened.context === 'inherited'
+          ? `已打开侧边对话（${opened.sideSessionId}），已带上当前对话上下文，可在侧边面板中继续提问。`
+          : `已打开侧边对话（${opened.sideSessionId}），当前对话暂无可继承的上下文，可在侧边面板中继续提问。`,
       }
     },
   })
