@@ -33,6 +33,7 @@ import type { SessionListState } from '@just-genius/dsh-plugin-runtime/client'
 import type { SnapshotSelectorHook } from '@just-genius/dsh-plugin-runtime/client'
 import { sessionCwd } from '../../host-adapters/sessions'
 import { useSidePanelLayout } from './layout-controller'
+import { SidePanelErrorBoundary } from './error-boundary'
 import type { SidePanelActionsContribution } from './actions'
 
 ensureSidePanelStyles()
@@ -65,6 +66,24 @@ function resolvePanelCwd(
 ): string | undefined {
   if (retainedSessionId === NO_SESSION_PANEL_KEY) return undefined
   return sessionCwd(sessionsById, retainedSessionId)
+}
+
+/**
+ * A readable name for the panel an error card belongs to.
+ *
+ * Only used as a label on the crash card, so it falls back to the raw id
+ * rather than depending on the slot ledger being readable at that moment.
+ */
+function labelOfPanel(panelId: string): string {
+  return PANEL_LABELS[panelId] ?? panelId
+}
+
+/** Panel ids worth naming on an error card (mirrors the tab strip's labels). */
+const PANEL_LABELS: Readonly<Record<string, string>> = {
+  files: '文件',
+  terminal: '终端',
+  'git-graph': '提交图',
+  'side-chat': '侧聊',
 }
 
 /**
@@ -423,18 +442,24 @@ export function SidePanelsShell(props: ShellProps) {
             className="dsh-side-panels-pane"
             hidden={!visible}
           >
-            {renderSlot(
-              'side.panel',
-              {
-                sessionId: ownerSessionId ?? NO_SESSION_PANEL_KEY,
-                cwd: resolvePanelCwd(session.sessionId, sessionsById),
-                instanceKey: instance.key,
-                state: instance.state,
-                // Hidden retained panes stay mounted but must not hold SSE.
-                visible,
-              },
-              { only: instance.panelId },
-            ) as ReactNode}
+            {/* A panel that throws during render would otherwise leave an empty
+                pane with no clue where it failed; the boundary shows the stack
+                in place. Keyed by the panel id so switching tabs remounts it
+                fresh after the underlying problem is fixed. */}
+            <SidePanelErrorBoundary label={labelOfPanel(instance.panelId)}>
+              {renderSlot(
+                'side.panel',
+                {
+                  sessionId: ownerSessionId ?? NO_SESSION_PANEL_KEY,
+                  cwd: resolvePanelCwd(session.sessionId, sessionsById),
+                  instanceKey: instance.key,
+                  state: instance.state,
+                  // Hidden retained panes stay mounted but must not hold SSE.
+                  visible,
+                },
+                { only: instance.panelId },
+              ) as ReactNode}
+            </SidePanelErrorBoundary>
           </div>
         )
       })}

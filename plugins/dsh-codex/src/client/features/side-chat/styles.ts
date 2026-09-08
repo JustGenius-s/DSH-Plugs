@@ -30,7 +30,14 @@ const FIT_SELECTORS = [
 const CSS = `
 ${fitRulesFor(FIT_SELECTORS)}
 .dsh-codex-sidechat{display:flex;flex-direction:column;flex:1;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}
-.dsh-codex-sidechat-error{display:flex;align-items:center;gap:8px;padding:8px 16px;color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none}
+.dsh-codex-sidechat-error{display:flex;align-items:flex-start;gap:8px;padding:8px 16px;color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none}
+/* Message over an optional stack: a long trace must not squeeze the dismiss
+   button out, and the bar stays single-line when there is no stack. */
+.dsh-codex-sidechat-error-body{flex:1;min-width:0}
+.dsh-codex-sidechat-error-message{display:block;overflow-wrap:anywhere}
+.dsh-codex-sidechat-error-stackwrap{margin-top:4px}
+.dsh-codex-sidechat-error-stackwrap summary{cursor:pointer;color:var(--dsw-alias-label-secondary,#b0b0b5);font-size:11px;font-weight:600}
+.dsh-codex-sidechat-error-stack{max-height:200px;margin:4px 0 0;padding:6px 8px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-overlay,rgba(0,0,0,.28));color:var(--dsw-alias-label-secondary,#b0b0b5);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:16px;white-space:pre;tab-size:2}
 .dsh-codex-sidechat-error-dismiss{flex:none;border:none;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:20px;padding:0 4px}
 .dsh-codex-sidechat-empty-panel{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}
 .dsh-codex-sidechat-empty-panel p{margin:0}

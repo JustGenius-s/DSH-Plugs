@@ -19,6 +19,7 @@ import type { ConversationSnapshot } from '@just-genius/dsh-plugin-runtime/clien
 import { sideChatApi } from './api'
 import { SideChatComposer } from './composer'
 import { SideChatTranscript } from './transcript'
+import { describeError, type ErrorDetail } from '../side-panels/error-boundary'
 import type { SideChatContextState } from '../../../shared/side-chat'
 
 /** Minimal observable the panel subscribes to (structural subset). */
@@ -48,6 +49,16 @@ export interface SideChatSessionsFace {
 /** How long to wait for a freshly opened side session to appear in the list. */
 const LIST_POLL_MS = 200
 const LIST_POLL_MAX = 25
+
+/**
+ * Describe a failure for the panel's error bar.
+ *
+ * Reuses the boundary's formatter so an async failure and a render failure
+ * produce the same shape — one place to look, both carrying a stack.
+ */
+function describePanelError(cause: unknown): ErrorDetail {
+  return describeError(cause)
+}
 
 /** Wait until a session id is listed (the host pushes session/created async). */
 function waitForListed(sessions: SideChatSessionsFace, id: string): Promise<void> {
@@ -104,7 +115,9 @@ export function SideChatPanel({
   const [sideSessionId, setSideSessionId] = useState<string | null>(
     initialSideSessionId ?? null,
   )
-  const [error, setError] = useState<string | null>(null)
+  // Carries the stack, not just the message: these panels fail in ways a
+  // one-line message cannot locate.
+  const [error, setError] = useState<ErrorDetail | null>(null)
   // Whether the parent's conversation context reached this side chat, as the
   // host reported it at open time.
   const [contextState, setContextState] = useState<SideChatContextState | null>(null)
@@ -147,7 +160,10 @@ export function SideChatPanel({
         setContextState(opened.context)
         setSideSessionId(id)
       } catch (cause) {
-        if (alive) setError(cause instanceof Error ? cause.message : String(cause))
+        // Keep the stack: a bare message cannot say whether the fork, the list
+        // wait, or the context injection failed, which is exactly what made
+        // these reports unlocatable.
+        if (alive) setError(describePanelError(cause))
       }
     })()
     return () => {
@@ -214,13 +230,21 @@ export function SideChatPanel({
     updateInstanceState(instanceKey, { title: firstUserText })
   }, [firstUserText, instanceKey, updateInstanceState])
 
-  const handleError = useCallback((message: string) => setError(message), [])
+  const handleError = useCallback((message: string) => setError({ message }), [])
 
   return (
     <div className="dsh-codex-sidechat" data-sidechat-root="">
       {error !== null && (
         <div className="dsh-codex-sidechat-error">
-          {error}
+          <div className="dsh-codex-sidechat-error-body">
+            <span className="dsh-codex-sidechat-error-message">{error.message}</span>
+            {error.stack !== undefined && (
+              <details className="dsh-codex-sidechat-error-stackwrap">
+                <summary>调用栈</summary>
+                <pre className="dsh-codex-sidechat-error-stack">{error.stack}</pre>
+              </details>
+            )}
+          </div>
           <button
             type="button"
             className="dsh-codex-sidechat-error-dismiss"

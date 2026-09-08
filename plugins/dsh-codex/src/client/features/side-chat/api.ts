@@ -14,15 +14,35 @@ import {
 
 export type { SideChatSummary }
 
-/** Structured request failure surfaced to the panel. */
+/**
+ * Structured request failure surfaced to the panel.
+ *
+ * Carries the Host's own stack when it sent one: a server-side throw is
+ * otherwise unlocatable from the browser, and the message alone does not say
+ * which call in the route handler failed.
+ */
 export class SideChatApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The Host-reported stack, verbatim, when the response carried one. */
+    readonly hostStack?: string,
   ) {
     super(message)
     this.name = 'SideChatApiError'
+    // Keep the Host stack reachable from the client stack too, so a report
+    // pasted from the panel shows both sides of the boundary.
+    if (hostStack !== undefined && hostStack !== '') {
+      this.stack = `${this.stack ?? ''}\n--- host ---\n${hostStack}`
+    }
   }
+}
+
+/** Pull the Host-reported stack out of one error payload, if present. */
+export function hostStackOf(payload: unknown): string | undefined {
+  if (payload === null || typeof payload !== 'object') return undefined
+  const stack = (payload as { stack?: unknown }).stack
+  return typeof stack === 'string' && stack !== '' ? stack : undefined
 }
 
 async function request(path: string, init?: RequestInit): Promise<any> {
@@ -42,6 +62,7 @@ async function request(path: string, init?: RequestInit): Promise<any> {
     throw new SideChatApiError(
       response.status,
       typeof message === 'string' ? message : `request to ${path} failed`,
+      hostStackOf(payload),
     )
   }
   return payload

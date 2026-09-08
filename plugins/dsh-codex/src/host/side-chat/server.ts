@@ -445,14 +445,28 @@ export function createDshCodexSideChatServer(
   }
 }
 
+/**
+ * Report one route failure to the client.
+ *
+ * The stack goes over the wire deliberately: these routes are the only place a
+ * Host-side failure becomes visible, and a bare message cannot say which call
+ * in the handler threw. The Host log keeps its own copy.
+ */
 function handleRouteError(ctx: Context, res: ServerResponse, error: unknown): void {
+  const stack = error instanceof Error ? error.stack : undefined
   if (error instanceof SideChatError) {
-    writeJson(res, error.status, { error: error.message })
+    writeJson(res, error.status, {
+      error: error.message,
+      ...(stack === undefined ? {} : { stack }),
+    })
     return
   }
   const message = error instanceof Error ? error.message : String(error)
   ctx.logger.warn(`[dsh-codex] side-chat route error: ${message}`)
-  writeJson(res, 500, { error: message })
+  writeJson(res, 500, {
+    error: message,
+    ...(stack === undefined ? {} : { stack }),
+  })
 }
 
 function writeJson(res: ServerResponse, status: number, payload: unknown): void {
