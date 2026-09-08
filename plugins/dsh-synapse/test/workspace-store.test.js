@@ -16,8 +16,8 @@ test('persists a workspace, a DSH-linked thread, and a message', async () => {
   const saved = await new WorkspaceStore(dataFile).get(workspace.id)
   assert.equal(saved.title, '调研 DSH 插件')
   assert.equal(saved.threads[0].dshSessionId, 'session-1')
-  assert.equal(saved.threads[0].messages[0].text, '确定使用已有 Web Server')
-  assert.match(await readFile(dataFile, 'utf8'), /"version": ?4/)
+  assert.equal(saved.threads[0].turns[0].question, '确定使用已有 Web Server')
+  assert.match(await readFile(dataFile, 'utf8'), /"version": ?5/)
 })
 
 test('projects committed DSH events once, folds tool process into the assistant card, and keeps fork lineage', async () => {
@@ -42,13 +42,14 @@ test('projects committed DSH events once, folds tool process into the assistant 
   const parentThread = graph.threads.find(thread => thread.dshSessionId === 'session-parent')
   const childThread = graph.threads.find(thread => thread.dshSessionId === 'session-child')
   assert.equal(workspace.title, 'DSH 任务')
-  assert.equal(parentThread.messages.length, 2)
-  assert.equal(parentThread.messages[0].kind, 'user')
-  assert.equal(parentThread.messages[1].kind, 'assistant')
-  assert.equal(parentThread.messages[1].process.length, 1)
-  assert.equal(parentThread.messages[1].process[0].name, 'bash')
-  assert.equal(parentThread.messages[1].process[0].result, 'ok')
-  assert.equal(parentThread.messages[1].process[0].error, null)
+  // v5 stores one card per turn, not a copy of the message log.
+  assert.equal(parentThread.turns.length, 1)
+  assert.equal(parentThread.turns[0].question, '分析登录异常')
+  assert.equal(parentThread.turns[0].answer, '我来检查。')
+  assert.equal(parentThread.turns[0].answerSeq, 1)
+  // The tool call and its result pair by callId into one counted invocation.
+  assert.equal(parentThread.turns[0].processCount, 1)
+  assert.deepEqual(parentThread.turns[0].processIds, ['c1'])
   assert.equal(childThread.parentId, parentThread.id)
 })
 
@@ -65,14 +66,30 @@ test('projects a batch of session events in a single write', async () => {
     ],
   }
   await store.projectEvents(session, session.events)
+  await store.flush()
   const [workspace] = await store.list()
   const graph = await store.get(workspace.id)
   const thread = graph.threads[0]
-  assert.equal(thread.messages.length, 2)
-  assert.equal(thread.messages[0].text, '批量问题')
-  assert.equal(thread.messages[1].process.length, 1)
-  assert.equal(thread.messages[1].process[0].result, 'ok')
-  assert.match(await readFile(join(directory, 'state.json'), 'utf8'), /"version": ?4/)
+  assert.equal(thread.turns.length, 1)
+  assert.equal(thread.turns[0].question, '批量问题')
+  assert.equal(thread.turns[0].answer, '批量回答')
+  assert.equal(thread.turns[0].processCount, 1)
+  assert.deepEqual(thread.turns[0].processIds, ['c1'])
+})
+
+test('upgrades a newly written v4 file to v5 on the next load', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-upgrade-'))
+  const dataFile = join(directory, 'state.json')
+  const store = new WorkspaceStore(dataFile)
+  await store.projectEvents(
+    { id: 's1', header: { meta: { cwd: 'C:\\work\\x' } }, firstLiveSeq: 0 },
+    [{ type: 'user/message', seq: 1, time: 1, data: { content: [{ type: 'text', text: '问' }] } }],
+  )
+  await store.flush()
+  // A fresh file is stamped with the current version, so the v5 rewrite is
+  // applied on the next load rather than during the very first save.
+  await new WorkspaceStore(dataFile).ready
+  assert.match(await readFile(dataFile, 'utf8'), /"version": ?5/)
 })
 
 test('retains a tool failure and exposes a failed turn without assistant text', async () => {
@@ -90,13 +107,12 @@ test('retains a tool failure and exposes a failed turn without assistant text', 
 
   const [workspace] = await store.list()
   const graph = await store.get(workspace.id)
-  const [user, failure] = graph.threads[0].messages
-  assert.equal(user.kind, 'user')
-  assert.equal(failure.kind, 'error')
-  assert.equal(failure.text, 'QuotaExceeded: INSUFFICIENT_BALANCE: 余额不足')
-  assert.equal(failure.process.length, 1)
-  assert.equal(failure.process[0].error, 'QuotaExceeded: INSUFFICIENT_BALANCE: 余额不足')
-  assert.equal(graph.threads[0].pendingProcess.length, 0)
+  const turn = graph.threads[0].turns[0]
+  assert.equal(turn.question, '搜索竞品')
+  assert.equal(turn.error, 'QuotaExceeded: INSUFFICIENT_BALANCE: 余额不足')
+  assert.equal(turn.answer, null)
+  assert.equal(turn.processCount, 1)
+  assert.deepEqual(turn.processIds, ['search-1'])
 })
 
 test('migrates v3 tool cards into the assistant process records', async () => {
@@ -125,14 +141,13 @@ test('migrates v3 tool cards into the assistant process records', async () => {
   const store = new WorkspaceStore(dataFile)
   const graph = await store.get('w-1')
   const thread = graph.threads[0]
-  assert.equal(thread.messages.length, 2)
-  assert.equal(thread.messages[1].process.length, 2)
-  assert.equal(thread.messages[1].process[0].name, 'read')
-  assert.equal(thread.messages[1].process[0].arguments, '{"file_path":"a.js"}')
-  assert.equal(thread.messages[1].process[0].result, 'file content')
-  assert.equal(thread.messages[1].process[1].name, 'bash')
-  assert.equal(thread.messages[1].process[1].result, null)
-  assert.match(await readFile(dataFile, 'utf8'), /"version": ?4/)
+  // The v3 tool cards fold into their assistant turn as a tool count.
+  assert.equal(thread.turns.length, 1)
+  assert.equal(thread.turns[0].question, '帮我检查')
+  assert.equal(thread.turns[0].answer, '好的。')
+  assert.equal(thread.turns[0].processCount, 2)
+  assert.equal(thread.messages, undefined)
+  assert.match(await readFile(dataFile, 'utf8'), /"version": ?5/)
 })
 
 test('does not persist the DSH runtime context as a user conversation turn', async () => {
@@ -149,7 +164,8 @@ test('does not persist the DSH runtime context as a user conversation turn', asy
 
   const [workspace] = await store.list()
   const graph = await store.get(workspace.id)
-  assert.deepEqual(graph.threads[0].messages.map(message => message.text), ['你好', '你好，我是助手。'])
+  assert.deepEqual(graph.threads[0].turns.map(turn => turn.question), ['你好'])
+  assert.equal(graph.threads[0].turns[0].answer, '你好，我是助手。')
 })
 
 test('merges a browser fork callback with an already projected DSH fork', async () => {
@@ -237,11 +253,11 @@ test('archived canvas nodes stay hidden during a later DSH session sync', async 
   assert.equal((await store.list()).length, 0)
 })
 
-test('does not rewrite an up-to-date v4 file on load', async () => {
+test('does not rewrite an up-to-date v5 file on load', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-idempotent-'))
   const dataFile = join(directory, 'state.json')
   const state = {
-    version: 4,
+    version: 5,
     hiddenSessionIds: [],
     workspaces: [{
       id: 'w-1', kind: 'dsh', cwd: 'C:\\work\\x', title: 'x',
@@ -250,7 +266,8 @@ test('does not rewrite an up-to-date v4 file on load', async () => {
         id: 't-1', title: 's', parentId: null, dshSessionId: 's-1', dshSessionTitle: null,
         color: '#0f766e', position: { x: 86, y: 82 }, sourceSeedLength: null,
         createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        messages: [{ id: 'm-1', kind: 'assistant', text: 'hi', sourceSeq: 1, at: '2026-01-01T00:00:00.000Z', process: [] }],
+        turns: [{ seq: 1, at: '2026-01-01T00:00:00.000Z', question: 'q', answer: 'hi', answerSeq: 2, error: null, processCount: 0, processIds: [] }],
+        processIds: [],
       }],
     }],
   }
@@ -279,10 +296,12 @@ test('coalesces deferred projection saves into one write', async () => {
   const after = (await stat(dataFile)).mtimeMs
   assert.notEqual(after, before)
   const parsed = JSON.parse(await readFile(dataFile, 'utf8'))
-  assert.equal(parsed.workspaces[0].threads[0].messages.length, 2)
+  // Both deferred projections coalesce into one turn card in one write.
+  assert.equal(parsed.workspaces[0].threads[0].turns.length, 1)
+  assert.equal(parsed.workspaces[0].threads[0].turns[0].answer, 'b')
 })
 
-test('truncates over-long projections with a detail-view marker', async () => {
+test('caps long card text instead of storing the whole reply', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-truncate-'))
   const store = new WorkspaceStore(join(directory, 'state.json'))
   const session = { id: 's1', header: { meta: { cwd: 'C:\\work\\x' } }, firstLiveSeq: 0 }
@@ -293,7 +312,85 @@ test('truncates over-long projections with a detail-view marker', async () => {
   await store.flush()
   const [workspace] = await store.list()
   const graph = await store.get(workspace.id)
-  const assistant = graph.threads[0].messages.find(message => message.kind === 'assistant')
-  assert.equal(assistant.text.length, 8_000 + '\n——…（详情查看全文）'.length)
-  assert.ok(assistant.text.endsWith('——…（详情查看全文）'))
+  const turn = graph.threads[0].turns[0]
+  // The card keeps a display-sized prefix; the rest stays in the DSH log and
+  // is re-read when the detail view opens.
+  assert.equal(turn.answer.length, 2_400 + '…'.length)
+  assert.ok(turn.answer.endsWith('…'))
+  assert.equal(turn.answerSeq, 2)
+})
+
+test('v5 migration drops the message log and keeps only card summaries', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-v5-'))
+  const dataFile = join(directory, 'state.json')
+  await writeFile(dataFile, JSON.stringify({
+    version: 4,
+    hiddenSessionIds: [],
+    workspaces: [{
+      id: 'w-1', kind: 'dsh', cwd: 'C:\\work\\x', title: 'x',
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      threads: [{
+        id: 't-1', title: '会话', parentId: null, dshSessionId: 's-1', dshSessionTitle: null,
+        color: '#0f766e', position: { x: 86, y: 82 }, sourceSeedLength: null,
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+        messages: [
+          { id: 'm-1', kind: 'user', text: '第一问', sourceSeq: 1, at: '2026-01-01T00:00:00.000Z' },
+          { id: 'm-2', kind: 'assistant', text: '第一答', sourceSeq: 2, at: '2026-01-01T00:00:00.100Z', process: [{ callId: 'c1', name: 'bash' }] },
+          // A mid-turn assistant step must not become a second card.
+          { id: 'm-3', kind: 'assistant', text: '第二答', sourceSeq: 3, at: '2026-01-01T00:00:00.200Z', process: [] },
+          { id: 'm-4', kind: 'user', text: '第二问', sourceSeq: 4, at: '2026-01-01T00:00:01.000Z' },
+        ],
+      }],
+    }],
+  }))
+  const store = new WorkspaceStore(dataFile)
+  const graph = await store.get('w-1')
+  const thread = graph.threads[0]
+  assert.equal(thread.messages, undefined)
+  assert.equal(thread.turns.length, 2)
+  assert.deepEqual(thread.turns.map(turn => turn.question), ['第一问', '第二问'])
+  // The turn's final assistant step wins as the card answer.
+  assert.equal(thread.turns[0].answer, '第二答')
+  assert.equal(thread.turns[0].answerSeq, 3)
+  assert.equal(thread.turns[0].processCount, 1)
+  assert.deepEqual(thread.turns[0].processIds, ['c1'])
+  assert.equal(thread.turns[1].answer, null)
+  assert.match(await readFile(dataFile, 'utf8'), /"version": ?5/)
+})
+
+test('v5 does not store tool output text in the canvas metadata', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-v5-tools-'))
+  const dataFile = join(directory, 'state.json')
+  const store = new WorkspaceStore(dataFile)
+  await store.projectSession({
+    id: 's-big', header: { meta: { cwd: 'C:\\work\\big' } }, firstLiveSeq: 0,
+    events: [
+      { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: '跑测试' }] } },
+      { type: 'assistant/message', seq: 1, time: 2, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '好' }] } } },
+      { type: 'tool/call', seq: 2, time: 3, data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: '{"cmd":"pnpm test"}' } },
+      // 50KB of tool output must never reach workspaces.json.
+      { type: 'tool/result', seq: 3, time: 4, data: { turn: 1, step: 1, message: { source: { kind: 'tool', callId: 'c1' }, content: [{ type: 'text', text: 'x'.repeat(50_000) }] } } },
+    ],
+  })
+  await store.flush()
+  const saved = await readFile(dataFile, 'utf8')
+  assert.ok(!saved.includes('x'.repeat(1_000)), 'tool output text must not be persisted')
+  assert.equal((await store.get((await store.list())[0].id)).threads[0].turns[0].processCount, 1)
+})
+
+test('a duplicate tool event is counted once', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-v5-dedupe-'))
+  const store = new WorkspaceStore(join(directory, 'state.json'))
+  const session = { id: 's1', header: { meta: { cwd: 'C:\\work\\x' } }, firstLiveSeq: 0 }
+  const call = { type: 'tool/call', seq: 2, time: 3, data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: '{}' } }
+  await store.projectEvents(session, [
+    { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: 'q' }] } },
+    { type: 'assistant/message', seq: 1, time: 2, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'a' }] } } },
+    call,
+    { ...call, seq: 4, time: 5 },
+  ])
+  await store.flush()
+  const [workspace] = await store.list()
+  const graph = await store.get(workspace.id)
+  assert.equal(graph.threads[0].turns[0].processCount, 1)
 })

@@ -6,18 +6,29 @@ window.__ModuleLoader__.load({
     let primitives = null
     try { primitives = require('@deepseek-ai/dsh-client-ui-primitives') } catch { primitives = null }
     const module = { exports: {} }
+    // Card state-machine inputs. DSH already carries every signal on its
+    // session summary: `running` (the agent is working), `pendingInteraction`
+    // (blocked on a human — approval / plan-review / question, which is the
+    // sidebar's amber dot), and `completed` (finished while not selected, the
+    // green done reminder).
+    const statusOf = session => ({
+      running: session.running === true,
+      pendingInteraction: typeof session.pendingInteraction === 'string' ? session.pendingInteraction : null,
+      completed: session.completed === true,
+      blank: session.blank === true,
+    })
     const currentSession = ctx => {
       const snapshot = ctx.sessions.list.getSnapshot()
       const id = snapshot.current
       if (id === undefined) return null
       const session = snapshot.byId[id]
-      return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null }
+      return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, ...statusOf(session) }
     }
     const sessionSnapshot = ctx => {
       const snapshot = ctx.sessions.list.getSnapshot()
       return snapshot.ids.map(id => {
         const session = snapshot.byId[id]
-        return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, blank: session.blank }
+        return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, blank: session.blank, ...statusOf(session) }
       }).filter(Boolean)
     }
     const rootIdsOf = (sessions, ids) => ids.filter(id => sessions.byId[id]?.parentId == null)
@@ -868,6 +879,10 @@ window.__ModuleLoader__.load({
         if (frame !== null) {
           send('synapse:workspaces', { workspaces: workspaceSnapshot(ctx) })
           send('synapse:current-session', { session: currentSession(ctx) })
+          // Card state machine: the host's own running / needs-input / done
+          // signals per session. Sent on every list change so a card reflects
+          // approvals, questions and completions as they happen.
+          send('synapse:session-status', { statuses: sessionSnapshot(ctx) })
         }
       }
       const switchToDialogTab = () => {

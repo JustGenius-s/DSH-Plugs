@@ -118,13 +118,15 @@ test('opens the clicked card in a tool-aware detail inspector', async () => {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
   const styles = await readFile(new URL('../styles.css', import.meta.url), 'utf8')
   const cardClick = source.slice(source.indexOf('if (!(button instanceof HTMLElement)) {'), source.indexOf("if (button.dataset.action === 'close')"))
-  const inspector = source.slice(source.indexOf('function messagesForCard'), source.indexOf('function renderThread'))
+  const inspector = source.slice(source.indexOf('function renderCardInspector'), source.indexOf('function renderThread'))
 
   assert.match(source, /inspectorCardId: null/)
   assert.match(source, /function openCardInspector/)
   assert.match(cardClick, /openCardInspector\(cardId\)/)
-  assert.match(inspector, /function messagesForCard/)
-  assert.match(inspector, /function inspectorProcessEntries/)
+  // v5: the inspector reads the full turn back from DSH instead of keeping a
+  // local message copy, and renders every tool record it gets back.
+  assert.match(inspector, /historyForCard\(thread, card\.id\)/)
+  assert.match(inspector, /detail\?\.process/)
   assert.match(inspector, /processRecords\(process/)
   assert.doesNotMatch(inspector, /threadMessage\(thread, message\)/)
   assert.match(inspector, /class="card-inspector/)
@@ -169,15 +171,17 @@ test('renders markdown tables and allows higher canvas zoom', async () => {
   assert.doesNotMatch(source, /Math\.min\(4, Math\.max\(\.6,/)
 })
 
-test('renders the refactored detail view with role-based messages', async () => {
+test('renders the detail view from turns read back from DSH', async () => {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
   const thread = source.slice(source.indexOf('function renderThread'), source.indexOf('function render()'))
-  const message = source.slice(source.indexOf('function threadMessage'), source.indexOf('function processRecords'))
 
   assert.match(thread, /detail-scroll/)
   assert.match(thread, /detail-head/)
-  assert.match(message, /message-avatar/)
-  assert.match(message, /message-body/)
+  // v5: one section per stored turn, each filled from its on-demand detail.
+  assert.match(thread, /turnsFor\(thread\)/)
+  assert.match(thread, /historyForCard\(thread, card\.id\)/)
+  assert.match(thread, /detail-turn/)
+  assert.doesNotMatch(source, /function threadMessage\(/)
 })
 
 test('persists dragged card positions and can focus the current session', async () => {
@@ -682,7 +686,10 @@ test('renders a follow-up plus on final cards and a branch control on any settle
   assert.match(card, /aria-expanded=/)
   assert.match(card, /M3\.5 8h9/)
   assert.match(card, /M8 3\.5v9/)
-  assert.match(card, /const branchButton = !Number\.isInteger\(card\.answer\?\.sourceSeq\) \? ''/)
+  // v5: the card's branch control reads the turn's settled answer seq, which
+  // the store now records directly, falling back to the assistant message seq.
+  assert.match(card, /const branchSeq = Number\.isSafeInteger\(card\.answerSeq\) \? card\.answerSeq/)
+  assert.match(card, /const branchButton = branchSeq === null \? ''/)
   assert.match(card, /class="graph-branch-button"/)
   assert.match(card, /aria-label="在新对话中分支"/)
   assert.match(card, /M13\.0762 1\.37207C14\.0846/)
@@ -702,7 +709,7 @@ test('positions the latest plus at the connector and the branch icon below the f
 
 test('persists graph collapse choices and renders connectors from visible cards only', async () => {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
-  const canvas = source.slice(source.indexOf('function renderCanvas'), source.indexOf('function isProcessMessage'))
+  const canvas = source.slice(source.indexOf('function renderCanvas'), source.indexOf('function processRecords'))
   const toggle = source.slice(source.indexOf("button.dataset.action === 'toggle-card-children'"), source.indexOf("button.dataset.action === 'open-continue'"))
 
   assert.match(source, /COLLAPSED_CARDS_KEY/)
@@ -748,7 +755,7 @@ test('reveals hidden ancestor paths when a conversation becomes current', async 
 test('scopes the canvas to the current DSH session family', async () => {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
   const scope = source.slice(source.indexOf('function threadFamily'), source.indexOf('function workspaceChoices'))
-  const canvas = source.slice(source.indexOf('function renderCanvas'), source.indexOf('function isProcessMessage'))
+  const canvas = source.slice(source.indexOf('function renderCanvas'), source.indexOf('function processRecords'))
 
   assert.match(scope, /function threadFamily/)
   assert.match(scope, /threadFamily\(threads, current\)/)
@@ -777,14 +784,20 @@ test('scopes the canvas to the current DSH session family', async () => {
   assert.deepEqual(exports.threadFamily(threads, undefined), [])
 })
 
-test('keeps a just-forked child on the map after the host switches session', async () => {
+test('keeps a just-forked child on the map without switching the host session', async () => {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
   const submit = source.slice(source.indexOf('async function submitDraft'), source.indexOf('function threadsById'))
   const load = source.slice(source.indexOf('async function threadsForDshWorkspace'), source.indexOf('async function openDshWorkspace'))
 
-  assert.match(submit, /state\.mapCardSessionSwitches\.add\(session\.id\)/)
-  assert.match(submit, /post\('synapse:activate-session', \{ sessionId: result\.thread\.dshSessionId \}\)/)
   assert.match(load, /loadedIds\.has\(thread\.parentId\)/)
+  // The fork must NOT be activated: making it DSH's current session makes the
+  // host leave the map for the conversation view, which is exactly what the
+  // user is trying to avoid when branching from a card.
+  assert.doesNotMatch(submit, /post\('synapse:activate-session', \{ sessionId: result\.thread\.dshSessionId \}\)/)
+  // The branch still runs and streams: live replies are subscribed per listed
+  // session in the host, so the map receives them without a session switch.
+  assert.match(submit, /dshRpc\('synapse:send-message', \{ sessionId: result\.thread\.dshSessionId, text \}\)/)
+  assert.match(source, /syncLiveSessions/)
 })
 
 test('re-centers the camera when the current session replaces the canvas', async () => {

@@ -53,10 +53,89 @@ const CAMERA_INSET_Y = 56
 // into the DOM; the margin pre-mounts cards just before they scroll into view
 // so panning never flashes empty space.
 const VIEWPORT_MARGIN = 1400
+
+/**
+ * Card states, in the order the resolver checks them.
+ *
+ * - `needs-input` — the session is BLOCKED on a human (an approval, a plan
+ *   review, or a question). Nothing will progress until the user answers in the
+ *   conversation, so this outranks everything else.
+ * - `running` — the agent is actively working; the card streams its answer.
+ * - `failed` — the turn ended in an error and never produced an answer.
+ * - `done` — the turn has an answer and the session is idle.
+ * - `waiting` — no answer yet and nothing is running (a fresh card, or a
+ *   session the plugin has not heard from).
+ */
+const CARD_STATES = ['needs-input', 'running', 'failed', 'done', 'waiting']
+const CARD_STATE_LABELS = {
+  'needs-input': '待处理',
+  running: '进行中',
+  failed: '失败',
+  done: '已完成',
+  waiting: '等待中',
+}
+// `pendingInteraction` kinds DSH reports; each maps to 待处理 with its own hint.
+const PENDING_INTERACTION_HINTS = {
+  approval: '需要审批',
+  'plan-review': '需要确认计划',
+  question: '需要回答问题',
+}
+
+/**
+ * Resolve one card's state.
+ *
+ * `sessionStatus` is the live status DSH reports for the card's session, or
+ * `null` when the session is no longer listed (archived, or a cold session the
+ * host has not loaded). The card's own fields cover those cases: a stored error
+ * marks a failed turn and a stored answer marks a finished one.
+ */
+function cardState(card, sessionStatus) {
+  if (sessionStatus?.pendingInteraction != null) return 'needs-input'
+  if (card?.answer?.pending === true || sessionStatus?.running === true) return 'running'
+  if (card?.error != null) return 'failed'
+  if (card?.answer != null) return 'done'
+  return 'waiting'
+}
+
+function cardStateLabel(card, sessionStatus) {
+  const resolved = cardState(card, sessionStatus)
+  if (resolved !== 'needs-input') return CARD_STATE_LABELS[resolved]
+  const kind = sessionStatus?.pendingInteraction
+  return PENDING_INTERACTION_HINTS[kind] ?? CARD_STATE_LABELS['needs-input']
+}
+
+/**
+ * The live status DSH reports for a thread's session, or `null` when the host
+ * no longer lists it. `state.sessionStatusById` is rebuilt on every session
+ * sync, so a card reflects the host's own running/waiting/done signals.
+ */
+function sessionStatusFor(thread) {
+  if (thread?.dshSessionId === null || thread?.dshSessionId === undefined) return null
+  return state.sessionStatusById?.get(thread.dshSessionId) ?? null
+}
+
+/**
+ * A fingerprint of the states the cards actually render, so a host list change
+ * that leaves every card's state alone costs no redraw.
+ */
+function statusFingerprint(statusById) {
+  const parts = []
+  for (const [id, status] of statusById) {
+    parts.push(`${id}:${status?.running === true ? 1 : 0}${status?.pendingInteraction ?? ''}${status?.completed === true ? 1 : 0}`)
+  }
+  return parts.sort().join('|')
+}
+
+/** The state badge markup for one card, or '' when the state needs no badge. */
+function cardStateBadge(card, sessionStatus) {
+  const resolved = cardState(card, sessionStatus)
+  return `<span class="card-state card-state-${resolved}" data-card-state="${resolved}" title="${escapeHtml(cardStateLabel(card, sessionStatus))}">${escapeHtml(cardStateLabel(card, sessionStatus))}</span>`
+}
+
 const state = {
   summaries: [], workspace: null, activeId: null, selectedCardId: null, mode: 'canvas', zoom: 1, currentDsh: null, sidebarCollapsed: false,
   dshWorkspaces: [], selectedDshWorkspaceId: null,
-  historyBySession: new Map(), historyRequests: new Map(), pendingReplies: new Map(), pendingRpc: new Map(), liveReplies: new Map(),
+  historyBySession: new Map(), historyRequests: new Map(), pendingReplies: new Map(), pendingRpc: new Map(), liveReplies: new Map(), sessionStatusById: new Map(),
   draft: null, error: '', workspaceLoad: 0, branchAnchors: new Map(savedBranchAnchors), cardPositions: new Map(savedCardPositions), collapsedCardIds: new Set(savedCollapsedCards), quickPhrases: savedQuickPhrases, quickPhraseEditorOpen: false,
   dragging: false, canvasGesture: false, canvasRefreshAfter: 0, canvasViewInitialized: false, canvasCamera: { x: 0, y: 0 }, mapCardSessionSwitches: new Set(),
   expandedMessageIds: new Set(),
@@ -111,6 +190,9 @@ async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { 'content-type': 'application/json', ...(options.headers ?? {}) } })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error ?? '请求失败')
+  // Any mutation invalidates the cached workspace graphs: the next read must
+  // observe what this write just changed.
+  if (options.method !== undefined && options.method !== 'GET') invalidateGraphCache()
   return body
 }
 
@@ -267,7 +349,51 @@ function messagesFromEvents(events) {
   })
 }
 
-async function loadThreadHistory() {}
+/**
+ * Load the full text of one turn on demand.
+ *
+ * v5 keeps only a display-sized summary on the card, so opening the detail
+ * view re-reads the real question, every assistant step, and each tool call
+ * (arguments and output) from the DSH session. Results are cached per turn so
+ * reopening a card is instant and re-renders do not refetch.
+ */
+async function loadThreadHistory(thread, cardId = undefined) {
+  if (thread?.dshSessionId === null || thread?.dshSessionId === undefined) return
+  const cards = cardId === undefined ? turnsFor(thread).map((turn, index) => ({ id: `${thread.id}:turn:${turn.seq ?? `i${index}`}`, turn })) : null
+  const targets = cards ?? [{ id: cardId, turn: turnForCardId(thread, cardId) }]
+  for (const target of targets) {
+    if (target.turn === null || target.turn === undefined) continue
+    if (state.historyBySession.has(`${thread.dshSessionId}:${target.id}`)) continue
+    if (state.historyRequests.has(target.id)) continue
+    // A pending turn exists only in the browser; there is nothing to read yet.
+    if (target.turn.pending === true) continue
+    if (!Number.isSafeInteger(target.turn.seq)) continue
+    const request = (async () => {
+      try {
+        const body = await api('/synapse/api/turn-detail', { method: 'POST', body: JSON.stringify({ sessionId: thread.dshSessionId, seq: target.turn.seq }) })
+        state.historyBySession.set(`${thread.dshSessionId}:${target.id}`, body.detail ?? null)
+      } catch (error) {
+        // A session that left the store (archived, or a DSH restart) simply
+        // has no detail to read; the card summary still renders.
+        state.historyBySession.set(`${thread.dshSessionId}:${target.id}`, null)
+      } finally {
+        state.historyRequests.delete(target.id)
+      }
+    })()
+    state.historyRequests.set(target.id, request)
+    await request
+  }
+}
+
+function turnForCardId(thread, cardId) {
+  if (typeof cardId !== 'string') return null
+  const index = turnsFor(thread).findIndex((turn, turnIndex) => `${thread.id}:turn:${turn.seq ?? `i${turnIndex}`}` === cardId)
+  return index === -1 ? null : turnsFor(thread)[index]
+}
+
+function historyForCard(thread, cardId) {
+  return state.historyBySession.get(`${thread.dshSessionId}:${cardId}`) ?? null
+}
 
 function canReplaceView() {
   return state.draft === null && !state.dragging && !state.canvasGesture && Date.now() >= state.canvasRefreshAfter && !document.activeElement?.matches('textarea')
@@ -334,11 +460,37 @@ function workspaceChoices() {
   return state.summaries.map(workspace => ({ id: workspace.id, title: workspace.title, path: workspace.cwd, sessionIds: [], source: 'projection' }))
 }
 
+/**
+ * Fetch one workspace's graph, caching in-flight and recent results.
+ *
+ * The 1s poll calls this for every workspace. Caching the in-flight promise
+ * collapses the concurrent calls of one tick into a single request, and the
+ * settled value is kept briefly so a tick that repeats before anything changed
+ * costs no request at all.
+ */
+const GRAPH_CACHE_MS = 1_500
+const graphCache = new Map()
+function invalidateGraphCache() {
+  graphCache.clear()
+}
+function workspaceGraph(workspaceId) {
+  const cached = graphCache.get(workspaceId)
+  if (cached !== undefined && Date.now() - cached.at < GRAPH_CACHE_MS) return cached.value
+  const value = api(`/synapse/api/workspaces/${workspaceId}`).then(body => body.workspace)
+  graphCache.set(workspaceId, { at: Date.now(), value })
+  // A failed fetch must not be cached: the next tick retries it.
+  value.catch(() => { if (graphCache.get(workspaceId)?.value === value) graphCache.delete(workspaceId) })
+  return value
+}
+
 async function threadsForDshWorkspace(workspace) {
   if (workspace.sessionIds.length === 0) return []
   const requested = new Set(workspace.sessionIds)
-  const projections = await Promise.all(state.summaries.map(summary => api(`/synapse/api/workspaces/${summary.id}`)))
-  const all = projections.flatMap(projection => projection.workspace.threads)
+  // Every workspace's full graph used to be fetched to find the sessions of
+  // one workspace. v5 payloads are small, but the 1s poll still re-fetched all
+  // of them, so the per-workspace graph is cached for the duration of a tick.
+  const projections = await Promise.all(state.summaries.map(summary => workspaceGraph(summary.id)))
+  const all = projections.flatMap(projection => projection.threads)
   const loaded = []
   const loadedIds = new Set()
   for (const thread of all) {
@@ -386,11 +538,24 @@ async function openCurrentWorkspace({ preserveCanvasCamera = false } = {}) {
   return openDshWorkspace(workspace.id, { preserveCanvasCamera })
 }
 
+/**
+ * A content fingerprint of the workspace summaries.
+ *
+ * The 1s poll used to compare `JSON.stringify(summaries)`, so any session
+ * whose `updatedAt` moved (every live turn) looked like a change and triggered
+ * a full re-fetch of every workspace. This fingerprint covers only the fields
+ * that actually alter what the map shows, so an in-progress turn no longer
+ * forces a reload on every tick.
+ */
+function summariesFingerprint(summaries) {
+  return summaries.map(summary => `${summary.id}:${summary.title}:${summary.cwd ?? ''}:${summary.threadCount}`).join('|')
+}
+
 async function refreshSummaries({ renderAfter = true } = {}) {
-  const before = JSON.stringify(state.summaries)
+  const before = summariesFingerprint(state.summaries)
   const body = await api('/synapse/api/workspaces')
   state.summaries = body.workspaces
-  const changed = before !== JSON.stringify(state.summaries)
+  const changed = before !== summariesFingerprint(state.summaries)
   const current = state.workspace?.id
   if (state.selectedDshWorkspaceId === null && current !== null && !state.summaries.some(item => item.id === current)) state.workspace = null
   const selected = selectedDshWorkspace()
@@ -510,7 +675,12 @@ async function submitDraft() {
     state.activeId = result.thread.id
     state.draft = null
     state.pendingReplies.set(result.thread.dshSessionId, { text, at: Date.now() })
-    post('synapse:activate-session', { sessionId: result.thread.dshSessionId })
+    // Deliberately NOT activating the fork. Switching DSH's current session
+    // makes the host leave the map for the conversation view, which defeats
+    // the point of branching from a card: the user wants to stay on the map
+    // and watch the branch run. The branch does not need to be current —
+    // `syncLiveSessions` subscribes to every listed session, so its streaming
+    // answer arrives through `synapse:live-reply` either way.
     render()
     await dshRpc('synapse:send-message', { sessionId: result.thread.dshSessionId, text })
     void loadThreadHistory(result.thread)
@@ -527,40 +697,52 @@ async function submitDraft() {
 }
 
 function threadsById() { return new Map((state.workspace?.threads ?? []).map(thread => [thread.id, thread])) }
+
+/**
+ * The turn cards to render for one thread.
+ *
+ * v5 stores the cards themselves, so this is normally the stored list. While a
+ * message the user just sent is still in flight (DSH has not committed its
+ * events yet), the pending question and its streaming answer are appended as a
+ * synthetic tail card so the canvas never blinks back to the previous turn.
+ */
+function turnsFor(thread) {
+  const turns = Array.isArray(thread.turns) ? thread.turns : []
+  const pending = state.pendingReplies.get(thread.dshSessionId)
+  if (pending === undefined) return turns
+  // The turn has landed in the projection: the synthetic tail is obsolete.
+  if (turns.some(turn => turn.question === pending.text)) {
+    state.pendingReplies.delete(thread.dshSessionId)
+    state.liveReplies.delete(thread.dshSessionId)
+    return turns
+  }
+  const live = state.liveReplies.get(thread.dshSessionId)
+  const tail = {
+    seq: null,
+    at: new Date(pending.at).toISOString(),
+    question: pending.text,
+    answer: live?.running === true ? live.text : null,
+    answerSeq: null,
+    error: null,
+    processCount: 0,
+    processIds: [],
+    pending: true,
+  }
+  return [...turns, tail]
+}
+
 function persistedMessagesFor(thread) { return state.historyBySession.get(thread.dshSessionId) ?? thread.messages ?? [] }
 
-function pendingUserIndex(messages, pending) {
-  return messages.findLastIndex(message => message.kind === 'user' && message.text === pending.text && new Date(message.at).getTime() >= pending.at - 2_000)
-}
-
-function settlePendingReply(thread, messages) {
-  const pending = state.pendingReplies.get(thread.dshSessionId)
-  if (pending === undefined) return false
-  const userIndex = pendingUserIndex(messages, pending)
-  if (userIndex === -1 || !messages.slice(userIndex + 1).some(message => message.kind === 'assistant')) return false
-  state.pendingReplies.delete(thread.dshSessionId)
-  return true
-}
-
-function messagesFor(thread) {
-  // A runtime-context snapshot is internal DSH state, never a user turn.
-  // Filter here as well as during persistence so existing saved workspaces
-  // immediately render one question and its answer as one card.
-  const messages = persistedMessagesFor(thread).filter(message => !(message.kind === 'user' && typeof message.text === 'string' && message.text.trimStart().startsWith('Current runtime context. This snapshot supersedes earlier runtime-context snapshots.')))
-  const pending = state.pendingReplies.get(thread.dshSessionId)
-  if (pending === undefined) return messages
-  if (settlePendingReply(thread, messages)) {
-    state.liveReplies.delete(thread.dshSessionId)
-    return messages
+function latestMessage(thread, kind) {
+  const turns = turnsFor(thread)
+  if (kind === 'user') {
+    const question = turns.at(-1)?.question
+    return question === undefined || question === '' ? undefined : { text: question, sourceSeq: turns.at(-1)?.seq }
   }
-  const liveReply = state.liveReplies.get(thread.dshSessionId)
-  const liveAssistant = liveReply?.running ? { kind: 'assistant', text: liveReply.text, pending: true, at: new Date().toISOString() } : { kind: 'assistant', text: '', pending: true, at: new Date().toISOString() }
-  const userIndex = pendingUserIndex(messages, pending)
-  if (userIndex !== -1) return [...messages, liveAssistant]
-  return [...messages, { kind: 'user', text: pending.text, pending: true, at: new Date(pending.at).toISOString() }, liveAssistant]
+  const turn = [...turns].reverse().find(item => item.answer !== null && item.answer !== undefined)
+  return turn === undefined ? undefined : { text: turn.answer, sourceSeq: turn.answerSeq }
 }
 
-function latestMessage(thread, kind) { return [...messagesFor(thread)].reverse().find(message => message.kind === kind) }
 function questionFor(thread) { return latestMessage(thread, 'user')?.text ?? thread.dshSessionTitle ?? '等待用户提问' }
 function answerFor(thread) { return latestMessage(thread, 'assistant') ?? null }
 
@@ -797,49 +979,35 @@ function conversationCards(threads) {
   const cards = []
   const cardsByThread = new Map()
   for (const thread of threads) {
-    const messages = messagesFor(thread)
+    // v5: the server already stores one card per turn, so the canvas reads
+    // them directly instead of re-deriving turns from a message log.
+    const stored = turnsFor(thread)
     const turns = []
-    for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
-      const question = messages[messageIndex]
-      if (question.kind !== 'user') continue
-      const replies = []
-      const errors = []
-      let processCount = 0
-      for (let replyIndex = messageIndex + 1; replyIndex < messages.length; replyIndex++) {
-        const reply = messages[replyIndex]
-        if (reply.kind === 'user') break
-        if (reply.kind === 'assistant') replies.push(reply)
-        if (reply.kind === 'error') errors.push(reply)
-        if (Array.isArray(reply.process)) processCount += reply.process.length
-        else if (reply.kind === 'tool') processCount += 1
-      }
-      const answer = replies.at(-1) ?? null
-      const error = errors.at(-1) ?? null
-      const turnIndex = turns.length
-      const id = `${thread.id}:turn:${question.sourceSeq ?? messageIndex}`
+    stored.forEach((storedTurn, turnIndex) => {
+      const id = `${thread.id}:turn:${storedTurn.seq ?? `i${turnIndex}`}`
       const previous = turns.at(-1)
       const positionKey = `${thread.id}:turn-index:${turnIndex}`
       const naturalPosition = previous === undefined ? { x: 86, y: 82 } : { x: previous.naturalPosition.x + 365, y: previous.naturalPosition.y }
       const savedPosition = state.cardPositions?.get(id) ?? state.cardPositions?.get(positionKey)
       const positionLocked = savedPosition !== undefined
-      const position = positionLocked ? savedPosition : naturalPosition
       turns.push({
         id,
         positionKey,
         dshThreadId: thread.id,
         sourceParentId: thread.parentId,
         parentId: null,
-        sourceSeq: question.sourceSeq,
+        sourceSeq: Number.isSafeInteger(storedTurn.seq) ? storedTurn.seq : undefined,
+        answerSeq: Number.isSafeInteger(storedTurn.answerSeq) ? storedTurn.answerSeq : undefined,
         turnIndex,
         naturalPosition,
-        position,
+        position: positionLocked ? savedPosition : naturalPosition,
         positionLocked,
-        question: question.text,
-        answer,
-        error,
-        processCount,
+        question: storedTurn.question ?? '',
+        answer: storedTurn.answer === null || storedTurn.answer === undefined ? null : { kind: 'assistant', text: storedTurn.answer, sourceSeq: storedTurn.answerSeq, at: storedTurn.at },
+        error: storedTurn.error === null || storedTurn.error === undefined ? null : { kind: 'error', text: storedTurn.error, at: storedTurn.at },
+        processCount: storedTurn.processCount ?? 0,
       })
-    }
+    })
     const liveReply = state.liveReplies.get(thread.dshSessionId)
     const latestTurn = turns.at(-1)
     if (liveReply?.running && latestTurn !== undefined && (latestTurn.answer === null || latestTurn.answer.pending === true)) latestTurn.answer = { kind: 'assistant', text: liveReply.text, pending: true, at: new Date().toISOString() }
@@ -860,7 +1028,10 @@ function conversationCards(threads) {
       naturalPosition,
       position: positionLocked ? savedPosition : naturalPosition,
       positionLocked,
-      question: thread.dshSessionTitle ?? thread.title,
+      // A session with no projected turn yet (created but never asked, or a
+      // fork waiting on its first message) still needs a visible card. Fall
+      // back instead of rendering a literal "undefined" title.
+      question: thread.dshSessionTitle ?? thread.title ?? '等待用户提问',
       answer: null,
       error: null,
       processCount: 0,
@@ -1022,12 +1193,15 @@ function conversationCard(card, graph) {
   const collapsed = state.collapsedCardIds.has(card.id)
   const foldLabel = collapsed ? '展开后续对话' : '折叠后续对话'
   const foldButton = childCount === 0 || card.canContinue === true ? '' : `<button class="graph-fold-button${collapsed ? ' collapsed' : ''}" data-action="toggle-card-children" data-card="${escapeHtml(card.id)}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${foldLabel}" title="${foldLabel}"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M3.5 8h9"/>${collapsed ? '<path d="M8 3.5v9"/>' : ''}</svg></button>`
-  const branchButton = !Number.isInteger(card.answer?.sourceSeq) ? '' : `<button class="graph-branch-button" data-action="open-branch" data-thread="${card.dshThreadId}" data-card="${escapeHtml(card.id)}" data-seq="${card.answer.sourceSeq}" aria-label="在新对话中分支" title="在新对话中分支"><svg aria-hidden="true" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M13.0762 1.37207C14.0846 1.37228 14.9021 2.19077 14.9023 3.19922C14.9022 4.20772 14.0847 5.02518 13.0762 5.02539C12.2967 5.02539 11.6325 4.53691 11.3701 3.84961H4.35547C4.79397 4.26458 5.15861 4.7644 5.41699 5.33496L7.10645 9.06738C7.88526 10.7875 9.55104 11.9228 11.4189 12.0371C11.7085 11.4109 12.3411 10.9756 13.0762 10.9756C14.0843 10.9759 14.9023 11.7936 14.9023 12.8018C14.9023 13.81 14.0843 14.6277 13.0762 14.6279C12.2534 14.6279 11.5574 14.0832 11.3291 13.335C8.9868 13.1879 6.89981 11.7612 5.92285 9.60352L4.23242 5.87109C3.67503 4.64033 2.44878 3.84961 1.09766 3.84961V2.54883C1.10665 2.54883 1.11601 2.54975 1.125 2.5498L11.3701 2.54883C11.6326 1.86151 12.2969 1.37207 13.0762 1.37207ZM13.0762 12.2764C12.7858 12.2764 12.5508 12.5114 12.5508 12.8018C12.5508 13.0921 12.7858 13.3281 13.0762 13.3281C13.3664 13.3279 13.6025 13.092 13.6025 12.8018C13.6025 12.5115 13.3664 12.2766 13.0762 12.2764ZM13.0762 2.67285C12.7855 2.67285 12.55 2.90861 12.5498 3.19922C12.5499 3.48987 12.7855 3.72559 13.0762 3.72559C13.3667 3.72538 13.6024 3.48975 13.6025 3.19922C13.6023 2.90874 13.3666 2.67306 13.0762 2.67285Z" fill="currentColor"/></svg></button>`
-  return `<article class="thread-card ${selected}" data-card-id="${escapeHtml(card.id)}" data-position-key="${escapeHtml(card.positionKey)}" data-thread="${card.dshThreadId}" style="left:${card.position.x}px;top:${card.position.y}px;--thread-color:#3478f6">
+  const branchSeq = Number.isSafeInteger(card.answerSeq) ? card.answerSeq : Number.isInteger(card.answer?.sourceSeq) ? card.answer.sourceSeq : null
+  const status = sessionStatusFor(state.workspace?.threads.find(item => item.id === card.dshThreadId))
+  const resolvedState = cardState(card, status)
+  const branchButton = branchSeq === null ? '' : `<button class="graph-branch-button" data-action="open-branch" data-thread="${card.dshThreadId}" data-card="${escapeHtml(card.id)}" data-seq="${branchSeq}" aria-label="在新对话中分支" title="在新对话中分支"><svg aria-hidden="true" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M13.0762 1.37207C14.0846 1.37228 14.9021 2.19077 14.9023 3.19922C14.9022 4.20772 14.0847 5.02518 13.0762 5.02539C12.2967 5.02539 11.6325 4.53691 11.3701 3.84961H4.35547C4.79397 4.26458 5.15861 4.7644 5.41699 5.33496L7.10645 9.06738C7.88526 10.7875 9.55104 11.9228 11.4189 12.0371C11.7085 11.4109 12.3411 10.9756 13.0762 10.9756C14.0843 10.9759 14.9023 11.7936 14.9023 12.8018C14.9023 13.81 14.0843 14.6277 13.0762 14.6279C12.2534 14.6279 11.5574 14.0832 11.3291 13.335C8.9868 13.1879 6.89981 11.7612 5.92285 9.60352L4.23242 5.87109C3.67503 4.64033 2.44878 3.84961 1.09766 3.84961V2.54883C1.10665 2.54883 1.11601 2.54975 1.125 2.5498L11.3701 2.54883C11.6326 1.86151 12.2969 1.37207 13.0762 1.37207ZM13.0762 12.2764C12.7858 12.2764 12.5508 12.5114 12.5508 12.8018C12.5508 13.0921 12.7858 13.3281 13.0762 13.3281C13.3664 13.3279 13.6025 13.092 13.6025 12.8018C13.6025 12.5115 13.3664 12.2766 13.0762 12.2764ZM13.0762 2.67285C12.7855 2.67285 12.55 2.90861 12.5498 3.19922C12.5499 3.48987 12.7855 3.72559 13.0762 3.72559C13.3667 3.72538 13.6024 3.48975 13.6025 3.19922C13.6023 2.90874 13.3666 2.67306 13.0762 2.67285Z" fill="currentColor"/></svg></button>`
+  return `<article class="thread-card ${selected} card-${resolvedState}" data-card-id="${escapeHtml(card.id)}" data-position-key="${escapeHtml(card.positionKey)}" data-thread="${card.dshThreadId}" data-state="${resolvedState}" style="left:${card.position.x}px;top:${card.position.y}px;--thread-color:#3478f6">
     <button class="node-handle" data-drag-card="${card.id}" aria-label="拖动 ${escapeHtml(card.question)}" title="拖动卡片"></button>
     ${continueButton}${foldButton}${branchButton}
     <div class="thread-card-head"><span class="topic-dot"></span><strong class="thread-title">${escapeHtml(card.question)}</strong></div>
-    <div class="thread-meta"><span>${source}</span><span>第 ${card.turnIndex + 1} 轮</span>${card.error === null ? '' : '<span class="card-error-status">失败</span>'}${card.processCount > 0 ? `<span class="card-process-count">工具 ${card.processCount}</span>` : ''}</div>
+    <div class="thread-meta"><span>${source}</span><span>第 ${card.turnIndex + 1} 轮</span>${cardStateBadge(card, status)}${card.processCount > 0 ? `<span class="card-process-count">工具 ${card.processCount}</span>` : ''}</div>
     <div class="thread-answer">${card.answer === null ? (card.error === null ? '<p class="thread-answer-empty">等待助手回复</p>' : '') : card.answer.pending && card.answer.text === '' ? '<p class="thread-answer-pending">正在回复</p>' : `${renderMarkdown(card.answer.text)}${card.answer.pending ? '<p class="thread-answer-pending">正在回复</p>' : ''}`}${card.error === null ? '' : `<p class="thread-answer-error" title="${escapeHtml(card.error.text)}">本轮失败：${escapeHtml(card.error.text)}</p>`}</div>
     <footer><button data-action="watch-turn" data-thread="${card.dshThreadId}" data-card="${escapeHtml(card.id)}" title="详情" aria-label="详情"><svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 8.5 8 2.5l6 6V13.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5Z"/><path d="M6.2 14v-3.6a1.8 1.8 0 0 1 3.6 0V14" /></svg>详情</button><button data-action="open-dsh" data-thread="${card.dshThreadId}" data-seq="${Number.isInteger(card.sourceSeq) ? card.sourceSeq : ''}" title="在 DSH 中打开" aria-label="在 DSH 中打开"><svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5H4.5A1.5 1.5 0 0 0 3 5v6.5A1.5 1.5 0 0 0 4.5 13H11a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 3.5h3v3M12.4 3.6 7.5 8.5"/></svg>DSH</button>${card.turnIndex === 0 && card.sourceParentId !== null ? `<button data-action="remove-branch" data-thread="${card.dshThreadId}" title="删除这个分支" aria-label="删除这个分支"><svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 4.5h9M6 4.5V3.4a.9.9 0 0 1 .9-.9h2.2a.9.9 0 0 1 .9.9V4.5M5.5 6.2v6.3a.8.8 0 0 0 .8.8h3.4a.8.8 0 0 0 .8-.8V6.2"/></svg>删除</button>` : ''}</footer>
   </article>`
@@ -1195,33 +1369,8 @@ function renderCanvas() {
   return `<section class="canvas-view"><div class="canvas-viewport"><div class="canvas-content" style="transform:translate(${state.canvasCamera.x}px, ${state.canvasCamera.y}px) scale(${state.zoom})"><svg class="connectors">${canvasConnectors(cards)}</svg><div class="cards-layer">${mounted.map(card => conversationCard(card, graph)).join('')}${draftCard(cards)}</div></div></div>${inspector}</section>`
 }
 
-function isProcessMessage(message) {
-  if (message.kind === 'tool' || message.kind === 'tool-result') return true
-  return message.kind === 'assistant' && /(?:^|\n)\s*(?:bash|pwsh|powershell|web_search|web_fetch|browser|read_file|write_file)\s*\n\s*\{/.test(message.text)
-}
-
-function processSummary(text) {
-  return text.replace(/\s+/g, ' ').trim().slice(0, 140) || '工具调用记录'
-}
-
-function threadMessage(thread, message) {
-  const isUser = message.kind === 'user'
-  const label = isUser ? '你' : message.kind === 'assistant' ? 'DSH' : message.kind === 'error' ? '错误' : '记录'
-  const branch = message.kind === 'assistant' && Number.isInteger(message.sourceSeq)
-    ? `<button class="message-branch" data-action="open-branch" data-thread="${thread.id}" data-seq="${message.sourceSeq}" title="从此回答创建分支"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M4.5 3v6a2.5 2.5 0 0 0 2.5 2.5H12"/><circle cx="4.5" cy="3" r="1.5"/><circle cx="11.5" cy="12" r="1.5"/></svg>分支</button>`
-    : ''
-  const messageId = `${thread.id}:${message.sourceSeq ?? `${message.kind}:${message.at}`}`
-  const collapsible = isProcessMessage(message)
-  const expanded = state.expandedMessageIds.has(messageId)
-  const fold = collapsible ? `<button class="message-fold" data-action="toggle-message" data-message="${escapeHtml(messageId)}" aria-label="${expanded ? '收起过程记录' : '展开过程记录'}" title="${expanded ? '收起' : '展开'}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg></button>` : ''
-  const process = Array.isArray(message.process) && message.process.length > 0 ? message.process : null
-  const body = message.pending && message.text === '' ? '<p class="message-streaming"><span class="streaming-dot"></span>正在回复</p>'
-    : `${collapsible && !expanded ? `<p class="message-summary">${escapeHtml(processSummary(message.text))}</p>` : renderMarkdown(message.text)}${message.pending ? '<p class="message-streaming"><span class="streaming-dot"></span>正在回复</p>' : ''}${process === null ? '' : processRecords(process, messageId)}`
-  const avatar = isUser ? '' : '<span class="message-avatar" aria-hidden="true"></span>'
-  return `<article class="message message-${message.kind}${message.pending ? ' message-pending' : ''}${collapsible ? ' message-collapsible' : ''}${expanded ? ' expanded' : ''}" data-message-seq="${Number.isInteger(message.sourceSeq) ? message.sourceSeq : ''}"><header>${avatar}<span class="message-role">${label}</span><time>${formatTime(message.at)}</time>${branch}${fold}</header><div class="message-body">${body}</div></article>`
-}
-
 function processRecords(process, messageId) {
+
   const key = `${messageId}:process`
   const expanded = state.expandedMessageIds.has(key)
   const entries = process.map((entry, index) => {
@@ -1235,71 +1384,58 @@ function processRecords(process, messageId) {
   return `<section class="process-records${expanded ? ' expanded' : ''}"><button class="process-records-fold" data-action="toggle-message" data-message="${escapeHtml(key)}"><span>${expanded ? '收起过程记录' : '过程记录'}</span><span class="process-count">${process.length}</span></button>${expanded ? entries : ''}</section>`
 }
 
-function messagesForCard(card) {
-  const thread = state.workspace?.threads.find(item => item.id === card.dshThreadId)
-  if (thread === undefined) return { thread: null, messages: [] }
-  const messages = messagesFor(thread)
-  let turnIndex = -1
-  let start = -1
-  for (let index = 0; index < messages.length; index++) {
-    if (messages[index].kind !== 'user') continue
-    turnIndex += 1
-    if (turnIndex === card.turnIndex) {
-      start = index
-      break
-    }
-  }
-  if (start === -1) return { thread, messages: [] }
-  const end = messages.findIndex((message, index) => index > start && message.kind === 'user')
-  return { thread, messages: messages.slice(start, end === -1 ? undefined : end) }
-}
-
-function inspectorProcessEntries(messages) {
-  const entries = []
-  for (const message of messages) {
-    if (Array.isArray(message.process)) {
-      entries.push(...message.process.map(entry => ({ ...entry })))
-      continue
-    }
-    if (message.kind === 'tool') {
-      entries.push({ name: processSummary(message.text), arguments: message.text, result: null, error: null })
-      continue
-    }
-    if (message.kind === 'tool-result') {
-      const previous = entries.at(-1)
-      if (previous !== undefined && previous.result === null && previous.error === null) previous.result = message.text
-      else entries.push({ name: '工具结果', arguments: null, result: message.text, error: null })
-    }
-  }
-  return entries
-}
-
 function renderCardInspector(card) {
   if (card === undefined) return ''
-  const { thread, messages } = messagesForCard(card)
-  if (thread === null) return ''
-  const process = inspectorProcessEntries(messages)
-  const answer = card.answer === null
-    ? card.error === null ? '<p class="card-inspector-pending">等待助手回复</p>' : ''
-    : `<article class="card-inspector-answer">${renderMarkdown(card.answer.text)}${card.answer.pending ? '<p class="card-inspector-pending">正在回复</p>' : ''}</article>`
-  const error = card.error === null ? '' : `<section class="card-inspector-error" role="alert"><strong>本轮未完成</strong><p>${escapeHtml(card.error.text)}</p></section>`
+  const thread = state.workspace?.threads.find(item => item.id === card.dshThreadId)
+  if (thread === undefined) return ''
+  // Full text is read back from the DSH session on open; until it arrives the
+  // card summary renders, which is what the canvas shows anyway.
+  const detail = historyForCard(thread, card.id)
+  const steps = detail?.steps ?? []
+  const process = detail?.process ?? []
+  const loading = detail === null && Number.isSafeInteger(card.sourceSeq)
+  const answerText = steps.length > 0
+    ? steps.filter(step => step.kind === 'assistant').map(step => step.text).join('\n\n')
+    : card.answer?.text ?? null
+  const errorText = card.error === null
+    ? null
+    : steps.filter(step => step.kind === 'error').map(step => step.text).join('\n\n') || card.error.text
+  const answer = answerText === null || answerText === ''
+    ? errorText === null ? `<p class="card-inspector-pending">${loading ? '正在读取完整内容…' : '等待助手回复'}</p>` : ''
+    : `<article class="card-inspector-answer">${renderMarkdown(answerText)}${card.answer?.pending ? '<p class="card-inspector-pending">正在回复</p>' : ''}</article>`
+  const error = errorText === null ? '' : `<section class="card-inspector-error" role="alert"><strong>本轮未完成</strong><p>${escapeHtml(errorText)}</p></section>`
   const processRecordsHtml = process.length === 0 ? '' : processRecords(process, `${thread.id}:${card.id}:inspector`)
   const continueAction = card.canContinue === true ? `<button type="button" data-action="open-continue" data-thread="${thread.id}" data-card="${escapeHtml(card.id)}"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3.5 2.5v-2.5h-1.5Z"/><path d="M8 5.5v3M6.5 7h3"/></svg>继续追问</button>` : ''
-  const branch = Number.isInteger(card.answer?.sourceSeq)
-    ? `<button type="button" data-action="open-branch" data-thread="${thread.id}" data-card="${escapeHtml(card.id)}" data-seq="${card.answer.sourceSeq}"><svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.5"/><circle cx="12" cy="3.5" r="1.5"/><circle cx="12" cy="12.5" r="1.5"/><path d="M5.5 3.5h2A2.5 2.5 0 0 1 10 6v5"/></svg>创建分支</button>`
+  const branchSeq = Number.isSafeInteger(card.answerSeq) ? card.answerSeq : card.answer?.sourceSeq
+  const branch = Number.isInteger(branchSeq)
+    ? `<button type="button" data-action="open-branch" data-thread="${thread.id}" data-card="${escapeHtml(card.id)}" data-seq="${branchSeq}"><svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.5"/><circle cx="12" cy="3.5" r="1.5"/><circle cx="12" cy="12.5" r="1.5"/><path d="M5.5 3.5h2A2.5 2.5 0 0 1 10 6v5"/></svg>创建分支</button>`
     : ''
-  const openDshAction = `<button class="primary" type="button" data-action="open-dsh" data-thread="${thread.id}" data-seq="${Number.isInteger(card.answer?.sourceSeq) ? card.answer.sourceSeq : ''}"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M7 3.5H4.5A1.5 1.5 0 0 0 3 5v6.5A1.5 1.5 0 0 0 4.5 13H11a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 3.5h3v3M12.4 3.6 7.5 8.5"/></svg>在 DSH 中打开</button>`
+  const openDshAction = `<button class="primary" type="button" data-action="open-dsh" data-thread="${thread.id}" data-seq="${Number.isInteger(branchSeq) ? branchSeq : ''}"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M7 3.5H4.5A1.5 1.5 0 0 0 3 5v6.5A1.5 1.5 0 0 0 4.5 13H11a1.5 1.5 0 0 0 1.5-1.5V9"/><path d="M9.5 3.5h3v3M12.4 3.6 7.5 8.5"/></svg>在 DSH 中打开</button>`
   const removeBranchAction = thread.parentId === null ? '' : `<button type="button" data-action="remove-branch" data-thread="${thread.id}">删除分支</button>`
-  return `<aside class="card-inspector${state.inspectorOpening ? ' is-opening' : ''}" aria-label="卡片详情" data-inspector-card="${escapeHtml(card.id)}"><header class="card-inspector-head"><div><div class="card-inspector-meta"><span>第 ${card.turnIndex + 1} 轮</span>${card.error === null ? '' : '<span class="card-inspector-error-status">失败</span>'}${process.length > 0 ? `<span>工具 ${process.length}</span>` : ''}</div><h2>${escapeHtml(card.question)}</h2></div><button class="card-inspector-close" type="button" data-action="close-card-inspector" aria-label="关闭卡片详情" title="关闭"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></header><div class="card-inspector-scroll">${error}${answer}${processRecordsHtml}</div><footer class="card-inspector-actions">${continueAction}${branch}${removeBranchAction}${openDshAction}</footer></aside>`
+  const question = detail?.question ?? card.question
+  return `<aside class="card-inspector${state.inspectorOpening ? ' is-opening' : ''}" aria-label="卡片详情" data-inspector-card="${escapeHtml(card.id)}"><header class="card-inspector-head"><div><div class="card-inspector-meta"><span>第 ${card.turnIndex + 1} 轮</span>${errorText === null ? '' : '<span class="card-inspector-error-status">失败</span>'}${process.length > 0 ? `<span>工具 ${process.length}</span>` : ''}</div><h2>${escapeHtml(question)}</h2></div><button class="card-inspector-close" type="button" data-action="close-card-inspector" aria-label="关闭卡片详情" title="关闭"><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4.5 4.5 7 7m0-7-7 7"/></svg></button></header><div class="card-inspector-scroll">${error}${answer}${processRecordsHtml}</div><footer class="card-inspector-actions">${continueAction}${branch}${removeBranchAction}${openDshAction}</footer></aside>`
 }
 
 function renderThread() {
   const thread = currentThread()
   if (thread === null) return renderCanvas()
-  const messages = messagesFor(thread)
   const waiting = state.pendingReplies.has(thread.dshSessionId)
-  const latestAssistantSeq = [...messages].reverse().find(message => Number.isInteger(message.sourceSeq))?.sourceSeq
-  return `<section class="detail-view"><header class="detail-head"><div class="detail-head-title"><div class="detail-head-meta"><span class="detail-badge">${thread.parentId === null ? '会话' : '分支'}</span>${thread.dshSessionTitle ?? thread.title ? `<span class="detail-subtitle">${escapeHtml(thread.dshSessionTitle ?? thread.title)}</span>` : ''}</div><h1>${escapeHtml(questionFor(thread))}</h1></div><div class="detail-head-actions"><button data-action="open-dsh" data-thread="${thread.id}" data-seq="${Number.isInteger(latestAssistantSeq) ? latestAssistantSeq : ''}" title="在原生对话中打开此会话">在 DSH 中打开</button><button data-action="open-branch" data-thread="${thread.id}" title="基于最新回答创建分支">创建分支</button><button class="primary" data-action="show-canvas">返回画布</button></div></header><div class="detail-scroll">${messages.map(message => threadMessage(thread, message)).join('') || '<div class="note-empty">等待这条会话的第一条消息。</div>'}</div><form class="message-composer" data-compose="${thread.id}"><textarea maxlength="4000" placeholder="继续当前会话…" ${waiting ? 'disabled' : ''}></textarea><button class="primary" type="submit" ${waiting ? 'disabled' : ''}>${waiting ? '等待回复' : '发送'}</button></form></section>`
+  // One section per turn, each reading its full text on demand.
+  const cards = turnsFor(thread).map((turn, index) => ({ id: `${thread.id}:turn:${turn.seq ?? `i${index}`}`, turn, index }))
+  const body = cards.map(card => {
+    const detail = historyForCard(thread, card.id)
+    const loading = detail === null && Number.isSafeInteger(card.turn.seq)
+    const answer = detail?.steps.filter(step => step.kind === 'assistant').map(step => step.text).join('\n\n')
+      ?? card.turn.answer
+      ?? ''
+    const failure = detail?.steps.filter(step => step.kind === 'error').map(step => step.text).join('\n\n') ?? card.turn.error ?? ''
+    const process = detail?.process ?? []
+    const processHtml = process.length === 0 ? '' : processRecords(process, `${thread.id}:${card.id}:detail`)
+    const seq = card.turn.seq
+    return `<section class="detail-turn" data-card-id="${escapeHtml(card.id)}"><header class="detail-turn-head"><span class="detail-turn-index">第 ${card.index + 1} 轮</span>${process.length > 0 ? `<span class="detail-turn-tools">工具 ${process.length}</span>` : ''}</header><article class="message message-user"><header><span class="message-role">你</span></header><div class="message-body">${renderMarkdown(detail?.question ?? card.turn.question ?? '')}</div></article>${answer === '' && failure === '' ? `<p class="note-empty">${loading ? '正在读取完整内容…' : '等待助手回复'}</p>` : `<article class="message message-assistant"><header><span class="message-role">DSH</span></header><div class="message-body">${renderMarkdown(answer)}</div></article>`}${failure === '' ? '' : `<section class="card-inspector-error" role="alert"><strong>本轮未完成</strong><p>${escapeHtml(failure)}</p></section>`}${processHtml}</section>`
+  }).join('')
+  const latestAssistantSeq = [...cards].reverse().find(card => Number.isSafeInteger(card.turn.answerSeq))?.turn.answerSeq
+  return `<section class="detail-view"><header class="detail-head"><div class="detail-head-title"><div class="detail-head-meta"><span class="detail-badge">${thread.parentId === null ? '会话' : '分支'}</span>${thread.dshSessionTitle ?? thread.title ? `<span class="detail-subtitle">${escapeHtml(thread.dshSessionTitle ?? thread.title)}</span>` : ''}</div><h1>${escapeHtml(questionFor(thread))}</h1></div><div class="detail-head-actions"><button data-action="open-dsh" data-thread="${thread.id}" data-seq="${Number.isInteger(latestAssistantSeq) ? latestAssistantSeq : ''}" title="在原生对话中打开此会话">在 DSH 中打开</button><button data-action="open-branch" data-thread="${thread.id}" title="基于最新回答创建分支">创建分支</button><button class="primary" data-action="show-canvas">返回画布</button></div></header><div class="detail-scroll">${body || '<div class="note-empty">等待这条会话的第一条消息。</div>'}</div><form class="message-composer" data-compose="${thread.id}"><textarea maxlength="4000" placeholder="继续当前会话…" ${waiting ? 'disabled' : ''}></textarea><button class="primary" type="submit" ${waiting ? 'disabled' : ''}>${waiting ? '等待回复' : '发送'}</button></form></section>`
 }
 
 function render() {
@@ -2013,6 +2149,19 @@ window.addEventListener('message', event => {
   }
   if (data.type === 'synapse:theme') {
     document.documentElement.dataset.theme = data.dark === true ? 'dark' : 'light'
+  }
+  if (data.type === 'synapse:session-status') {
+    // Rebuild the status map the cards read. Only redraw when a state actually
+    // changed: this arrives on every host session-list change.
+    const statuses = Array.isArray(data.statuses) ? data.statuses : []
+    const next = new Map(statuses.filter(item => typeof item?.id === 'string').map(item => [item.id, item]))
+    if (statusFingerprint(next) !== statusFingerprint(state.sessionStatusById)) {
+      state.sessionStatusById = next
+      if (state.mode === 'canvas' && canReplaceView()) render()
+    } else {
+      state.sessionStatusById = next
+    }
+    return
   }
   if (data.type === 'synapse:workspaces') {
     state.dshWorkspaces = Array.isArray(data.workspaces) ? data.workspaces.filter(workspace => typeof workspace?.id === 'string' && typeof workspace.title === 'string' && Array.isArray(workspace.sessionIds)) : []

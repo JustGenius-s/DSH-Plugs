@@ -36,30 +36,40 @@ By default, Synapse stores canvas metadata at:
 $DSH_HOME/synapse/workspaces.json
 ```
 
-The file contains organizational state such as workspace mapping, card layout, and fork anchors. It does not replace session logs.
+The file contains organizational state: workspace mapping, card summaries, card layout, and fork anchors. It does not replace session logs.
 
-Consequences:
+## Card summaries and detail on demand
 
-- deleting the file resets canvas organization but does not delete conversations;
-- uninstalling the plugin keeps the file, so reinstalling restores the canvas;
-- older schema versions migrate when loaded;
-- two processes sharing the same file can still produce last-writer-wins replacement despite locking and external-change warnings.
+Version 5 stores **one card per turn**, not a copy of the session message log. Each card holds only what the canvas renders:
 
-Run one `dsh web` instance for each shared profile.
+| Field | Purpose |
+|---|---|
+| `question` | the user question (capped at 600 chars for display) |
+| `answer` / `answerSeq` | the turn's final assistant reply and its event seq (capped at 2,400 chars) |
+| `error` | the failure text, when the turn did not complete |
+| `processCount` / `processIds` | how many tool invocations the turn made, and their `callId`s |
+| `seq` | the durable event seq, used for branching and detail lookup |
+
+The full text lives in the DSH session log. Opening a card's detail view re-reads that turn from the session — every assistant step plus each tool call's arguments and output, uncapped — through `GET`-free `POST /synapse/api/turn-detail`:
+
+1. a **live** session is read from its in-memory event log (no I/O);
+2. an **archived or cold** session is inspected through persistence (read-only: it does not publish the session or commit crash recovery).
+
+Results are cached per turn in the browser, so reopening a card is instant.
+
+Rationale: the previous model copied every message — and every tool output — into `workspaces.json`. One 50 KB `bash` result alone was ~4% of a 12 MB file, and tool outputs accounted for half of it, even though the canvas never renders them. Card summaries plus detail-on-demand cut that file by ~95% while the detail view gained the complete tool output it previously truncated.
 
 ## Projection model
 
 With `autoProjection` enabled, committed DSH session events are grouped by working directory and projected into the corresponding Synapse workspace.
 
-Each user question becomes a conversation card. The following assistant messages are folded into that turn, and the final assistant reply is shown as the answer. Forked sessions connect to the parent turn at the durable DSH seed boundary rather than at an arbitrary canvas coordinate.
+Each user question becomes a conversation card. The following assistant messages are folded into that turn, and the final assistant reply becomes the card's `answer`. Forked sessions connect to the parent turn at the durable DSH seed boundary rather than at an arbitrary canvas coordinate.
 
-Projected card text is capped at 8000 characters. Longer messages receive a truncation marker in the card, while their complete content remains available from the conversation detail view.
-
-Projection writes are coalesced during event bursts, and live updates reuse cached Markdown and patch the active card instead of rebuilding the complete canvas. Card coordinates remain visual metadata only and never determine conversation lineage.
+Card fields are capped for display as described above; the detail view is the uncapped path. Projection writes are coalesced during event bursts, and live updates reuse cached Markdown and patch the active card instead of rebuilding the complete canvas. Card coordinates remain visual metadata only and never determine conversation lineage.
 
 ## Tool process folding
 
-Live events pair tool calls and results by `callId` and render them inside the related assistant reply instead of as standalone conversation cards.
+Live events pair tool calls and results by `callId` and count them towards the turn's card instead of creating standalone conversation cards. Tool arguments and outputs are **not** stored in the canvas metadata; they are re-read from the DSH session for the detail view.
 
 Legacy v3 migrations did not always have durable call IDs. Those records pair each tool call with the next tool result by order during migration.
 

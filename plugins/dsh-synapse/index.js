@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 
 export const name = 'synapse'
+// `sessionPersistence` is resolved lazily via `ctx.get`: it is only needed to
+// read the full detail of a card whose DSH session is no longer live (archived
+// or not yet restored). Listing it as a hard dependency would stop the plugin
+// from loading on a profile that does not mount it, so it stays optional.
 export const inject = ['webServer', 'sessions']
 
 const MAX_BODY_BYTES = 32 * 1024
@@ -12,6 +16,14 @@ const MAX_NOTE_LENGTH = 4_000
 // at the detail view instead of silently cutting mid-sentence.
 const MAX_PROJECTION_LENGTH = 8_000
 const PROJECTION_TRUNCATED_SUFFIX = '\n——…（详情查看全文）'
+// v5 stores one card per turn instead of a copy of the session's message log.
+// The canvas only renders the question and the turn's final answer, so those
+// two fields are capped for display; full text is re-read from the DSH session
+// when the user opens the detail view. The caps clear the p95 answer (~2.4k
+// chars) so truncation stays rare and the detail view is the fallback.
+const CARD_QUESTION_LENGTH = 600
+const CARD_ANSWER_LENGTH = 2_400
+const TRUNCATED_MARK = '…'
 const TOPIC_COLORS = ['#0f766e', '#2563eb', '#be123c', '#7c3aed', '#b45309']
 const LOCK_STALE_MS = 60_000
 // Deferred (event-projection) writes coalesce into one save per window, so a
@@ -115,7 +127,13 @@ export class WorkspaceStore {
     return this.mutate(() => {
       if (!Array.isArray(sessions)) throw new InputError('sessions 必须是数组')
       if (!Array.isArray(removedSessionIds) || removedSessionIds.some(item => typeof item !== 'string')) throw new InputError('removedSessionIds 必须是字符串数组')
-      const blankIds = new Set(sessions.filter(item => item?.blank === true && typeof item.id === 'string').map(item => item.id))
+      // A blank session is one DSH created but never filled with a message.
+      // They are pruned so untouched new sessions do not clutter the map —
+      // EXCEPT for forks: a branch the user just created is blank for the few
+      // hundred milliseconds before its first message lands, and pruning it
+      // made the branch vanish from the map right after it was created. Keep
+      // those so the branch stays visible and streams in live.
+      const blankIds = new Set(sessions.filter(item => item?.blank === true && typeof item.id === 'string' && typeof item.parentId !== 'string').map(item => item.id))
       const removedIds = new Set(removedSessionIds)
       for (const workspace of this.state.workspaces) {
         if (workspace.kind !== 'dsh') continue
@@ -124,7 +142,10 @@ export class WorkspaceStore {
       this.state.workspaces = this.state.workspaces.filter(workspace => workspace.kind !== 'dsh' || workspace.threads.length > 0)
       for (const item of sessions) {
         if (typeof item?.id !== 'string' || item.id === '' || typeof item.cwd !== 'string' || item.cwd === '') continue
-        if (item.blank === true) continue
+        // Untouched blank sessions stay off the map; blank FORKS are kept (see
+        // `blankIds` above) so a just-created branch is not pruned before its
+        // first message arrives.
+        if (item.blank === true && typeof item.parentId !== 'string') continue
         // Canvas archiving is persistent UI state. A normal DSH list refresh
         // must not recreate a session that the user deliberately archived.
         if (this.state.hiddenSessionIds.includes(item.id)) continue
@@ -144,8 +165,11 @@ export class WorkspaceStore {
     return this.mutate(() => {
       const { workspace, thread } = this.locateThread(threadId)
       const at = new Date().toISOString()
-      const message = { id: randomUUID(), text: requiredText(text, MAX_NOTE_LENGTH, 'text'), kind: 'user', at }
-      thread.messages.push(message)
+      const note = requiredText(text, MAX_NOTE_LENGTH, 'text')
+      const turns = thread.turns ??= []
+      // Manual workspaces have no DSH session to re-read, so the note itself
+      // is the card content; the canvas cap does not apply here.
+      turns.push({ seq: null, at, question: note, answer: null, answerSeq: null, error: null, processCount: 0, processIds: [] })
       thread.updatedAt = at
       workspace.updatedAt = at
       return structuredClone(thread)
@@ -181,6 +205,23 @@ export class WorkspaceStore {
       if (workspace.threads.length === 0) this.state.workspaces = this.state.workspaces.filter(item => item.id !== workspace.id)
       return { removed: removal.size }
     })
+  }
+
+  /**
+   * The session ids that already hold at least one projected card.
+   *
+   * Used by the fork backfill to skip work already done, so a restart never
+   * re-projects (or duplicates) conversations the canvas already has.
+   */
+  async projectedSessionIds() {
+    await this.ready
+    const ids = new Set()
+    for (const workspace of this.state.workspaces) {
+      for (const thread of workspace.threads) {
+        if (typeof thread.dshSessionId === 'string' && thread.dshSessionId !== '' && (thread.turns ?? []).length > 0) ids.add(thread.dshSessionId)
+      }
+    }
+    return ids
   }
 
   async clearLegacy(sessions) {
@@ -380,9 +421,13 @@ export class WorkspaceStore {
         thread.title = title
         thread.dshSessionTitle = title
       }
-      // `seedLength` is DSH's durable fork cut. Keep it even after the
-      // session has been restored, when its in-process `firstLiveSeq` moves.
-      const seedLength = session.header?.seedLength
+      // The fork cut is DSH's durable `header.seedLength`, but that field is
+      // missing on most real forks; `session.seedBoundary` carries the boundary
+      // resolved from the log itself (see `forkSeqBoundary`). Keeping it lets
+      // the canvas attach this branch under the exact parent turn instead of
+      // leaving it floating as a root. Keep the value even after the session
+      // has been restored, when its in-process `firstLiveSeq` moves.
+      const seedLength = session.header?.seedLength ?? session.seedBoundary
       if (Number.isSafeInteger(seedLength) && seedLength >= 0) thread.sourceSeedLength = seedLength
       return thread
     }
@@ -395,7 +440,7 @@ export class WorkspaceStore {
       title: typeof session.title === 'string' && session.title.trim() !== '' ? session.title.slice(0, MAX_TITLE_LENGTH) : (parent === undefined ? 'DSH 会话' : `${parent.title} 分支`),
       parentId: parent?.id ?? null,
       sourceParentSessionId: parentSessionId,
-      sourceSeedLength: Number.isSafeInteger(session.header?.seedLength) && session.header.seedLength >= 0 ? session.header.seedLength : null,
+      sourceSeedLength: Number.isSafeInteger(session.header?.seedLength ?? session.seedBoundary) && (session.header?.seedLength ?? session.seedBoundary) >= 0 ? (session.header?.seedLength ?? session.seedBoundary) : null,
       dshSessionId: session.id,
       dshSessionTitle: typeof session.title === 'string' ? session.title.slice(0, MAX_TITLE_LENGTH) : null,
       color: TOPIC_COLORS[workspace.threads.length % TOPIC_COLORS.length],
@@ -405,8 +450,9 @@ export class WorkspaceStore {
       position: parent === undefined ? { x: 86, y: 82 } : { x: parent.position.x + 400, y: parent.position.y },
       createdAt: now,
       updatedAt: now,
-      messages: [],
+      turns: [],
       pendingProcess: [],
+      processIds: [],
     }
     workspace.threads.push(thread)
     // A child may arrive before its parent during startup replay. Repair that
@@ -418,6 +464,14 @@ export class WorkspaceStore {
     return thread
   }
 
+  /**
+   * Fold one projected event into the thread's turn cards.
+   *
+   * v5 keeps only what the canvas renders: one card per user turn holding the
+   * question, the turn's latest answer, the tool count and the source seq used
+   * for branching. Full message text stays in the DSH session log and is
+   * re-read when the user opens the detail view.
+   */
   projectEventInto(workspace, thread, event) {
     if (event.type === 'session/title' && typeof event.data?.title === 'string') {
       thread.title = event.data.title.slice(0, MAX_TITLE_LENGTH)
@@ -432,70 +486,103 @@ export class WorkspaceStore {
       return
     }
     const projection = projectableEvent(event)
-    if (projection === null || thread.messages.some(message => message.sourceSeq === event.seq)) return
+    if (projection === null || this.hasSourceSeq(thread, event.seq)) return
     const at = new Date(event.time).toISOString()
-    const message = {
-      id: randomUUID(),
-      text: projection.text,
-      kind: projection.kind,
-      sourceSeq: event.seq,
-      at,
-      ...(projection.kind === 'assistant' || projection.kind === 'error'
-        ? { turn: event.data?.turn, step: event.data?.step, process: [] }
-        : {}),
+    const process = projection.kind === 'assistant' || projection.kind === 'error'
+      ? this.takePendingProcess(thread, event.data?.turn, event.data?.step)
+      : []
+    if (projection.kind === 'user') {
+      thread.turns.push({
+        seq: event.seq,
+        at,
+        question: cardText(projection.text, CARD_QUESTION_LENGTH),
+        answer: null,
+        answerSeq: null,
+        error: null,
+        processCount: 0,
+        processIds: [],
+      })
+      if (thread.dshSessionTitle === null) {
+        thread.title = titleFromText(projection.text)
+        thread.dshSessionTitle = thread.title
+      }
+    } else {
+      const turn = thread.turns.at(-1) ?? this.appendPlaceholderTurn(thread, at)
+      turn.processCount += process.length
+      turn.processIds.push(...process.map(entry => entry.callId))
+      if (projection.kind === 'error') turn.error = cardText(projection.text, CARD_ANSWER_LENGTH)
+      // A turn's final assistant reply is the card's answer. Replace so a
+      // later step (or a retry after an error) supersedes the earlier one.
+      else {
+        turn.answer = cardText(projection.text, CARD_ANSWER_LENGTH)
+        turn.answerSeq = event.seq
+        turn.error = null
+      }
+      turn.at = at
     }
-    this.attachPendingProcess(thread, message)
-    thread.messages.push(message)
     thread.updatedAt = at
     workspace.updatedAt = at
-    if (thread.dshSessionTitle === null && projection.kind === 'user') {
-      thread.title = titleFromText(projection.text)
-      thread.dshSessionTitle = thread.title
+  }
+
+  /** A reply without a preceding question (fork tail, mid-turn replay) still needs a card. */
+  appendPlaceholderTurn(thread, at) {
+    const turn = {
+      seq: null,
+      at,
+      question: thread.dshSessionTitle ?? thread.title ?? '会话',
+      answer: null,
+      answerSeq: null,
+      error: null,
+      processCount: 0,
+      processIds: [],
     }
+    thread.turns.push(turn)
+    return turn
+  }
+
+  hasSourceSeq(thread, seq) {
+    if (!Number.isSafeInteger(seq)) return false
+    return thread.turns.some(turn => turn.seq === seq || turn.answerSeq === seq)
   }
 
   /**
-   * Fold one tool call or result into the assistant message of its own
-   * turn/step, keyed by `callId`, so a tool invocation never becomes a
-   * separate canvas card. If a tool result arrives before its associated
-   * assistant/error message, retain it on the thread until that turn appears.
+   * Fold one tool call or result into the current turn's tool count, keyed by
+   * `callId` so a retried or duplicate event is not counted twice. Tool
+   * arguments and outputs are tracked by id only — they are never stored in
+   * the canvas metadata (issue: one 50KB bash output alone was ~4% of a
+   * 12MB workspaces.json) and are re-read from DSH for the detail view.
    */
   foldToolProcess(thread, event) {
     const at = new Date(event.time).toISOString()
     const data = event.data ?? {}
-    const target = [...thread.messages].reverse().find(message =>
-      (message.kind === 'assistant' || message.kind === 'error')
-      && (message.turn === data.turn && message.step === data.step
-        || message.turn === undefined && message.step === undefined))
-    const process = target === undefined ? (thread.pendingProcess ??= []) : (target.process ??= [])
     const callId = String(event.type === 'tool/call' ? data.callId : data.message?.source?.callId ?? '')
-    const entry = process.find(item => item.callId === callId)
-    if (event.type === 'tool/call') {
-      if (entry === undefined) {
-        process.push({ callId, turn: data.turn, step: data.step, name: data.name, arguments: data.arguments, result: null, error: null })
-      } else {
-        entry.name = data.name
-        entry.arguments = data.arguments
-      }
+    const turn = thread.turns.at(-1)
+    const recorded = thread.processIds ??= []
+    if (callId !== '' && recorded.includes(callId)) {
+      thread.updatedAt = at
+      return
+    }
+    if (callId !== '') recorded.push(callId)
+    if (turn !== undefined) {
+      turn.processCount += 1
+      turn.processIds.push(callId)
+      turn.at = at
     } else {
-      const outcome = contentText(data.message?.content)
-      const error = errorText(data.error)
-      if (entry === undefined) {
-        process.push({ callId, turn: data.turn, step: data.step, name: '工具调用', arguments: null, result: outcome, error })
-      } else {
-        entry.result = outcome
-        entry.error = error
-      }
+      // A tool event arriving before any assistant message: keep it in the
+      // pending bucket so the count survives until its turn appears.
+      const pending = thread.pendingProcess ??= []
+      pending.push({ callId, turn: data.turn, step: data.step })
     }
     thread.updatedAt = at
   }
 
-  attachPendingProcess(thread, message) {
-    if (!Array.isArray(thread.pendingProcess) || thread.pendingProcess.length === 0 || !Array.isArray(message.process)) return
-    const matching = thread.pendingProcess.filter(entry => entry.turn === message.turn && entry.step === message.step)
-    if (matching.length === 0) return
-    message.process.push(...matching.map(({ turn, step, ...entry }) => entry))
-    thread.pendingProcess = thread.pendingProcess.filter(entry => entry.turn !== message.turn || entry.step !== message.step)
+  takePendingProcess(thread, turn, step) {
+    const pending = thread.pendingProcess
+    if (!Array.isArray(pending) || pending.length === 0) return []
+    const matching = pending.filter(entry => entry.turn === turn && entry.step === step)
+    if (matching.length === 0) return []
+    thread.pendingProcess = pending.filter(entry => entry.turn !== turn || entry.step !== step)
+    return matching
   }
 
   thread({ title, parentId, dshSessionId, dshSessionTitle, position, color, now, order }) {
@@ -509,8 +596,9 @@ export class WorkspaceStore {
       position: positionOf(position ?? { x: 86 + (order % 3) * 410, y: 82 + Math.floor(order / 3) * 260 }),
       createdAt: now,
       updatedAt: now,
-      messages: [],
+      turns: [],
       pendingProcess: [],
+      processIds: [],
     }
   }
 
@@ -525,17 +613,13 @@ class NotFoundError extends Error {}
 function normalizeState(value) {
   let migrated = false
   let state
-  if ((value?.version === 2 || value?.version === 3 || value?.version === 4) && Array.isArray(value.workspaces)) {
+  if ([2, 3, 4, 5].includes(value?.version) && Array.isArray(value.workspaces)) {
     const hiddenSessionIds = Array.isArray(value.hiddenSessionIds) ? value.hiddenSessionIds.filter(item => typeof item === 'string') : []
     migrated = value.version < 3 || !Array.isArray(value.hiddenSessionIds)
     const workspaces = value.workspaces.map(workspace => ({
       ...workspace,
       threads: Array.isArray(workspace.threads) ? workspace.threads.map(thread => {
-        if (Array.isArray(thread.messages)) {
-          const messages = thread.messages.filter(message => !isRuntimeContextMessage(message))
-          if (messages.length !== thread.messages.length) migrated = true
-          return { ...thread, messages }
-        }
+        if (Array.isArray(thread.messages) || Array.isArray(thread.turns)) return thread
         migrated = true
         const notes = Array.isArray(thread.notes) ? thread.notes : []
         const { notes: _notes, ...rest } = thread
@@ -566,14 +650,119 @@ function normalizeState(value) {
     }
     migrated = true
   } else {
-    throw new Error('expected Synapse data version 1, 2, 3, or 4')
+    throw new Error('expected Synapse data version 1, 2, 3, 4, or 5')
   }
-  if (state.version !== 4) {
+  if (state.version < 4) {
     if (foldLegacyToolCards(state.workspaces)) migrated = true
     state.version = 4
     migrated = true
   }
+  // v5: replace the per-thread copy of the session message log with one card
+  // per turn. The canvas renders only those fields, and the detail view
+  // re-reads full text from the DSH session, so the log copy was pure weight.
+  if (state.version === 4) {
+    if (collapseMessagesToTurns(state.workspaces)) migrated = true
+    state.version = 5
+    migrated = true
+  }
+  // Normalize in place, so a hand-edited or partially written v5 file loads
+  // instead of crashing the canvas.
+  if (state.version === 5 && normalizeTurns(state.workspaces)) migrated = true
   return { state, migrated }
+}
+
+/**
+ * Coerce a v5 thread's turn cards to their expected shape (missing arrays,
+ * wrong-typed fields, or a leftover `messages` log from an interrupted
+ * migration). Returns whether anything had to be repaired.
+ */
+function normalizeTurns(workspaces) {
+  let changed = false
+  for (const workspace of workspaces) {
+    for (const thread of workspace.threads ?? []) {
+      if (thread.messages !== undefined) {
+        if (collapseMessagesToTurns([workspace])) changed = true
+        continue
+      }
+      if (!Array.isArray(thread.turns)) {
+        thread.turns = []
+        changed = true
+        continue
+      }
+      if (Array.isArray(thread.processIds)) continue
+      thread.processIds = []
+      changed = true
+    }
+  }
+  return changed
+}
+
+/**
+ * Rebuild each thread's turn cards from its persisted message log, then drop
+ * the log. Mirrors the live projection's turn slicing: a user message opens a
+ * turn, following assistant replies become its answer, and tool records count
+ * towards that turn.
+ */
+function collapseMessagesToTurns(workspaces) {
+  let changed = false
+  for (const workspace of workspaces) {
+    for (const thread of workspace.threads ?? []) {
+      if (thread.turns !== undefined) continue
+      changed = true
+      const messages = Array.isArray(thread.messages) ? thread.messages.filter(message => !isRuntimeContextMessage(message)) : []
+      const turns = []
+      let processIds = []
+      for (let index = 0; index < messages.length; index++) {
+        const message = messages[index]
+        if (message.kind === 'user') {
+          turns.push({
+            seq: Number.isSafeInteger(message.sourceSeq) ? message.sourceSeq : null,
+            at: typeof message.at === 'string' ? message.at : thread.updatedAt,
+            question: cardText(message.text, CARD_QUESTION_LENGTH),
+            answer: null,
+            answerSeq: null,
+            error: null,
+            processCount: 0,
+            processIds: [],
+          })
+          continue
+        }
+        const turn = turns.at(-1)
+        const process = Array.isArray(message.process) ? message.process : []
+        const ids = process.map(entry => String(entry?.callId ?? '')).filter(id => id !== '')
+        if (turn === undefined) {
+          // A reply with no preceding question: give it its own card so the
+          // canvas keeps the content instead of dropping it.
+          turns.push({
+            seq: null,
+            at: typeof message.at === 'string' ? message.at : thread.updatedAt,
+            question: thread.dshSessionTitle ?? thread.title ?? '会话',
+            answer: message.kind === 'error' ? null : cardText(message.text, CARD_ANSWER_LENGTH),
+            answerSeq: message.kind === 'error' || !Number.isSafeInteger(message.sourceSeq) ? null : message.sourceSeq,
+            error: message.kind === 'error' ? cardText(message.text, CARD_ANSWER_LENGTH) : null,
+            processCount: process.length,
+            processIds: ids,
+          })
+        } else {
+          turn.processCount += process.length
+          turn.processIds.push(...ids)
+          if (message.kind === 'error') turn.error = cardText(message.text, CARD_ANSWER_LENGTH)
+          else if (message.kind === 'assistant') {
+            turn.answer = cardText(message.text, CARD_ANSWER_LENGTH)
+            turn.answerSeq = Number.isSafeInteger(message.sourceSeq) ? message.sourceSeq : turn.answerSeq
+            turn.error = null
+          }
+          if (typeof message.at === 'string') turn.at = message.at
+        }
+        if (ids.length > 0) processIds.push(...ids)
+      }
+      delete thread.messages
+      delete thread.pendingProcess
+      thread.turns = turns
+      thread.processIds = [...new Set(processIds)]
+    }
+  }
+  return changed
 }
 
 /**
@@ -665,6 +854,257 @@ function projectableEvent(event) {
   }
 }
 
+// Markers that open a session's OWN log. A fork created by spawning a
+// subagent/child session starts its log from scratch with one of these at
+// seq 0, never with inherited parent history — so projecting from 0 cannot
+// duplicate the parent's turns.
+const OWN_LOG_BOOTSTRAP_TYPES = new Set(['permission/preset', 'sandbox/mode', 'approval/policy', 'subagent/descriptor'])
+
+/**
+ * Resolve where a fork's OWN history starts, so only the child's new turns are
+ * projected and the inherited parent history stays on the parent's cards.
+ *
+ * DSH persists the cut as `header.seedLength`, but that field is frequently
+ * absent (84% of forks in one real profile). Two fallbacks cover it, in order:
+ *
+ * 1. the durable `session/end-seed` marker event — per the session contract,
+ *    readers of STORED history must locate the LAST such event rather than
+ *    trust the in-process `firstLiveSeq`;
+ * 2. a log that opens with a session's own bootstrap marker at seq 0, which
+ *    means it holds no inherited history, so 0 is a safe boundary.
+ *
+ * @returns the seq to project from, or `null` when the boundary is unknown.
+ */
+export function forkSeqBoundary(events, header) {
+  if (Number.isSafeInteger(header?.seedLength) && header.seedLength >= 0) return header.seedLength
+  if (!Array.isArray(events) || events.length === 0) return null
+  let boundary = null
+  for (const event of events) if (event?.type === 'session/end-seed') boundary = event.seq + 1
+  if (boundary !== null) return boundary
+  const first = events[0]
+  return first?.seq === 0 && OWN_LOG_BOOTSTRAP_TYPES.has(first.type) ? 0 : null
+}
+
+/**
+ * Where in the PARENT's log this fork was cut, or `null` when unknown.
+ *
+ * This is the anchoring question, and it is deliberately stricter than
+ * `forkSeqBoundary`: the canvas attaches a branch under the parent turn with
+ * the greatest seq below this value. A bootstrap-derived boundary of 0 means
+ * only "this child's log starts from scratch" — it says nothing about which
+ * parent turn it came from, so using it as an anchor would attach the branch
+ * under nothing (parent turns all have seq >= 0) and leave it a root anyway.
+ *
+ * Only a durable `seedLength` or an `end-seed` marker identifies the cut.
+ */
+export function forkAnchorSeq(events, header) {
+  if (Number.isSafeInteger(header?.seedLength) && header.seedLength >= 0) return header.seedLength
+  let boundary = null
+  for (const event of events) if (event?.type === 'session/end-seed') boundary = event.seq + 1
+  return boundary
+}
+
+/**
+ * Project the fork branches that the live-session replay never reached.
+ *
+ * `autoProjection` only replays sessions that are live in this DSH process
+ * (`ctx.sessions.list()`). After a restart, every other session — including
+ * forks the user branched into and then switched away from — keeps no cards,
+ * so its branch shows on the map as an empty placeholder. Measured on one
+ * profile: 23 of 30 forks had real turns on disk but zero cards.
+ *
+ * The scan is deliberately narrow (forks only, per the configured scope) and
+ * runs in the background so startup is never blocked:
+ *
+ * 1. list session headers and pick the ones that have a `parentSession`;
+ * 2. skip any session that already has cards, or that the user archived;
+ * 3. inspect each remaining fork's log (live sessions come from memory, cold
+ *    ones from persistence — the same two paths the detail view uses);
+ * 4. project only the events from the fork's own seed boundary onward.
+ *
+ * Forks whose boundary cannot be determined are left alone rather than
+ * projected from 0, which would duplicate their parent's history onto the map.
+ */
+async function backfillForks(ctx, store, workspaceTitle, reportFailure) {
+  let persistence
+  try {
+    persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : ctx.sessionPersistence
+  } catch {
+    return
+  }
+  if (persistence === undefined || persistence === null || typeof persistence.list !== 'function') return
+  let headers
+  try {
+    headers = await persistence.list()
+  } catch {
+    return
+  }
+  if (!Array.isArray(headers)) return
+  const alreadyProjected = await store.projectedSessionIds()
+  const queue = headers.filter(header =>
+    typeof header?.parentSession === 'string'
+    && typeof header?.id === 'string'
+    && !alreadyProjected.has(header.id))
+  if (queue.length === 0) return
+  const projected = new Set(alreadyProjected)
+  // Yield between sessions: a large profile has hundreds of logs, and the
+  // canvas stays responsive while they are filled in one at a time.
+  for (const header of queue) {
+    try {
+      const events = await readSessionEvents(ctx, header.id)
+      if (events === null || events.length === 0) continue
+      const boundary = forkSeqBoundary(events, header)
+      if (boundary === null) continue
+      // A fork only attaches under its parent's turn when the parent itself
+      // has cards. Parents are usually cold too (they were branched away from
+      // and never re-opened), so backfill the parent first — from 0, since a
+      // root session owns its whole log — but only as far as the fork point's
+      // own history, never beyond what the fork needs as an anchor.
+      if (typeof header.parentSession === 'string' && !projected.has(header.parentSession)) {
+        const parentEvents = await readSessionEvents(ctx, header.parentSession)
+        if (parentEvents !== null && parentEvents.length > 0) {
+          const parentHeader = headers.find(item => item?.id === header.parentSession) ?? { id: header.parentSession }
+          await store.projectSession({ id: header.parentSession, header: parentHeader, events: parentEvents }, 0, workspaceTitle)
+          projected.add(header.parentSession)
+          await store.flush()
+        }
+      }
+      // Pass the resolved boundary through: it becomes the thread's
+      // `sourceSeedLength`, which is what lets the canvas anchor this branch
+      // under the exact parent turn it forked from. Only a real, durable cut
+      // can serve as that anchor (see `forkAnchorSeq`) — a bootstrap-derived
+      // start point would attach the branch under nothing.
+      const anchor = forkAnchorSeq(events, full)
+      const thread = await store.projectSession({ id: header.id, header, events, seedBoundary: anchor }, boundary, workspaceTitle)
+      if (thread !== null) projected.add(header.id)
+      await store.flush()
+    } catch (error) {
+      reportFailure(error)
+    }
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+}
+
+/**
+ * Read one session's committed events, live or cold.
+ *
+ * A live session's log is already in memory, so it is read directly. An
+ * archived or not-yet-restored session is inspected through persistence
+ * (read-only: it does not publish the session or commit crash recovery), so
+ * opening a card for an old conversation still shows its full turn.
+ *
+ * @returns the events, or `null` when the session has no readable log.
+ */
+async function readSessionEvents(ctx, sessionId) {
+  if (sessionId === '') return null
+  // Both services are resolved defensively: cordis's Context proxy throws
+  // `cannot get property ... without inject` on an undeclared service, and a
+  // store may reject an id it cannot brand. Either way the detail view should
+  // show the card summary — not fail the request.
+  let live
+  try {
+    live = ctx.sessions.get(sessionId)
+  } catch {
+    live = undefined
+  }
+  if (live !== undefined) return live.events
+  // `ctx.sessionPersistence` is NOT declared in `inject`, so touching it
+  // directly makes cordis throw `cannot get property ... without inject`
+  // (its Context proxy rejects undeclared services) — that throw used to
+  // escape into the route's catch and surface as a 500. Resolve it through
+  // `ctx.get`, the safe accessor, and guard the whole lookup anyway.
+  let persistence
+  try {
+    persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : ctx.sessionPersistence
+  } catch {
+    return null
+  }
+  if (persistence === undefined || persistence === null || typeof persistence.inspect !== 'function') return null
+  try {
+    const inspection = await persistence.inspect(sessionId)
+    return Array.isArray(inspection?.events) ? inspection.events : null
+  } catch {
+    // A session whose log was deleted or is still being written has no detail
+    // to show; the card summary still renders.
+    return null
+  }
+}
+
+/**
+ * Rebuild the full detail of one turn straight from a DSH session's event log.
+ *
+ * v5 stores only a display-sized card summary, so the detail view reads the
+ * real text (and every tool call with its arguments and output) back from the
+ * session instead of from the canvas metadata. `events` are the session's
+ * committed events in seq order; `turnSeq` is the turn's opening user event.
+ */
+export function buildTurnDetail(events, turnSeq) {
+  if (!Array.isArray(events)) return { question: null, steps: [], process: [] }
+  const ordered = [...events].sort((left, right) => left.seq - right.seq)
+  // Only a REAL user question opens a turn. DSH emits runtime-context
+  // snapshots and <system-reminder> blocks as user-role messages too; the
+  // card projection already skips them, so the detail view must slice on the
+  // same rule or those blocks would split one turn into several.
+  const isTurnStart = event => event.type === 'user/message' && !isRuntimeContextText(contentText(event.data?.content))
+  let start = ordered.findIndex(event => event.seq === turnSeq && isTurnStart(event))
+  if (start === -1) {
+    // Fall back to the nth real turn when the durable seq is unavailable
+    // (legacy data, or a turn discovered before its event was committed).
+    start = ordered.findIndex(isTurnStart)
+  }
+  if (start === -1) return { question: null, steps: [], process: [] }
+  const end = ordered.findIndex((event, index) => index > start && isTurnStart(event))
+  const slice = ordered.slice(start, end === -1 ? undefined : end)
+  const questionText = contentText(ordered[start].data?.content)
+  const question = questionText.trim() === '' ? null : questionText
+  const steps = []
+  const process = []
+  for (const event of slice.slice(1)) {
+    if (event.type === 'assistant/message' || event.type === 'todo/write') {
+      const text = event.type === 'todo/write'
+        ? (Array.isArray(event.data?.todos) ? event.data.todos.map(todo => `[${todo.status}] ${todo.content}`).join('\n') : '')
+        : contentText(event.data?.message?.content)
+      if (text.trim() === '') continue
+      steps.push({ kind: 'assistant', seq: event.seq, at: new Date(event.time).toISOString(), text })
+      continue
+    }
+    if (event.type === 'turn/end' && event.data?.reason?.kind === 'error') {
+      const text = errorText(event.data.reason.error) ?? '本轮执行失败'
+      steps.push({ kind: 'error', seq: event.seq, at: new Date(event.time).toISOString(), text })
+      continue
+    }
+    if (event.type !== 'tool/call' && event.type !== 'tool/result') continue
+    const data = event.data ?? {}
+    const callId = String(event.type === 'tool/call' ? data.callId : data.message?.source?.callId ?? '')
+    // An empty callId cannot be paired (legacy records), so it always appends.
+    const entry = callId === '' ? undefined : process.find(item => item.callId === callId)
+    if (event.type === 'tool/call') {
+      if (entry !== undefined) {
+        // A redelivered call keeps the first record; only the name/args refresh.
+        entry.name = typeof data.name === 'string' ? data.name : entry.name
+        continue
+      }
+      process.push({
+        callId,
+        name: typeof data.name === 'string' ? data.name : '工具调用',
+        arguments: typeof data.arguments === 'string' ? data.arguments : '',
+        result: null,
+        error: null,
+      })
+      continue
+    }
+    if (entry === undefined) {
+      // A result whose call was never seen (or arrived out of order) still
+      // shows its output instead of being dropped.
+      process.push({ callId, name: '工具结果', arguments: '', result: contentText(data.message?.content), error: errorText(data.error) })
+      continue
+    }
+    entry.result = contentText(data.message?.content)
+    entry.error = errorText(data.error)
+  }
+  return { question, steps, process }
+}
+
 function errorText(value) {
   if (typeof value === 'string') return value.trim() || null
   if (value === null || value === undefined || typeof value !== 'object') return null
@@ -673,6 +1113,12 @@ function errorText(value) {
   const message = typeof value.message === 'string' && value.message.trim() !== '' ? value.message.trim() : ''
   if (message !== '') return [name, code].filter(Boolean).concat(message).join(': ')
   return [name, code].filter(Boolean).join(': ') || null
+}
+
+/** Cap a card field for display; the detail view re-reads the full text from DSH. */
+function cardText(text, limit) {
+  const value = String(text ?? '')
+  return value.length <= limit ? value : `${value.slice(0, limit)}${TRUNCATED_MARK}`
 }
 
 function noteProjection(kind, text) {
@@ -759,12 +1205,27 @@ export function apply(ctx, config) {
   }
   const replaySession = session => {
     // Forks inherit their parent's log. The canvas already represents that
-    // history through the parent node, so only project the child's live tail.
-    const replayFrom = session.header?.parentSession === undefined ? 0 : session.firstLiveSeq
-    void store.projectSession(session, replayFrom, projectionWorkspaceTitle).catch(reportProjectionFailure)
+    // history through the parent node, so only project the child's own turns.
+    //
+    // `firstLiveSeq` alone is not enough: when a fork is restored from disk,
+    // its constructor seed is the whole stored log, so `firstLiveSeq` can sit
+    // past the branch's own first message and that message would be skipped —
+    // leaving the branch an empty card. `forkSeqBoundary` resolves the real
+    // cut (durable seedLength, else the end-seed marker, else an own-log
+    // bootstrap header) and falls back to firstLiveSeq only when unknown.
+    const parentSession = session.header?.parentSession
+    const replayFrom = parentSession === undefined
+      ? 0
+      : (forkSeqBoundary(session.events, session.header) ?? session.firstLiveSeq ?? 0)
+    void store.projectSession(
+      { ...session, seedBoundary: parentSession === undefined ? undefined : forkAnchorSeq(session.events, session.header) },
+      replayFrom,
+      projectionWorkspaceTitle,
+    ).catch(reportProjectionFailure)
   }
   // Buffer live events per session and flush them in one write per microtask,
   // so a burst of turn events coalesces into a single save instead of N.
+  backfillForks(ctx, store, projectionWorkspaceTitle, reportProjectionFailure)
   const projectionQueue = []
   let projectionScheduled = false
   const enqueueProjection = (session, event) => {
@@ -813,6 +1274,18 @@ export function apply(ctx, config) {
       const branch = /^\/synapse\/api\/threads\/([0-9a-f-]+)\/branch$/i.exec(path)
       if (branch !== null && req.method === 'POST') return sendJson(res, 201, { thread: await store.branch(branch[1], await readJson(req)) })
       if (path === '/synapse/api/sessions/sync' && req.method === 'POST') { const body = await readJson(req); return sendJson(res, 200, { workspaces: await store.syncSessions(body.sessions, body.removedSessionIds) }) }
+      // Detail on demand: the canvas stores only card summaries, so the full
+      // turn (every assistant step plus tool arguments and outputs) is read
+      // back from the DSH session when the user opens it. Live sessions are
+      // read from memory; archived/cold ones come from persistence, so the
+      // detail view works for every card on the map, not just the current one.
+      if (path === '/synapse/api/turn-detail' && req.method === 'POST') {
+        const body = await readJson(req)
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
+        const events = await readSessionEvents(ctx, sessionId)
+        if (events === null) return sendJson(res, 404, { error: '会话已不可用' })
+        return sendJson(res, 200, { detail: buildTurnDetail(events, Number.isSafeInteger(body.seq) ? body.seq : null) })
+      }
       const messages = /^\/synapse\/api\/threads\/([0-9a-f-]+)\/messages$/i.exec(path)
       if (messages !== null && req.method === 'POST') return sendJson(res, 201, { thread: await store.addMessage(messages[1], (await readJson(req)).text) })
       const thread = /^\/synapse\/api\/threads\/([0-9a-f-]+)$/i.exec(path)
