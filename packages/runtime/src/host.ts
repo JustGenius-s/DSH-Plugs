@@ -49,8 +49,20 @@ export type { Context } from '@deepseek-ai/cordis'
 export type { Entry } from '@deepseek-ai/cordis-plugin-loader'
 export { default as Schema } from '@deepseek-ai/schemastery'
 export type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
-export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
-export type { PresetBearingSession } from '@deepseek-ai/dsh-agent-presets'
+/**
+ * Preset resolution that survives a session with no readable log.
+ *
+ * Upstream's `resolveSessionPreset` indexes `session.events.length` directly,
+ * and a Session whose `events` getter has not resolved yet reads undefined —
+ * which threw
+ *   TypeError: Cannot read properties of undefined (reading 'length')
+ * from inside dsh-agent-presets and failed the whole side-chat open request,
+ * with no handler able to describe it. The local re-export keeps the same
+ * contract but treats a missing log as "header value only" (see
+ * session-preset.ts) instead of crashing.
+ */
+export { resolveSessionPreset } from './session-preset.ts'
+export type { PresetBearingSession } from './session-preset.ts'
 export type { CommandInvocation } from '@deepseek-ai/dsh-commands'
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'

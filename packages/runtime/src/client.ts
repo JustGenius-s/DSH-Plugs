@@ -58,6 +58,11 @@ export interface PluginSlotMap {}
 /** Plugin-owned conversation node payloads bridged into the chat renderer. */
 export interface PluginChatNodeDataMap {}
 
+/** DSH 0.1.2 split directory/navigation commands out of `workspaces`. */
+export interface UiWorkspaceFace {
+  pickDirectory: () => Promise<string | null>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context extends PluginClientContext {}
 }
@@ -113,6 +118,28 @@ export type {
   ReferenceInsert,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 export type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+/**
+ * Chat-target selector hook, surfaced to slot components as `useChat`.
+ *
+ * This is the only hook that carries chat rows (`order` / `nodes`):
+ * `useSession` exposes Session LIFECYCLE facts and `useConversation` exposes
+ * the target-keyed `views` store, so reading rows off either of those yields
+ * `undefined`. That is the 0.1.2 shape change that silently emptied features
+ * written against the old flat `snapshot.chat`.
+ *
+ * Declared structurally rather than re-exported from dsh-client-ui-chat: that
+ * package resolves a second cordis instance here, which breaks dts bundling.
+ * Types only — no runtime dependency is added.
+ */
+export type UseChat = <S>(
+  selector: (snapshot: {
+    readonly order: readonly string[]
+    readonly nodes: {
+      get(key: string): { kind?: string; data?: unknown } | undefined
+    }
+  }) => S,
+  isEqual?: (a: S, b: S) => boolean,
+) => S
 export type {
   InjectFace,
   PropsLocale,
@@ -279,6 +306,7 @@ export const CLIENT_SERVICES = {
   slots: 'slots',
   settingsScope: 'settingsScope',
   settingsSchema: 'settingsSchema',
+  uiWorkspace: 'uiWorkspace',
   workspaces: 'workspaces',
 } as const
 
@@ -316,6 +344,13 @@ export function getSessions(ctx: ClientContext): ISessions {
 
 export function getWorkspaces(ctx: ClientContext): IWorkspaces {
   return ctx.workspaces
+}
+
+/** Resolve the Workspace UI service introduced by the 0.1.2 service split. */
+export function getUiWorkspace(ctx: ClientContext): UiWorkspaceFace {
+  const service = ctx.get(CLIENT_SERVICES.uiWorkspace) as UiWorkspaceFace | undefined
+  if (service === undefined) throw new Error('uiWorkspace service is unavailable')
+  return service
 }
 
 export function getSettingsScope(ctx: ClientContext): SettingsScopeBinder {
