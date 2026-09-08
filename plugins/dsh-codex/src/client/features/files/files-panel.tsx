@@ -6,6 +6,8 @@ import {
   Input,
   Menu,
   type MenuEntry,
+  Toast,
+  writeClipboard,
 } from '@just-genius/dsh-plugin-ui'
 import {
   type GitChangeStatus,
@@ -19,6 +21,14 @@ import {
 import type { PanelNavState } from '../side-panels/service'
 import { fileIconSvg, folderIconSvg } from './file-icons'
 import { subscribeRepoWatch } from '../repo-watch'
+import {
+  absolutePathOf,
+  fetchFilesHostInfo,
+  relativePathOf,
+  revealPath,
+  type FilesHostInfo,
+} from './files-actions'
+import { buildFilesMenu } from './files-menu'
 import { FileCodeView, FileDiffView, FileMarkdownView, type ViewLabels } from './file-views'
 import type { FileReviewComment } from './review-comment'
 import { isMarkdownFile } from './markdown'
@@ -65,10 +75,11 @@ export interface FilesPanelProps {
   /** Dark syntax-highlight theme id (see files/themes.ts). */
   highlightThemeDark?: string
   /**
-   * Insert a worktree file into the conversation draft as an `@file` chip.
+   * Insert a worktree path into the conversation draft as an `@path` chip —
+   * a directory mention keeps its trailing slash and folder glyph.
    * Wired by the feature wrapper; omitted when conversation is unavailable.
    */
-  onAddToChat?: (path: string) => boolean
+  onAddToChat?: (path: string, kind: 'file' | 'dir') => boolean
   /** Append an inline file/diff review comment to the conversation draft. */
   onAddComment?: (comment: FileReviewComment) => boolean
 }
@@ -174,6 +185,8 @@ const TREE_REFRESH_DEBOUNCE_MS = 400
  */
 interface FileContextMenuState {
   path: string
+  /** Directory rows insert a folder mention (trailing slash, folder glyph). */
+  kind: 'file' | 'dir'
   x: number
   y: number
 }
@@ -184,7 +197,7 @@ function FilesTree(props: {
   onOpen: (state: PanelNavState) => void
   showIgnored: boolean
   visible: boolean
-  onAddToChat?: (path: string) => boolean
+  onAddToChat?: (path: string, kind: 'file' | 'dir') => boolean
 }) {
   const { cwd, t, onOpen, showIgnored, visible, onAddToChat } = props
   const [contextMenu, setContextMenu] = useState<FileContextMenuState | null>(null)
@@ -198,6 +211,24 @@ function FilesTree(props: {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const [matches, setMatches] = useState<readonly GitTreeEntry[] | null>(null)
   const [searchBusy, setSearchBusy] = useState(false)
+  const [hostInfo, setHostInfo] = useState<FilesHostInfo | undefined>()
+  const [notice, setNotice] = useState<{ seq: number; text: string } | null>(null)
+  const noticeSeq = useRef(0)
+
+  const showNotice = useCallback((text: string): void => {
+    noticeSeq.current += 1
+    setNotice({ seq: noticeSeq.current, text })
+  }, [])
+
+  // One probe per page: the platform decides whether the reveal row exists at
+  // all, and a right-click must not wait on a round trip to paint its menu.
+  useEffect(() => {
+    let cancelled = false
+    void fetchFilesHostInfo().then((value) => {
+      if (!cancelled) setHostInfo(value)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const expandedRef = useRef(expanded)
   expandedRef.current = expanded
@@ -372,23 +403,47 @@ function FilesTree(props: {
   const rootEntries = childrenByDir.get('')
   const searchList = matches ?? []
 
-  const openFileMenu = useCallback((event: ReactMouseEvent, path: string): void => {
-    if (onAddToChat === undefined) return
+  const openFileMenu = useCallback((event: ReactMouseEvent, path: string, kind: 'file' | 'dir'): void => {
     event.preventDefault()
     event.stopPropagation()
-    setContextMenu({ path, x: event.clientX, y: event.clientY })
-  }, [onAddToChat])
+    setContextMenu({ path, kind, x: event.clientX, y: event.clientY })
+  }, [])
 
   const menuItems = useMemo((): readonly MenuEntry[] => {
-    if (onAddToChat === undefined) return []
-    return [{ id: 'add-to-chat', label: t('context.addToChat') }]
-  }, [onAddToChat, t])
+    if (contextMenu === null) return []
+    return buildFilesMenu(
+      { path: contextMenu.path, kind: contextMenu.kind, cwd },
+      { canAddToChat: onAddToChat !== undefined, hostInfo },
+      t,
+    )
+  }, [contextMenu, cwd, hostInfo, onAddToChat, t])
 
   const onMenuSelect = useCallback((id: string): void => {
     if (contextMenu === null) return
-    if (id === 'add-to-chat') onAddToChat?.(contextMenu.path)
+    const { path, kind } = contextMenu
     setContextMenu(null)
-  }, [contextMenu, onAddToChat])
+    switch (id) {
+      case 'add-to-chat':
+        onAddToChat?.(path, kind)
+        return
+      case 'copy-path':
+        void copyText(absolutePathOf(path, cwd), t, showNotice)
+        return
+      case 'copy-relative-path': {
+        const relative = relativePathOf(path, cwd)
+        if (relative !== undefined) void copyText(relative, t, showNotice)
+        return
+      }
+      case 'reveal':
+        void (async (): Promise<void> => {
+          const result = await revealPath(cwd, path, kind)
+          if (!result.ok) showNotice(t('context.revealFailed'))
+        })()
+        return
+      default:
+        return
+    }
+  }, [contextMenu, cwd, onAddToChat, showNotice, t])
 
   return (
     <div className="dsh-files-tree">
@@ -445,7 +500,7 @@ function FilesTree(props: {
           />
         )}
       </div>
-      {onAddToChat !== undefined ? (
+      {menuItems.length > 0 ? (
         <Menu
           open={contextMenu !== null}
           portal
@@ -463,8 +518,28 @@ function FilesTree(props: {
           onClose={() => setContextMenu(null)}
         />
       ) : null}
+      {/* Keyed so a repeated action re-triggers the 4s dismiss timer. */}
+      {notice !== null ? (
+        <Toast key={notice.seq} text={notice.text} onDone={() => setNotice(null)} />
+      ) : null}
     </div>
   )
+}
+
+/**
+ * Put `text` on the clipboard and confirm it, or report the failure.
+ *
+ * Clipboard writes are user-gesture-scoped in most browsers, so this runs
+ * straight from the menu's click handler — never after an await that would
+ * lose the gesture and make the write a no-op.
+ */
+async function copyText(
+  text: string,
+  t: (key: string) => string,
+  notice: (text: string) => void,
+): Promise<void> {
+  const copied = await writeClipboard(text)
+  notice(copied ? t('context.copied') : t('context.copyFailed'))
 }
 
 /** One directory level; children come from the lazy `childrenByDir` map. */
@@ -477,7 +552,7 @@ function TreeLevel(props: {
   /** Hover warm-up so expand usually paints with children already cached. */
   onPrefetch: (dir: string) => void
   onOpen: (state: PanelNavState) => void
-  onContextMenu?: (event: ReactMouseEvent, path: string) => void
+  onContextMenu?: (event: ReactMouseEvent, path: string, kind: 'file' | 'dir') => void
   /**
    * Ancestor folder was gitignored — paint every descendant faded even if a
    * nested listing omitted the flag (VS Code Explorer under node_modules).
@@ -517,6 +592,9 @@ function TreeLevel(props: {
                 type="button"
                 className="dsh-files-tree-row-main"
                 onClick={() => onToggle(node.path)}
+                onContextMenu={onContextMenu === undefined
+                  ? undefined
+                  : (event) => onContextMenu(event, node.path, 'dir')}
                 title={ignored ? `${node.path} (gitignore)` : node.path}
               >
                 {open
@@ -556,7 +634,7 @@ function FileRow(props: {
   entry: GitTreeEntry
   depth: number
   onOpen: (state: PanelNavState) => void
-  onContextMenu?: (event: ReactMouseEvent, path: string) => void
+  onContextMenu?: (event: ReactMouseEvent, path: string, kind: 'file' | 'dir') => void
   /** Show the parent directory after the name (search results are flat). */
   hint?: boolean
   /** Override when an ancestor directory is ignored. */
@@ -575,7 +653,7 @@ function FileRow(props: {
         onClick={() => onOpen({ mode: 'preview', file: entry.path })}
         onContextMenu={onContextMenu === undefined
           ? undefined
-          : (event) => onContextMenu(event, entry.path)}
+          : (event) => onContextMenu(event, entry.path, 'file')}
         title={ignored ? `${entry.path} (gitignore)` : entry.path}
       >
         <span className="dsh-files-tree-chevron" />

@@ -1,12 +1,14 @@
 /**
  * Routes conversation file links into the `files` side-panel preview.
  *
- * The stock chat view opens file links through `ctx.workspaces.openPath`,
- * which hands the path to the Host operating system's default application.
- * That service is a shared instance captured by the conversation plugin at
- * apply time, so shadowing its `openPath` method here reroutes every chat
- * file-open (markdown links, produced-files chips) without forking the
- * conversation package.
+ * Since DSH 0.1.3 the chat view opens file links through the Host Remote
+ * `session/openWorkspacePath` — `ctx.remote.session.openWorkspacePath({ path })`
+ * — which hands the path to the operating system's default application. Before
+ * that, the same gesture went through the client-side `ctx.workspaces.openPath`.
+ * The Remote call is a generated namespace method installed as a getter on the
+ * namespace service, so shadowing `openWorkspacePath` with an own property here
+ * reroutes every chat file-open (markdown links, produced-files chips) without
+ * forking the conversation package.
  *
  * Absolute paths are rerouted whether they sit inside the session's working
  * directory or not — the host's worktree read is plain file IO and happily
@@ -16,7 +18,7 @@
  */
 
 import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
-import { getSessions, getWorkspaces } from '@just-genius/dsh-plugin-runtime/client'
+import { getSessions } from '@just-genius/dsh-plugin-runtime/client'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
@@ -31,38 +33,96 @@ export function createFileLinksFeature(
     id: 'file-links',
     requires: ['sidePanels', 'files'],
     activate() {
-      const workspaces = getWorkspaces(ctx)
+      const session = sessionRemote(ctx)
+      if (session === undefined) return () => {}
       const store = ctx.sidePanels as SidePanelsStore
-      const hadOwn = Object.prototype.hasOwnProperty.call(workspaces, 'openPath')
-      const original = workspaces.openPath
+      // The generated namespace installs each method as an own accessor, so
+      // the descriptor — not just its current value — is what a restore owes
+      // back. Deleting the property instead would leave the namespace without
+      // the method for the rest of the page's life.
+      const descriptor = findAccessor(session, 'openWorkspacePath')
+      if (descriptor === undefined) return () => {}
+      const readOriginal = (): OpenWorkspacePath =>
+        descriptor.get === undefined
+          ? descriptor.value as OpenWorkspacePath
+          : descriptor.get.call(session) as OpenWorkspacePath
 
-      const patched = async (path: string): Promise<void> => {
+      const patched = async (request: OpenPathRequest): Promise<OpenPathResult> => {
         const config = scope.getSnapshot().value ?? DEFAULT_CONFIG
         if (config.fileLinksInPanel && config.filesEnabled) {
-          const target = panelTarget(ctx, path)
+          const target = panelTarget(ctx, request.path)
           if (target !== undefined) {
             openPreview(store, target.sessionId, target.file)
-            return
+            // The chat view treats a non-ok result as a failed open and shows
+            // its error dialog; a rerouted link needs the same success shape
+            // the Host returns when the native opener accepts the path.
+            return { ok: true, value: { opened: true } }
           }
         }
-        return original.call(workspaces, path)
+        // Read through the saved getter on every call: a method the Gateway
+        // remounts (a Remote contribution re-loaded under HMR) installs a new
+        // closure, so a value captured once could go stale.
+        return readOriginal()(request)
       }
 
-      workspaces.openPath = patched
+      Object.defineProperty(session, 'openWorkspacePath', {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: patched,
+      })
 
       return () => {
         // Another feature may have re-patched after us; leave its patch alone.
-        if (workspaces.openPath !== patched) return
-        if (hadOwn) {
-          workspaces.openPath = original
-        } else {
-          // The stock method lives on the prototype; dropping the own
-          // property restores it.
-          Reflect.deleteProperty(workspaces, 'openPath')
-        }
+        if (session.openWorkspacePath !== patched) return
+        Object.defineProperty(session, 'openWorkspacePath', descriptor)
       }
     },
   }
+}
+
+/** The wire shapes of `session/openWorkspacePath` (see dsh-api-session-controller). */
+interface OpenPathRequest {
+  path: string
+}
+
+interface OpenPathResult {
+  ok: boolean
+  value?: { opened: true }
+  error?: { code: string; message: string }
+}
+
+/**
+ * The `session` Remote namespace, or undefined when this Host does not expose
+ * it. `ctx.remote.session` throws when the namespace is not injected, so the
+ * read is guarded: an older Host keeps its own file-link behavior intact.
+ */
+function sessionRemote(ctx: ClientContext): SessionRemote | undefined {
+  const remote = ctx.remote as { session?: SessionRemote } | undefined
+  return remote?.session
+}
+
+interface SessionRemote {
+  openWorkspacePath(request: OpenPathRequest): Promise<OpenPathResult>
+}
+
+type OpenWorkspacePath = (request: OpenPathRequest) => Promise<OpenPathResult>
+
+/**
+ * Walk the prototype chain for `key`'s own property descriptor.
+ *
+ * The Gateway's namespace service defines methods on the instance, but a
+ * Remote namespace is reached through Cordis service tracing, so the object
+ * read off `ctx.remote.session` may proxy or shadow that instance.
+ */
+function findAccessor(target: object, key: string): PropertyDescriptor | undefined {
+  let current: object | null = target
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, key)
+    if (descriptor !== undefined && descriptor.configurable) return descriptor
+    current = Object.getPrototypeOf(current)
+  }
+  return undefined
 }
 
 /**

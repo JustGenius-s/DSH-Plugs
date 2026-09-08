@@ -11,6 +11,7 @@ import {
   type DshCodexConfig,
 } from './shared/config'
 import { createDshCodexGitGraphServer } from './host/git-graph/server'
+import { createDshCodexFilesServer } from './host/files/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
@@ -81,4 +82,9 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
     const server = createDshCodexGitGraphServer(ctx)
     return () => server.dispose()
   }, 'dsh-codex: git-graph routes')
+
+  ctx.effect(() => {
+    const server = createDshCodexFilesServer(ctx)
+    return () => server.dispose()
+  }, 'dsh-codex: files routes')
 }

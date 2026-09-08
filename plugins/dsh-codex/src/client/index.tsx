@@ -30,8 +30,9 @@ export const inject = [
   CLIENT_SERVICES.locale,
   CLIENT_SERVICES.connection,
   CLIENT_SERVICES.remote,
+  // Chat file links resolve through `session/openWorkspacePath` since DSH 0.1.3.
+  CLIENT_SERVICES.remoteSession,
   CLIENT_SERVICES.sessions,
-  CLIENT_SERVICES.workspaces,
   // Terminal selections and file review comments register `@` reference codecs here.
   CLIENT_SERVICES.inputTriggers,
   CLIENT_SERVICES.settingsScope,
