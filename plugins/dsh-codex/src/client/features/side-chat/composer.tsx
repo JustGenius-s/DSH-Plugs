@@ -30,6 +30,7 @@ import type {
 } from '@just-genius/dsh-plugin-runtime/client'
 import type { IApiClient } from '@just-genius/dsh-plugin-runtime/client'
 import type { ModelCatalogModel, ModelReasoning, ModelSelection, SessionModels } from './types'
+import { modelLookupErrorMessage, modelMenuNotice } from './model-picker'
 import {
   SideChatPermissionSelect,
   type PermissionProjectionFace,
@@ -70,11 +71,10 @@ export interface SideChatComposerProps {
 }
 
 /** Structured model directory snapshot kept in component state. */
-interface ModelState {
-  status: 'loading' | 'ready' | 'error'
-  value?: SessionModels
-  error?: string
-}
+type ModelState =
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; value: SessionModels }
 
 /**
  * Render the composer.
@@ -141,14 +141,11 @@ export function SideChatComposer({
         if (result.result.ok) {
           setModels({ status: 'ready', value: result.result.value })
         } else {
-          setModels({ status: 'error', error: String(result.result.error?.message ?? 'model lookup failed') })
+          setModels({ status: 'error', message: String(result.result.error?.message ?? 'model lookup failed') })
         }
       } catch (cause) {
         if (alive) {
-          setModels({
-            status: 'error',
-            error: cause instanceof Error ? cause.message : 'model lookup failed',
-          })
+          setModels({ status: 'error', message: modelLookupErrorMessage(cause) })
         }
       }
     })()
@@ -220,10 +217,12 @@ export function SideChatComposer({
   }
 
   // ── model select ────────────────────────────────────────────────────────
-  const currentSelection = models.value?.current
+  const directory = models.status === 'ready' ? models.value : undefined
+  const notice = modelMenuNotice(models)
+  const currentSelection = directory?.current
   const currentCatalog = currentSelection === undefined
     ? undefined
-    : catalogModel(models.value, currentSelection.provider, currentSelection.model)
+    : catalogModel(directory, currentSelection.provider, currentSelection.model)
   const selectedModelLabel = currentSelection === undefined
     ? undefined
     : (currentCatalog === undefined
@@ -233,7 +232,7 @@ export function SideChatComposer({
   const selectedEffortLabel = effortCaption(reasoning, currentSelection?.reasoningEffort)
 
   const applySelection = (selected: ModelSelection): void => {
-    setModels(current => current.value === undefined
+    setModels(current => current.status !== 'ready'
       ? current
       : { status: 'ready', value: { ...current.value, current: selected } })
   }
@@ -361,7 +360,6 @@ export function SideChatComposer({
                 type="button"
                 className="dsh-codex-sidechat-select"
                 onClick={openModelMenu}
-                disabled={models.status !== 'ready' || (models.value?.groups.length ?? 0) === 0}
                 title={selectedEffortLabel === undefined
                   ? selectedModelLabel
                   : `${selectedModelLabel} · ${selectedEffortLabel}`}
@@ -382,9 +380,14 @@ export function SideChatComposer({
 
               {modelMenuOpen && (
                 <div className="dsh-codex-sidechat-model-menu" role="menu">
-                  {models.status === 'error' && (
+                  {notice.text !== undefined && (
                     <div className="dsh-codex-sidechat-model-error">
-                      {models.error ?? '模型目录加载失败'}
+                      {notice.text}
+                      {(notice.details?.length ?? 0) > 0 && (
+                        <span className="dsh-codex-sidechat-model-error-detail">
+                          {notice.details?.join('；')}
+                        </span>
+                      )}
                     </div>
                   )}
                   {modelPane === 'root' && (
@@ -413,7 +416,7 @@ export function SideChatComposer({
                   )}
                   {modelPane === 'model' && (
                     <div className="dsh-codex-sidechat-model-groups">
-                      {(models.value?.groups ?? []).map(group => (
+                      {(directory?.groups ?? []).map(group => (
                         <div key={group.id} className="dsh-codex-sidechat-model-group">
                           <div className="dsh-codex-sidechat-model-group-title">{group.name}</div>
                           {group.models.map(model => {

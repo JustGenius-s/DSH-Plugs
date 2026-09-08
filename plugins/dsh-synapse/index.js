@@ -235,13 +235,38 @@ export class WorkspaceStore {
     })
   }
 
+  /**
+   * Forget the projected cards of the given sessions without hiding them.
+   *
+   * The fork backfill uses this to drop subagent children it finds on disk:
+   * their cards are delegation mechanics, not conversation branches, so the
+   * canvas is cleaner without them — but they must stay un-hidden, or a later
+   * live run of the same subagent would be filtered as "archived".
+   */
+  async dropProjectedSessions(sessionIds) {
+    return this.mutate(() => {
+      const drop = new Set(sessionIds)
+      for (const workspace of this.state.workspaces) {
+        workspace.threads = workspace.threads.filter(thread => !drop.has(thread.dshSessionId))
+      }
+      this.state.workspaces = this.state.workspaces.filter(workspace => workspace.threads.length > 0)
+      return { dropped: drop.size }
+    })
+  }
+
   /** Replay one live DSH session into the dedicated projection workspace. */
   async projectSession(session, replayFrom = 0, workspaceTitle = 'DSH 任务') {
     return this.mutate(() => {
       if (this.state.hiddenSessionIds.includes(session.id)) return null
       const workspace = this.dshWorkspace(sessionCwd(session), workspaceTitle)
       const thread = this.dshThread(workspace, session)
-      for (const event of session.events) {
+      // A live Session exposes its log through `snapshotEvents()`; a projected
+      // shape (backfill, tests) carries a plain `events` array. Both are read
+      // so one code path serves the live replay and the cold backfill.
+      const events = typeof session.snapshotEvents === 'function'
+        ? session.snapshotEvents()
+        : session.events
+      for (const event of events ?? []) {
         if (event.seq >= replayFrom) this.projectEventInto(workspace, thread, event)
       }
       return structuredClone(thread)
@@ -421,13 +446,14 @@ export class WorkspaceStore {
         thread.title = title
         thread.dshSessionTitle = title
       }
-      // The fork cut is DSH's durable `header.seedLength`, but that field is
+      // The fork cut is the session's `inheritedEventCount` (live sessions
+      // report it exactly), else DSH's durable `header.seedLength`, which is
       // missing on most real forks; `session.seedBoundary` carries the boundary
       // resolved from the log itself (see `forkSeqBoundary`). Keeping it lets
       // the canvas attach this branch under the exact parent turn instead of
       // leaving it floating as a root. Keep the value even after the session
       // has been restored, when its in-process `firstLiveSeq` moves.
-      const seedLength = session.header?.seedLength ?? session.seedBoundary
+      const seedLength = session.inheritedEventCount ?? session.header?.seedLength ?? session.seedBoundary
       if (Number.isSafeInteger(seedLength) && seedLength >= 0) thread.sourceSeedLength = seedLength
       return thread
     }
@@ -435,12 +461,13 @@ export class WorkspaceStore {
     const parent = parentSessionId === null ? undefined : workspace.threads.find(item => item.dshSessionId === parentSessionId)
     const siblings = workspace.threads.filter(item => item.sourceParentSessionId === parentSessionId)
     const now = new Date().toISOString()
+    const rawSeed = session.inheritedEventCount ?? session.header?.seedLength ?? session.seedBoundary
     thread = {
       id: randomUUID(),
       title: typeof session.title === 'string' && session.title.trim() !== '' ? session.title.slice(0, MAX_TITLE_LENGTH) : (parent === undefined ? 'DSH 会话' : `${parent.title} 分支`),
       parentId: parent?.id ?? null,
       sourceParentSessionId: parentSessionId,
-      sourceSeedLength: Number.isSafeInteger(session.header?.seedLength ?? session.seedBoundary) && (session.header?.seedLength ?? session.seedBoundary) >= 0 ? (session.header?.seedLength ?? session.seedBoundary) : null,
+      sourceSeedLength: Number.isSafeInteger(rawSeed) && rawSeed >= 0 ? rawSeed : null,
       dshSessionId: session.id,
       dshSessionTitle: typeof session.title === 'string' ? session.title.slice(0, MAX_TITLE_LENGTH) : null,
       color: TOPIC_COLORS[workspace.threads.length % TOPIC_COLORS.length],
@@ -865,18 +892,25 @@ const OWN_LOG_BOOTSTRAP_TYPES = new Set(['permission/preset', 'sandbox/mode', 'a
  * projected and the inherited parent history stays on the parent's cards.
  *
  * DSH persists the cut as `header.seedLength`, but that field is frequently
- * absent (84% of forks in one real profile). Two fallbacks cover it, in order:
+ * absent (84% of forks in one real profile). Fallbacks cover it, in order:
  *
- * 1. the durable `session/end-seed` marker event — per the session contract,
+ * 1. `header.inheritedEventCount` — a live session reports exactly how many
+ *    leading events are the parent's; it outranks the stored `seedLength`,
+ *    which a restored fork can over- or under-report;
+ * 2. `header.seedLength`, when it is a non-negative safe integer;
+ * 3. the durable `session/end-seed` marker event — per the session contract,
  *    readers of STORED history must locate the LAST such event rather than
  *    trust the in-process `firstLiveSeq`;
- * 2. a log that opens with a session's own bootstrap marker at seq 0, which
+ * 4. a log that opens with a session's own bootstrap marker at seq 0, which
  *    means it holds no inherited history, so 0 is a safe boundary.
  *
  * @returns the seq to project from, or `null` when the boundary is unknown.
  */
 export function forkSeqBoundary(events, header) {
-  if (Number.isSafeInteger(header?.seedLength) && header.seedLength >= 0) return header.seedLength
+  const inherited = inheritedCountOf(header)
+  if (inherited !== null) return inherited
+  const seedLength = seedLengthOf(header)
+  if (seedLength !== null) return seedLength
   if (!Array.isArray(events) || events.length === 0) return null
   let boundary = null
   for (const event of events) if (event?.type === 'session/end-seed') boundary = event.seq + 1
@@ -895,13 +929,64 @@ export function forkSeqBoundary(events, header) {
  * parent turn it came from, so using it as an anchor would attach the branch
  * under nothing (parent turns all have seq >= 0) and leave it a root anyway.
  *
- * Only a durable `seedLength` or an `end-seed` marker identifies the cut.
+ * Only a durable cut identifies the anchor: `inheritedEventCount`,
+ * `seedLength`, or an `end-seed` marker.
  */
 export function forkAnchorSeq(events, header) {
-  if (Number.isSafeInteger(header?.seedLength) && header.seedLength >= 0) return header.seedLength
+  const inherited = inheritedCountOf(header)
+  if (inherited !== null) return inherited
+  const seedLength = seedLengthOf(header)
+  if (seedLength !== null) return seedLength
+  if (!Array.isArray(events)) return null
   let boundary = null
   for (const event of events) if (event?.type === 'session/end-seed') boundary = event.seq + 1
   return boundary
+}
+
+/**
+ * A persisted `seedLength`, accepting only well-formed values.
+ *
+ * A negative, fractional, or non-numeric seedLength is a corrupt record, not
+ * a boundary; null lets the end-seed marker take over instead of projecting
+ * from a bogus index.
+ */
+function seedLengthOf(header) {
+  const value = header?.seedLength
+  return Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+/**
+ * Whether a session is a spawned subagent rather than a user-visible fork.
+ *
+ * Subagent logs are delegation mechanics, not conversation branches: the user
+ * never opened them, so their cards would only clutter the canvas. Reads the
+ * three shapes DSH reports (a bare descriptor, a header, or a meta bag), the
+ * delegation depth, and the session's own descriptor event.
+ */
+export function isSubagentSession(session) {
+  if (session === null || typeof session !== 'object') return false
+  if (session.origin === 'subagent') return true
+  if (session.header?.origin === 'subagent') return true
+  if (session.meta?.origin === 'subagent') return true
+  if (Number.isSafeInteger(session.delegationDepth) && session.delegationDepth > 0) return true
+  const events = session.events
+  if (Array.isArray(events) && events.some(event => event?.type === 'subagent/descriptor')) return true
+  return false
+}
+
+/**
+ * Whether a session title is a generated placeholder rather than a real
+ * question, so a card never shows the harness's own label as content.
+ *
+ * DSH names untitled sessions 当前会话 / 等待用户提问, and every fork it
+ * creates gets " 分支" appended — whatever the parent's title was. So a
+ * trailing 分支 marks a generated name, a real first question never has one.
+ */
+export function isSessionLabelQuestion(text) {
+  if (typeof text !== 'string') return false
+  const trimmed = text.trim()
+  if (trimmed === '当前会话' || trimmed === '等待用户提问') return true
+  return trimmed.endsWith('分支')
 }
 
 /**
@@ -941,9 +1026,17 @@ async function backfillForks(ctx, store, workspaceTitle, reportFailure) {
   }
   if (!Array.isArray(headers)) return
   const alreadyProjected = await store.projectedSessionIds()
+  // Subagent children are delegation mechanics, not conversation branches:
+  // drop any cards an earlier pass gave them (without hiding them — a live
+  // subagent must not read as "archived") and keep them out of the queue.
+  const subagentIds = headers.filter(header => isSubagentSession(header)).map(header => header.id)
+  const leftoverSubagents = [...alreadyProjected].filter(id => subagentIds.includes(id))
+  if (leftoverSubagents.length > 0) await store.dropProjectedSessions(leftoverSubagents)
   const queue = headers.filter(header =>
     typeof header?.parentSession === 'string'
     && typeof header?.id === 'string'
+    && !subagentIds.includes(header.id)
+    && !isSubagentSession(header)
     && !alreadyProjected.has(header.id))
   if (queue.length === 0) return
   const projected = new Set(alreadyProjected)
@@ -974,7 +1067,7 @@ async function backfillForks(ctx, store, workspaceTitle, reportFailure) {
       // under the exact parent turn it forked from. Only a real, durable cut
       // can serve as that anchor (see `forkAnchorSeq`) — a bootstrap-derived
       // start point would attach the branch under nothing.
-      const anchor = forkAnchorSeq(events, full)
+      const anchor = forkAnchorSeq(events, header)
       const thread = await store.projectSession({ id: header.id, header, events, seedBoundary: anchor }, boundary, workspaceTitle)
       if (thread !== null) projected.add(header.id)
       await store.flush()
@@ -983,6 +1076,34 @@ async function backfillForks(ctx, store, workspaceTitle, reportFailure) {
     }
     await new Promise(resolve => setTimeout(resolve, 0))
   }
+}
+
+/**
+ * Read a live session's event log, whichever way it offers one.
+ *
+ * A live Session's `events` is a prototype getter over the in-memory log; a
+ * projected or test-shaped session exposes the same log through a
+ * `snapshotEvents()` callable. Both are read so one helper serves every shape.
+ *
+ * @returns the events, or `null` when the session exposes no log.
+ */
+function sessionEventLog(session) {
+  if (session === null || typeof session !== 'object') return null
+  if (typeof session.snapshotEvents === 'function') {
+    const events = session.snapshotEvents()
+    return Array.isArray(events) ? events : null
+  }
+  if (Array.isArray(session.events)) return session.events
+  return null
+}
+
+/**
+ * The count of leading events a fork inherited from its parent, when the
+ * session reports one.
+ */
+function inheritedCountOf(header) {
+  const value = header?.inheritedEventCount
+  return Number.isSafeInteger(value) && value >= 0 ? value : null
 }
 
 /**
@@ -999,7 +1120,7 @@ async function readSessionEvents(ctx, sessionId) {
   if (sessionId === '') return null
   // Both services are resolved defensively: cordis's Context proxy throws
   // `cannot get property ... without inject` on an undeclared service, and a
-  // store may reject an id it cannot brand. Either way the detail view should
+  // branded-id store rejects a raw string. Either way the detail view should
   // show the card summary — not fail the request.
   let live
   try {
@@ -1007,7 +1128,10 @@ async function readSessionEvents(ctx, sessionId) {
   } catch {
     live = undefined
   }
-  if (live !== undefined) return live.events
+  if (live !== undefined && live !== null) {
+    const events = sessionEventLog(live)
+    if (events !== null) return events
+  }
   // `ctx.sessionPersistence` is NOT declared in `inject`, so touching it
   // directly makes cordis throw `cannot get property ... without inject`
   // (its Context proxy rejects undeclared services) — that throw used to

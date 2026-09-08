@@ -181,6 +181,15 @@ export interface SessionModels {
     name?: string
     models: readonly ModelCatalogModel[]
   }[]
+  /**
+   * Providers whose directory lookup refused, so the picker can explain an
+   * empty list instead of reading as "no models exist".
+   */
+  failures?: readonly {
+    id: string
+    name?: string
+    message?: string
+  }[]
 }
 
 /** A provider + model pair, optionally with a chosen reasoning effort. */

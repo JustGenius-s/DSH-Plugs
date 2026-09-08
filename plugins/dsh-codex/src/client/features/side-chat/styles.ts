@@ -217,6 +217,9 @@ ${fitRulesFor(FIT_SELECTORS)}
 .dsh-codex-sidechat-model-root{min-width:0;position:relative}
 .dsh-codex-sidechat-model-menu{z-index:20;border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);width:max-content;min-width:min(240px,100vw - 32px);max-width:min(420px,100vw - 32px);max-height:min(360px,100vh - 96px);box-shadow:var(--dsw-shadow-lv3);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;display:flex;flex-direction:column;padding:4px;position:absolute;bottom:calc(100% + 8px);right:0;overflow:hidden}
 .dsh-codex-sidechat-model-error{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);border-radius:8px;margin-bottom:4px;padding:7px 8px;font-size:12px;line-height:18px}
+/* Provider failure detail under an empty-directory notice; secondary so the
+   headline stays readable while the cause is still legible. */
+.dsh-codex-sidechat-model-error-detail{display:block;margin-top:3px;opacity:.85;font-size:11px;line-height:16px}
 .dsh-codex-sidechat-model-groups{min-height:0;overflow-y:auto}
 .dsh-codex-sidechat-model-group + .dsh-codex-sidechat-model-group{margin-top:4px}
 .dsh-codex-sidechat-model-group-title{z-index:1;background:var(--dsw-specific-menu);color:var(--dsw-alias-label-tertiary);padding:5px 8px 3px;font-size:12px;font-weight:500;line-height:18px;position:sticky;top:0}

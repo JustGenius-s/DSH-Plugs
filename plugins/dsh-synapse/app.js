@@ -88,12 +88,18 @@ const PENDING_INTERACTION_HINTS = {
  * `null` when the session is no longer listed (archived, or a cold session the
  * host has not loaded). The card's own fields cover those cases: a stored error
  * marks a failed turn and a stored answer marks a finished one.
+ *
+ * Session-level `running` belongs to the in-flight card only: a settled card
+ * stays done (or failed) while a LATER turn of the same session streams, or
+ * every card on a running session would flip to 进行中 the moment the user
+ * asks a follow-up.
  */
 function cardState(card, sessionStatus) {
   if (sessionStatus?.pendingInteraction != null) return 'needs-input'
-  if (card?.answer?.pending === true || sessionStatus?.running === true) return 'running'
+  if (card?.answer?.pending === true) return 'running'
   if (card?.error != null) return 'failed'
   if (card?.answer != null) return 'done'
+  if (sessionStatus?.running === true) return 'running'
   return 'waiting'
 }
 
@@ -1382,6 +1388,32 @@ function processRecords(process, messageId) {
     return `<div class="process-entry${entryExpanded ? ' expanded' : ''}"><button class="process-entry-fold" data-action="toggle-message" data-message="${escapeHtml(entryKey)}"><span class="process-entry-name">${escapeHtml(entry.name)}</span><span class="process-status${entry.error !== null ? ' process-status-error' : entry.result === null ? ' process-status-pending' : ' process-status-done'}">${status}</span></button>${entryExpanded ? `<div class="process-entry-body">${argumentsHtml}${outcomeHtml}</div>` : ''}</div>`
   }).join('')
   return `<section class="process-records${expanded ? ' expanded' : ''}"><button class="process-records-fold" data-action="toggle-message" data-message="${escapeHtml(key)}"><span>${expanded ? '收起过程记录' : '过程记录'}</span><span class="process-count">${process.length}</span></button>${expanded ? entries : ''}</section>`
+}
+
+/**
+ * The reply body of one inspector card, resolved from its on-demand detail.
+ *
+ * A settled card keeps its own text even while a LATER turn of the same
+ * session streams live: the session-level `running` flag belongs to the
+ * in-flight card only, so it must never be read here. When the detail read
+ * failed (or has not landed yet) the stored card summary carries the card —
+ * the pane degrades, it never breaks.
+ *
+ * @returns the answer text plus whether the reply is still pending.
+ */
+function inspectorReply(card) {
+  const thread = state.workspace?.threads.find(item => item.id === card.dshThreadId)
+  const detail = thread === undefined ? null : historyForCard(thread, card.id)
+  const steps = detail?.steps ?? []
+  const pending = card.answer?.pending === true
+  const answerText = steps.length > 0
+    ? steps.filter(step => step.kind === 'assistant').map(step => step.text).join('\n\n')
+    : (card.answer?.text ?? '')
+  return { pending, answerText }
+}
+
+function inspectorNoteBody(card) {
+  return inspectorReply(card).answerText
 }
 
 function renderCardInspector(card) {
