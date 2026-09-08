@@ -185,7 +185,10 @@ export function SideChatPanel({
   // loop that takes the whole side-panels shell down with it.
   const firstUserText = useMemo(() => {
     if (snapshot === undefined) return ''
-    for (const node of snapshot.nodes as readonly unknown[]) {
+    // Defensive: `nodes` is absent until the conversation view composes, and
+    // iterating it directly crashes the panel on open with the same
+    // undefined-read the transcript guards against.
+    for (const node of (snapshot.nodes ?? []) as readonly unknown[]) {
       const n = node as { kind?: string; content?: readonly unknown[] } | null
       if (n == null || n.kind !== 'user') continue
       const text = (n.content ?? [])

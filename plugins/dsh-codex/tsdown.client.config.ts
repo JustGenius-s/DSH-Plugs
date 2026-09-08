@@ -12,6 +12,13 @@ export default defineConfig({
   outDir: 'lib',
   clean: false,
   platform: 'browser',
+  // DSH registers one client module factory per plugin entry. Any relative
+  // chunk emitted by Rolldown (including its shared runtime chunk) is not a
+  // separately registered module and therefore cannot be required at runtime.
+  // Keep the client bundle self-contained, including Shiki language imports.
+  outputOptions: {
+    codeSplitting: false,
+  },
   // alwaysBundle inlines the shared UI package (never a runtime dep) beside
   // the terminal/shiki stacks. markdown-it is a production dependency, which
   // tsdown externalizes by default — so it must be inlined here too.

@@ -46,8 +46,11 @@ export function createSideChatFeature(
       const sessions = ctx.sessions as unknown as SideChatSessionsFace
       const store = ctx.sidePanels as SidePanelsStore
       const api = (ctx as unknown as ConnectionFace).connection?.api
-      const conversation = (ctx.get('conversation') as unknown as ConversationFace | undefined)
-        ?? (ctx.conversation as unknown as ConversationFace | undefined)
+      // Optional compatibility service: `Context#get()` is the Cordis API for
+      // reading a service without an inject requirement. Do not fall back to
+      // `ctx.conversation` here; property access is inject-guarded and throws
+      // while the conversation provider is absent or still activating.
+      const conversation = ctx.get('conversation') as unknown as ConversationFace | undefined
 
       // `multi`: every open is a NEW instance (tab), and each tab is one side
       // chat (the panel forks on mount and disposes on unmount).

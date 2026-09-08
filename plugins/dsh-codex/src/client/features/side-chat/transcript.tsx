@@ -47,6 +47,12 @@ import {
   type MarkdownCodeLabels,
 } from '@just-genius/dsh-plugin-ui'
 import {
+  chatRowsOf,
+  contextRowsOf,
+  hasVisibleContent,
+  pendingSteeringOf,
+} from './snapshot'
+import {
   isTerminalCall,
   toolPresentation,
   variantTitle,
@@ -898,21 +904,6 @@ function ContextRow({
   )
 }
 
-function hasVisibleContent(snapshot: ConversationSnapshot): boolean {
-  for (const key of snapshot.chat.order) {
-    const node = snapshot.chat.nodes.get(key)
-    if (node === undefined || node.visibility === 'hidden') continue
-    // Context rows are model-facing injections, not conversation: they render
-    // inside the flow once it exists, but they must not displace the empty
-    // hero (every side chat starts with an inherited-context row).
-    if (node.kind === 'turn-tail' || node.kind === 'context') continue
-    return true
-  }
-  return snapshot.running
-    || snapshot.pending.length > 0
-    || snapshot.queue.some(item => item.placement === 'steering')
-}
-
 /**
  * Render one side chat's transcript with follow-the-latest scroll.
  * @param props - the live conversation snapshot, or undefined while binding.
@@ -966,12 +957,7 @@ export function SideChatTranscript({
   // hiding it is what made this feature look broken — the user sees an empty
   // chat with no evidence the main conversation came along.
   if (snapshot === undefined || !hasVisibleContent(snapshot)) {
-    const contextNodes = snapshot === undefined
-      ? []
-      : snapshot.chat.order
-        .map(key => snapshot.chat.nodes.get(key))
-        .filter((node): node is ChatConversationViewNode =>
-          node !== undefined && node.kind === 'context' && node.visibility !== 'hidden')
+    const contextNodes = contextRowsOf<ChatConversationViewNode>(snapshot)
     return (
       <div className="dsh-codex-sidechat-empty">
         <div className="dsh-codex-sidechat-empty-hero">
@@ -1002,7 +988,10 @@ export function SideChatTranscript({
     )
   }
 
-  const pendingSteering = snapshot.queue.filter(item => item.placement === 'steering')
+  // Same defensive reads as `hasVisibleContent`: the Chat slice, the queue,
+  // and the pending list all arrive asynchronously.
+  const pendingSteering = pendingSteeringOf<{ id: string; content: readonly unknown[] }>(snapshot)
+  const chatRows = chatRowsOf<ChatConversationViewNode>(snapshot)
 
   return (
     <div className="dsh-codex-sidechat-transcript-wrap">
@@ -1011,11 +1000,9 @@ export function SideChatTranscript({
         ref={scrollRef}
         onScroll={onScroll}
       >
-        {snapshot.chat.order.map((key) => {
-          const node = snapshot.chat.nodes.get(key)
-          if (node === undefined) return null
-          return <ChatNodeView key={key} node={node} sessionId={sessionId} api={api} t={t} />
-        })}
+        {chatRows.map(node => (
+          <ChatNodeView key={node.key} node={node} sessionId={sessionId} api={api} t={t} />
+        ))}
         {snapshot.running && <TurnStatus />}
         {pendingSteering.map(item => (
           <UserBubble key={item.id} content={item.content} sessionId={sessionId} api={api} />
