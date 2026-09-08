@@ -16,8 +16,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import type { ReactNode } from 'react'
 import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import {
+  Button,
   IconChevronRightOutline14,
-  IconCloseOutline16, IconPlusOutline16, Menu, Tooltip,
+  IconCloseOutline16, IconPlusOutline16, Menu, Modal, Tooltip,
   type MenuEntry,
 } from '@just-genius/dsh-plugin-ui'
 import {
@@ -27,7 +28,7 @@ import {
 } from '../../../shared/config'
 import { resolvePanelIcon } from './icons'
 import { launcherVisible, type LauncherStore } from './launcher-store'
-import { NO_SESSION_PANEL_KEY, type SidePanelInstance, type SidePanelsStore } from './service'
+import { NO_SESSION_PANEL_KEY, type CloseWarning, type SidePanelInstance, type SidePanelsStore } from './service'
 import { ensureSidePanelStyles } from './styles'
 import type { SessionListState } from '@just-genius/dsh-plugin-runtime/client'
 import type { SnapshotSelectorHook } from '@just-genius/dsh-plugin-runtime/client'
@@ -149,6 +150,20 @@ export function SidePanelsShell(props: ShellProps) {
   const launcherSnapshot = useSyncExternalStore(launcher.subscribe, launcher.getSnapshot)
   const launcherShown = launcherVisible(launcherSnapshot)
 
+  // Every close path funnels through here: a panel that reports a running task
+  // makes the shell confirm first. The dialog copy comes from that panel.
+  const [closeConfirm, setCloseConfirm] = useState<{ warning: CloseWarning; run: () => void } | null>(null)
+  const requestClose = useCallback((keys: readonly string[], run: () => void): void => {
+    const owner = sessionId ?? NO_SESSION_PANEL_KEY
+    for (const key of keys) {
+      const warning = store.closeWarning(owner + ':' + key)
+      if (warning === null) continue
+      setCloseConfirm({ warning, run })
+      return
+    }
+    run()
+  }, [store, sessionId])
+
   // Switch before paint so the header never renders one session's tabs under
   // another session's owner. Retained panes keep their original owner props.
   useLayoutEffect(() => {
@@ -228,11 +243,14 @@ export function SidePanelsShell(props: ShellProps) {
     setTabMenu(null)
     if (menu === null) return
     if (id === 'rename') setRenamingKey(menu.key)
-    else if (id === 'close') store.closeInstance(menu.key)
-    else if (id === 'close-others') store.closeOthers(menu.key)
-    else if (id === 'close-right') store.closeToRight(menu.key)
-    else if (id === 'close-all') store.closeAll()
-  }, [store, tabMenu])
+    else if (id === 'close') requestClose([menu.key], () => { store.closeInstance(menu.key) })
+    else if (id === 'close-others') {
+      requestClose(live.filter(i => i.key !== menu.key).map(i => i.key), () => { store.closeOthers(menu.key) })
+    } else if (id === 'close-right') {
+      const index = live.findIndex(i => i.key === menu.key)
+      requestClose(live.slice(index + 1).map(i => i.key), () => { store.closeToRight(menu.key) })
+    } else if (id === 'close-all') requestClose(live.map(i => i.key), () => { store.closeAll() })
+  }, [store, tabMenu, live, requestClose])
 
   const commitRename = useCallback((key: string, value: string): void => {
     store.renameInstance(key, value)
@@ -617,7 +635,9 @@ export function SidePanelsShell(props: ShellProps) {
                   className="dsh-side-panels-tab-close"
                   aria-label={t('aria.closeTab')}
                   title={t('aria.closeTab')}
-                  onClick={() => store.closeInstance(instance.key)}
+                  onClick={() => {
+                    requestClose([instance.key], () => { store.closeInstance(instance.key) })
+                  }}
                 >
                   <IconCloseOutline16 size={12} />
                 </button>
@@ -679,6 +699,29 @@ export function SidePanelsShell(props: ShellProps) {
         {renderPanes()}
       </div>
       </div>
+      <Modal
+        open={closeConfirm !== null}
+        onClose={() => setCloseConfirm(null)}
+        title={closeConfirm?.warning.title ?? ''}
+        closeLabel={t('tabs.closeCancel')}
+        footer={closeConfirm === null ? undefined : (
+          <>
+            <Button variant="outline" onClick={() => setCloseConfirm(null)}>{t('tabs.closeCancel')}</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                const pending = closeConfirm
+                setCloseConfirm(null)
+                pending.run()
+              }}
+            >
+              {t('tabs.closeConfirm')}
+            </Button>
+          </>
+        )}
+      >
+        <p>{closeConfirm?.warning.description ?? ''}</p>
+      </Modal>
       <Menu
         open={tabMenu !== null}
         portal

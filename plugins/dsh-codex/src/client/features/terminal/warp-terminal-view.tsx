@@ -47,6 +47,8 @@ import { useCursorBlink, useTerminalTheme } from './browser-lifecycle'
 
 ensureWarpTerminalStyles()
 
+/** Beat between the close's SIGINT/kill frames and closing the socket. */
+const TERMINATE_FLUSH_MS = 300
 const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const LINE_HEIGHT = 1.2
 
@@ -176,6 +178,13 @@ export interface WarpTerminalViewProps {
   terminalFontSize: number
   controllerStore?: TerminalControllerStore
   controllerId?: string
+  /**
+   * Live "a command is running in this terminal" flag for the side-panel
+   * shell's close guard: the running command's first line, or null when idle.
+   */
+  busyRef?: { current: string | null }
+  /** Filled by this view: stop the shell when the panel tab is closed. */
+  terminateRef?: { current: (() => void) | null }
   t: (key: string) => string
   /**
    * Insert the selected terminal text into the conversation as a `@终端`
@@ -223,6 +232,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const runningIdRef = useRef<string | null>(null)
+  const terminateStartedRef = useRef(false)
   const startedAtRef = useRef<Map<string, number>>(new Map())
   const currentContextRef = useRef<BlockContext | null>(null)
   const blocksRef = useRef<Block[]>([])
@@ -792,7 +802,38 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     connection.updateShell(terminalShell)
   }, [connection, terminalShell])
 
-  useEffect(() => () => connection.dispose(), [connection])
+  useEffect(() => () => {
+    // A deliberate close already sent SIGINT/kill; let those frames flush
+    // before the socket goes away, or the host only sees a detach.
+    if (terminateStartedRef.current) return
+    connection.dispose()
+  }, [connection])
+
+  // Closing the panel tab must stop the task: interrupt the foreground
+  // command, tear the PTY down, and only then drop the connection.
+  useEffect(() => {
+    const ref = props.terminateRef
+    if (ref === undefined) return
+    ref.current = () => {
+      if (terminateStartedRef.current) return
+      terminateStartedRef.current = true
+      connection.send({ type: 'signal', signal: 'SIGINT' })
+      connection.send({ type: 'kill' })
+      window.setTimeout(() => connection.dispose(), TERMINATE_FLUSH_MS)
+    }
+    return () => { ref.current = null }
+  }, [connection, props.terminateRef])
+
+  // Publish the running command so the shell can confirm a close.
+  useEffect(() => {
+    const ref = props.busyRef
+    if (ref === undefined) return
+    const command = runningId === null ? '' : (blocks.find(block => block.id === runningId)?.command ?? '')
+    const firstLine = command.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
+    ref.current = runningId === null ? null : firstLine
+    return () => { ref.current = null }
+  }, [props.busyRef, runningId, blocks])
+
   // `submitCommand` is the single send path shared by the interactive editor
   // (`runDraft`) and the controller (`run`). It mirrors the pre-existing
   // runDraft behavior: an empty command is ignored, a running command block

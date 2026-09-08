@@ -37,12 +37,34 @@ export function chatAnchorRow(scroll: ParentNode, key: string): HTMLElement | nu
  */
 export function isChatViewActive(root: ParentNode = document): boolean {
   const scroll = conversationScroll(root)
-  const header = scroll?.previousElementSibling ?? null
-  const tablist = header?.querySelector('[role="tablist"]') ?? null
-  if (tablist === null) return true
-  const selected = tablist.querySelector('[role="tab"][aria-selected="true"]')
-  if (selected === null) return true
-  return selected === tablist.firstElementChild
+  const tablist = scroll === null ? null : conversationTablist(scroll)
+  let result: boolean
+  if (tablist === null) {
+    // No view tablist to read: fall back to the chat view's own flow container,
+    // which only exists while the chat view is the one mounted in the scrollport.
+    result = scroll === null ? true : chatFlow(scroll) !== null
+  } else {
+    const selected = tablist.querySelector('[role="tab"][aria-selected="true"]')
+    result = selected === null ? true : selected === tablist.firstElementChild
+  }
+  return result
+}
+
+/**
+ * The conversation's view tablist, which the host renders in the session header
+ * above the resident scrollport. The header is not necessarily the scrollport's
+ * immediate previous sibling (the scrollport sits inside a body wrapper), so
+ * climb to the nearest ancestor that owns a tablist outside the scrollport.
+ */
+function conversationTablist(scroll: HTMLElement): Element | null {
+  let node: Element | null = scroll.parentElement
+  while (node !== null) {
+    for (const candidate of node.querySelectorAll('[role="tablist"]')) {
+      if (!scroll.contains(candidate)) return candidate
+    }
+    node = node.parentElement
+  }
+  return null
 }
 
 function escapeSelectorValue(value: string): string {

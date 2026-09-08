@@ -116,6 +116,15 @@ export interface SidePanelDescriptor {
   ) => string
 }
 
+/**
+ * A close the shell must confirm before running it. The panel owns the copy
+ * (already localized); the shell renders it with its own button labels.
+ */
+export interface CloseWarning {
+  title: string
+  description: string
+}
+
 export interface SidePanelsService {
   /**
    * Report presentation facts for a panel id (see {@link SidePanelDescriptor}).
@@ -166,6 +175,22 @@ export interface SidePanelsService {
   renameInstance(key: string, title: string): void
   /** Move one instance to `toIndex` in the tab strip (clamped). */
   moveInstance(key: string, toIndex: number): void
+  /**
+   * Register a per-instance close guard, asked with `<sessionId>:<instanceKey>`
+   * right before the shell closes that instance. It returns the confirmation
+   * the panel needs, or null to close silently. A panel registers from its own
+   * component while mounted; the returned disposer retracts the guard.
+   */
+  guardClose(key: string, guard: () => CloseWarning | null): () => void
+  /** The confirmation closing `<sessionId>:<instanceKey>` needs right now. */
+  closeWarning(key: string): CloseWarning | null
+  /**
+   * Register a per-instance close hook, run when the shell actually closes that
+   * instance — before its pane unmounts — so a panel can release the backend
+   * resource the pane owned (e.g. stop a terminal session's shell). Returns the
+   * disposer.
+   */
+  onInstanceClose(key: string, hook: () => void): () => void
   /** Current snapshot. */
   getSnapshot(): SidePanelsSnapshot
   /** Subscribe to store changes. Returns the unsubscriber. */
@@ -298,6 +323,12 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
   // Panel-reported presentation facts, keyed by panel id. Held outside the
   // snapshot: descriptors are not user state and never persist.
   const descriptors = new Map<string, SidePanelDescriptor>()
+  // Per-instance close guards from mounted panels, keyed by
+  // `<sessionId>:<instanceKey>` so a retained pane from another session cannot
+  // answer for this session's instance.
+  const closeGuards = new Map<string, () => CloseWarning | null>()
+  // Per-instance release hooks, same key shape as the guards.
+  const closeHooks = new Map<string, () => void>()
   // Monotonic per-panel counter backing instance keys. Never reused within a
   // page: a closed-and-reopened tab must not collide with the React subtree of
   // the one it replaced.
@@ -378,6 +409,23 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     return panelId + '#' + String(n)
   }
 
+  /** Release the resources of instances that are actually leaving the strip. */
+  const runCloseHooks = (keys: readonly string[]): void => {
+    // Hooks are keyed like the guards: `<sessionId>:<instanceKey>`.
+    const owner = sessionId ?? NO_SESSION_PANEL_KEY
+    for (const key of keys) {
+      const hookKey = owner + ':' + key
+      const hook = closeHooks.get(hookKey)
+      if (hook === undefined) continue
+      closeHooks.delete(hookKey)
+      try {
+        hook()
+      } catch {
+        // A panel's release must never block the close itself.
+      }
+    }
+  }
+
   const store: SidePanelsStore = {
     describe(id, descriptor) {
       descriptors.set(id, descriptor)
@@ -391,6 +439,21 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     },
     descriptor(id) {
       return descriptors.get(id)
+    },
+    guardClose(key, guard) {
+      closeGuards.set(key, guard)
+      return () => {
+        if (closeGuards.get(key) === guard) closeGuards.delete(key)
+      }
+    },
+    closeWarning(key) {
+      return closeGuards.get(key)?.() ?? null
+    },
+    onInstanceClose(key, hook) {
+      closeHooks.set(key, hook)
+      return () => {
+        if (closeHooks.get(key) === hook) closeHooks.delete(key)
+      }
     },
     open(id, state) {
       if (id === undefined) {
@@ -451,6 +514,7 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     closeInstance(key) {
       const index = snapshot.instances.findIndex(i => i.key === key)
       if (index === -1) return
+      runCloseHooks([key])
       const instances = snapshot.instances.filter(i => i.key !== key)
       if (instances.length === 0) {
         // No empty shell: closing the last tab closes the sidebar.
@@ -469,12 +533,14 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     closeOthers(key) {
       const instance = snapshot.instances.find(i => i.key === key)
       if (instance === undefined || snapshot.instances.length < 2) return
+      runCloseHooks(snapshot.instances.filter(i => i.key !== key).map(i => i.key))
       setSnapshot({ instances: [instance], activeKey: key })
       saveTabs()
     },
     closeToRight(key) {
       const index = snapshot.instances.findIndex(i => i.key === key)
       if (index === -1 || index === snapshot.instances.length - 1) return
+      runCloseHooks(snapshot.instances.slice(index + 1).map(i => i.key))
       const instances = snapshot.instances.slice(0, index + 1)
       const activeKey = instances.some(i => i.key === snapshot.activeKey)
         ? snapshot.activeKey
@@ -484,6 +550,7 @@ export function createSidePanelsStore(options: SidePanelsStoreOptions = {}): Sid
     },
     closeAll() {
       if (snapshot.instances.length === 0) return
+      runCloseHooks(snapshot.instances.map(i => i.key))
       // Same contract as closing the last tab: no empty shell left behind.
       setSnapshot({ open: false, instances: [], activeKey: null })
       writeStorage(OPEN_KEY, '0')
