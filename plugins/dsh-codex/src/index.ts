@@ -43,6 +43,7 @@ export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),
   fileLinksInPanel: Schema.boolean().default(DEFAULT_CONFIG.fileLinksInPanel),
   sideChatEnabled: Schema.boolean().default(DEFAULT_CONFIG.sideChatEnabled),
+  sideChatContextEnabled: Schema.boolean().default(DEFAULT_CONFIG.sideChatContextEnabled),
   filesShowGitIgnored: Schema.boolean().default(DEFAULT_CONFIG.filesShowGitIgnored),
   highlightThemeLight: Schema.string().default(DEFAULT_CONFIG.highlightThemeLight),
   highlightThemeDark: Schema.string().default(DEFAULT_CONFIG.highlightThemeDark),
@@ -88,7 +89,10 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
   }, 'dsh-codex: git-graph routes')
 
   ctx.effect(() => {
-    const server = createDshCodexSideChatServer(ctx)
+    // Live config, not a boot snapshot: both side-chat switches are read per
+    // open request, so a settings change lands on the next side chat with no
+    // plugin restart.
+    const server = createDshCodexSideChatServer(ctx, () => currentConfig)
     return () => server.dispose()
   }, 'dsh-codex: side-chat routes')
 

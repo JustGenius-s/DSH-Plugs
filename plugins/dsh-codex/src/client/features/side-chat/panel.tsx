@@ -16,7 +16,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ConversationSnapshot } from '@just-genius/dsh-plugin-runtime/client'
-import { sideChatApi } from './api'
+import { sideChatApi, SideChatDisabledError } from './api'
+import { chatRowsOf } from './snapshot'
+import type { ImageApi, UiConversationFace } from './connection'
 import { SideChatComposer } from './composer'
 import { SideChatTranscript } from './transcript'
 import { describeError, type ErrorDetail } from '../side-panels/error-boundary'
@@ -84,8 +86,16 @@ export interface SideChatPanelProps {
   /** A restored tab's owned side session id (from the persisted instance state). */
   initialSideSessionId?: string
   sessions: SideChatSessionsFace
-  /** The `IApiClient` face (model directory / selection). */
+  /**
+   * The legacy `connection.api` face, kept only for attachment reads. DSH
+   * 0.1.2 removed its `sessions.*` RPCs, so it no longer serves the model
+   * directory — that goes through `modelDirectories` below.
+   */
   api?: unknown
+  /** The `ctx.uiConversation` image face (durable image reads). */
+  uiConversation?: unknown
+  /** The `ctx.modelDirectories` resolver (model directory / selection). */
+  modelDirectories?: unknown
   /** The `ctx.conversation` face (draft-image attachment handling). */
   conversation?: unknown
   t: (key: string) => string
@@ -108,6 +118,8 @@ export function SideChatPanel({
   initialSideSessionId,
   sessions,
   api,
+  uiConversation,
+  modelDirectories,
   conversation,
   t,
   updateInstanceState,
@@ -118,6 +130,11 @@ export function SideChatPanel({
   // Carries the stack, not just the message: these panels fail in ways a
   // one-line message cannot locate.
   const [error, setError] = useState<ErrorDetail | null>(null)
+  // Side chat is switched off in the settings. Held apart from `error` on
+  // purpose: a feature the user turned off is a state to explain, not a
+  // failure to report — putting it in the error bar would offer a stack for
+  // something that worked exactly as configured.
+  const [disabled, setDisabled] = useState(false)
   // Whether the parent's conversation context reached this side chat, as the
   // host reported it at open time.
   const [contextState, setContextState] = useState<SideChatContextState | null>(null)
@@ -160,6 +177,13 @@ export function SideChatPanel({
         setContextState(opened.context)
         setSideSessionId(id)
       } catch (cause) {
+        // A switched-off side chat is not a failure: record it as a state and
+        // leave the error bar empty, so the pane explains itself instead of
+        // showing an empty message with an empty stack.
+        if (cause instanceof SideChatDisabledError) {
+          if (alive) setDisabled(true)
+          return
+        }
         // Keep the stack: a bare message cannot say whether the fork, the list
         // wait, or the context injection failed, which is exactly what made
         // these reports unlocatable.
@@ -183,6 +207,29 @@ export function SideChatPanel({
     () => (session === undefined ? undefined : session.getSnapshot()),
   )
 
+  // The conversation content (order/nodes) is NOT on `session.getSnapshot()` —
+  // since DSH 0.1.2 that snapshot is the control face only (queue, running,
+  // openState…), with no `chat` field, which is exactly why a sent message
+  // never rendered. Chat rows come from the uiConversation service's chat
+  // target instead — the same source the main conversation's `useChat` reads.
+  const chatTarget = useMemo<Observable<unknown> | undefined>(() => {
+    if (sideSessionId === null) return undefined
+    const svc = uiConversation as
+      | { binding(id: string): { target(name: string): Observable<unknown> } | undefined }
+      | undefined
+    try {
+      return svc?.binding(sideSessionId)?.target('chat')
+    } catch {
+      // The binding resolves the session lazily; a not-yet-listed side chat
+      // throws, and the empty hero below is the correct stand-in until it lands.
+      return undefined
+    }
+  }, [sideSessionId, uiConversation])
+  const chatSnapshot = useSyncExternalStore<import('./snapshot').ChatLike | undefined>(
+    (fn) => (chatTarget === undefined ? () => {} : chatTarget.subscribe(fn)),
+    () => (chatTarget === undefined ? undefined : chatTarget.getSnapshot() as import('./snapshot').ChatLike | undefined),
+  )
+
   // Disposing on unmount: closing the tab releases the side chat (agent
   // disposed + session archived on the host).
   useEffect(() => {
@@ -202,14 +249,13 @@ export function SideChatPanel({
   // store each render → emit → shell re-render → new bound function → infinite
   // loop that takes the whole side-panels shell down with it.
   const firstUserText = useMemo(() => {
-    if (snapshot === undefined) return ''
-    // Defensive: `nodes` is absent until the conversation view composes, and
-    // iterating it directly crashes the panel on open with the same
-    // undefined-read the transcript guards against.
-    for (const node of (snapshot.nodes ?? []) as readonly unknown[]) {
-      const n = node as { kind?: string; content?: readonly unknown[] } | null
-      if (n == null || n.kind !== 'user') continue
-      const text = (n.content ?? [])
+    if (chatSnapshot === undefined) return ''
+    // The title reads the chat target, not the control snapshot: the control
+    // face has no `nodes`, so the old read always found nothing.
+    for (const node of chatRowsOf<{ kind?: string; data?: unknown }>(chatSnapshot)) {
+      if (node.kind !== 'user') continue
+      const content = (node.data as { content?: readonly unknown[] } | undefined)?.content ?? []
+      const text = content
         .filter((block): block is { type?: string; text?: string } =>
           typeof block === 'object' && block !== null
           && (block as { type?: unknown }).type === 'text')
@@ -220,7 +266,7 @@ export function SideChatPanel({
       if (text.length > 0) return text.length > 24 ? text.slice(0, 24) + '…' : text
     }
     return ''
-  }, [snapshot])
+  }, [chatSnapshot])
   const persistedTitleRef = useRef<string | null>(null)
   useEffect(() => {
     if (firstUserText.length === 0) return
@@ -256,7 +302,13 @@ export function SideChatPanel({
         </div>
       )}
 
-      {session === undefined ? (
+      {disabled ? (
+        // Reuse the empty-panel slot: the pane has nothing to show and nothing
+        // to retry, so it says what the user can do about it.
+        <div className="dsh-codex-sidechat-empty-panel">
+          <p>{t('sideChat.disabled')}</p>
+        </div>
+      ) : session === undefined ? (
         <div className="dsh-codex-sidechat-empty-panel">
           <p>{t('sideChat.loading')}</p>
         </div>
@@ -264,9 +316,11 @@ export function SideChatPanel({
         <div className="dsh-codex-sidechat-conversation">
           <SideChatTranscript
             snapshot={snapshot}
+            chat={chatSnapshot}
             t={t}
             sessionId={sideSessionId ?? undefined}
-            api={api as import('./transcript').ImageApi | undefined}
+            api={api as ImageApi | undefined}
+            uiConversation={uiConversation as UiConversationFace | undefined}
             contextState={contextState ?? undefined}
           />
           <SideChatComposer
@@ -280,7 +334,7 @@ export function SideChatPanel({
             running={running}
             pending={snapshot?.pending}
             runningCalls={snapshot?.runningCalls}
-            api={api as import('@just-genius/dsh-plugin-runtime/client').IApiClient | undefined}
+            modelDirectories={modelDirectories as import('./model-directory').ModelDirectoryResolverFace | undefined}
             conversation={conversation as import('./composer').SideChatConversationFace | undefined}
             onError={handleError}
             t={t}

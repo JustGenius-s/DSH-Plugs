@@ -17,11 +17,15 @@ import type { CodexFeature } from '../../core/feature-manager'
 import type {} from '../side-panels/contract'
 import type { SidePanelsStore } from '../side-panels/service'
 import { SideChatPanel, type SideChatSessionsFace } from './panel'
+import { closeAllSideChatInstances, SIDE_CHAT_PANEL_ID } from './instance-cleanup'
 import { ensureSideChatStyles } from './styles'
-import { connectionApiOf } from './connection'
+import { connectionApiOf, remoteSessionApiOf, uiConversationOf } from './connection'
+import { modelDirectoriesOf } from './model-directory'
 
 const PANEL_SLOT = 'side.panel'
-const PANEL_ID = 'side-chat'
+// Same id the cleanup reads: a panel renamed in one place but not the other
+// would silently stop releasing side chats when the switch goes down.
+const PANEL_ID = SIDE_CHAT_PANEL_ID
 const NS = 'settings.codex'
 
 interface ConnectionFace {
@@ -53,6 +57,18 @@ export function createSideChatFeature(
       // rather than through an optional chain on the context proxy: a missed
       // read left the model picker silently stuck on "模型…" forever.
       const api = connectionApiOf(ctx) as IApiClient | undefined
+      // The model directory moved off `connection.api` in DSH 0.1.2: that
+      // envelope RPC (`sessions.models` / `selectModel`) was removed, so the
+      // picker read a namespace that no longer existed and reported a missing
+      // inject. `modelDirectories` is the per-session owner now.
+      const modelDirectories = modelDirectoriesOf(ctx)
+      // Attachment reads: the 0.1.2 Typert remote is preferred, but the legacy
+      // envelope api is kept as the fallback so an image still renders on a
+      // host that has not mounted the remote namespace.
+      const imageApi = remoteSessionApiOf(ctx) ?? api
+      // Durable image reads: the same face the MAIN transcript uses, so a
+      // side-chat attachment renders as the main conversation renders it.
+      const uiConversation = uiConversationOf(ctx)
       // Optional compatibility service: `Context#get()` is the Cordis API for
       // reading a service without an inject requirement. Do not fall back to
       // `ctx.conversation` here; property access is inject-guarded and throws
@@ -70,9 +86,17 @@ export function createSideChatFeature(
         let disposeEntry: (() => void) | undefined
 
         const syncRegistration = (): void => {
+          const enabled = (scope.getSnapshot().value ?? DEFAULT_CONFIG).sideChatEnabled !== false
           disposeEntry?.()
           disposeEntry = undefined
-          if (!(scope.getSnapshot().value ?? DEFAULT_CONFIG).sideChatEnabled) return
+          if (!enabled) {
+            // Switching the panel off also releases the side chats it owns:
+            // their tabs are gone (the shell drops instances whose panel is no
+            // longer registered), and a side agent nobody can reach would keep
+            // running and hold its session open.
+            closeAllSideChatInstances(store)
+            return
+          }
 
           disposeEntry = ctx.slots.register(
             {
@@ -100,7 +124,9 @@ export function createSideChatFeature(
                 instanceKey: key,
                 initialSideSessionId: instance?.state?.sideSessionId,
                 sessions: sessions as SideChatSessionsFace,
-                api,
+                api: imageApi,
+                uiConversation,
+                modelDirectories,
                 conversation,
                 t: props.t,
                 // Stable method reference + key: `updateInstanceState` is the

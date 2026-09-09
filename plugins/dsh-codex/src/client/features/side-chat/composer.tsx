@@ -3,8 +3,9 @@
  *
  * - textarea + send / stop (same `prompt` verb the main composer uses)
  * - image/file attachment through the conversation service's draft-image path
- * - model select through the session's model directory (`api.sessions.models`
- *   + `selectModel`), including the model's reasoning effort
+ * - model select through `ctx.modelDirectories` (DSH 0.1.2's per-session
+ *   directory; the old `connection.api.sessions.models` RPC was REMOVED in
+ *   0.1.2 — see ./model-directory), including the model's reasoning effort
  * - permission chip through the `/permission` slash command
  * - approval / ask_user_question takeover while `snapshot.pending` is waiting
  *
@@ -14,7 +15,7 @@
  * behave like the main conversation.
  */
 
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   IconCheckOutline16,
   IconChevronDownOutline14,
@@ -29,8 +30,16 @@ import type {
   RunningToolCall,
 } from '@just-genius/dsh-plugin-runtime/client'
 import type { IApiClient } from '@just-genius/dsh-plugin-runtime/client'
+import { draftPreviewsOf, imageFilesOf } from './connection'
+import { debugPrompt } from './snapshot'
 import type { ModelCatalogModel, ModelReasoning, ModelSelection, SessionModels } from './types'
 import { modelLookupErrorMessage, modelMenuNotice } from './model-picker'
+import {
+  loadModelDirectory,
+  MODEL_DIRECTORY_MISSING_MESSAGE,
+  selectModel,
+  type ModelDirectoryResolverFace,
+} from './model-directory'
 import {
   SideChatPermissionSelect,
   type PermissionProjectionFace,
@@ -52,6 +61,16 @@ export interface SideChatComposerSession {
 export interface SideChatConversationFace {
   createDraftImages(files: readonly File[]): readonly unknown[]
   draftImages(ids: readonly unknown[]): readonly unknown[]
+  /**
+   * Serialize drafts to wire payloads. The main composer's own path: it
+   * validates MIME, encodes bare base64, and keeps the preview URL alive —
+   * which a hand-rolled FileReader cannot do.
+   */
+  serializeDraftImages(ids: readonly unknown[]): Promise<readonly {
+    mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+    data: string
+    name?: string
+  }[]>
   releaseDraftImage(id: unknown): void
 }
 
@@ -62,8 +81,11 @@ export interface SideChatComposerProps {
   pending?: readonly PendingInteraction[] | undefined
   /** Running tool calls used to pair an approval with its bash command. */
   runningCalls?: readonly RunningToolCall[] | undefined
-  /** The `IApiClient` face for model directory / selection. */
-  api?: IApiClient | undefined
+  /**
+   * The `ctx.modelDirectories` resolver for the model directory / selection.
+   * DSH 0.1.2 route; see ./model-directory for why the old api face is gone.
+   */
+  modelDirectories?: ModelDirectoryResolverFace | undefined
   /** The `ctx.conversation` face for draft-image attachment handling. */
   conversation?: SideChatConversationFace | undefined
   onError: (message: string) => void
@@ -87,7 +109,7 @@ export function SideChatComposer({
   running,
   pending,
   runningCalls,
-  api,
+  modelDirectories,
   conversation,
   onError,
   t,
@@ -129,36 +151,29 @@ export function SideChatComposer({
     }
   }, [modelMenuOpen, modelPane])
 
-  // Load the model directory once when the api face is available.
+  // Load the model directory once the directory service is available.
   useEffect(() => {
-    // Say so instead of parking on "模型…" forever: a missing api used to be
-    // indistinguishable from a slow lookup, and the picker looked broken.
-    if (api === undefined) {
-      setModels({
-        status: 'error',
-        message: 'connection.api 不可用，无法读取模型目录（检查 dsh.client.inject 是否包含 @deepseek-ai/dsh-client-connection）',
-      })
+    // Say so instead of parking on "模型…" forever: a missing service used to
+    // be indistinguishable from a slow lookup, and the picker looked broken.
+    // The message names the service to inject, because the old text blamed a
+    // `connection.api` that DSH 0.1.2 removed — sending the reader after an
+    // inject entry that was already present.
+    if (modelDirectories === undefined) {
+      setModels({ status: 'error', message: MODEL_DIRECTORY_MISSING_MESSAGE })
       return
     }
     let alive = true
     void (async () => {
       setModels({ status: 'loading' })
       try {
-        const result = await api.sessions.models({ sessionId: session.sessionId as never })
-        if (!alive) return
-        if (result.result.ok) {
-          setModels({ status: 'ready', value: result.result.value })
-        } else {
-          setModels({ status: 'error', message: String(result.result.error?.message ?? 'model lookup failed') })
-        }
+        const value = await loadModelDirectory(modelDirectories, session.sessionId)
+        if (alive) setModels({ status: 'ready', value })
       } catch (cause) {
-        if (alive) {
-          setModels({ status: 'error', message: modelLookupErrorMessage(cause) })
-        }
+        if (alive) setModels({ status: 'error', message: modelLookupErrorMessage(cause) })
       }
     })()
     return () => { alive = false }
-  }, [api, session.sessionId])
+  }, [modelDirectories, session.sessionId])
 
   const submit = async (): Promise<void> => {
     const text = draft.trim()
@@ -168,21 +183,20 @@ export function SideChatComposer({
     try {
       const content: unknown[] = []
       if (text.length > 0) content.push({ type: 'text', text })
-      // Resolve draft images to browser-owned descriptors, then to wire parts.
+      // Serialize through the conversation service, the same call the main
+      // composer makes. Hand-rolling a FileReader here sent a full
+      // `data:image/png;base64,…` URL where the wire expects BARE base64, so
+      // every attached image was rejected (or rendered as a broken box).
       if (conversation !== undefined && draftIds.length > 0) {
-        const images = conversation.draftImages(draftIds)
-        for (const image of images as { file?: File; previewUrl?: string; id?: unknown }[]) {
-          const file = image.file
-          if (file !== undefined) {
-            content.push({
-              type: 'image',
-              mediaType: file.type || 'image/png',
-              data: await fileToDataUrl(file),
-            })
-          }
+        const images = await conversation.serializeDraftImages(draftIds)
+        for (const image of images) {
+          content.push({ type: 'image', mediaType: image.mediaType, data: image.data })
         }
       }
       const result = await session.prompt(content, 'queue')
+      // Record what the send actually returned to the host trace: whether the
+      // RPC accepted the message is the first thing to rule in or out.
+      debugPrompt(session.sessionId, result)
       if (result != null && typeof result === 'object' && 'ok' in result
         && (result as { ok?: boolean }).ok === false) {
         const err = (result as { error?: { message?: string } }).error
@@ -212,17 +226,45 @@ export function SideChatComposer({
   const onPickFiles = (event: React.ChangeEvent<HTMLInputElement>): void => {
     const files = event.target.files
     if (files === null || files.length === 0 || conversation === undefined) return
-    const created = conversation.createDraftImages(Array.from(files))
-    if (created.length > 0) {
-      setDraftIds(current => [...current, ...created.map((c) => (c as { id?: unknown }).id).filter((id): id is string => typeof id === 'string')])
-    }
+    addFiles(Array.from(files))
     event.target.value = ''
+  }
+
+  /**
+   * Paste: an image on the clipboard becomes an attachment.
+ *
+   * Copying an image and pasting it into the composer is the natural gesture,
+   * and without this handler it did nothing at all — the only way to attach
+   * was the file picker. Text pastes fall through to the textarea's own
+   * behaviour so a pasted snippet still lands in the draft.
+   */
+  const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    if (conversation === undefined) return
+    const files = imageFilesOf(event.clipboardData)
+    if (files.length === 0) return
+    event.preventDefault()
+    addFiles(files)
+  }
+
+  const addFiles = (files: readonly File[]): void => {
+    if (conversation === undefined) return
+    const created = conversation.createDraftImages(files)
+    if (created.length === 0) return
+    setDraftIds(current => [
+      ...current,
+      ...created.map(item => (item as { id?: unknown }).id).filter((id): id is string => typeof id === 'string'),
+    ])
   }
 
   const removeDraft = (id: unknown): void => {
     conversation?.releaseDraftImage(id)
     setDraftIds(current => current.filter(item => item !== id))
   }
+
+  const draftPreviews = useMemo(
+    () => draftPreviewsOf(conversation, draftIds),
+    [conversation, draftIds],
+  )
 
   // ── model select ────────────────────────────────────────────────────────
   const directory = models.status === 'ready' ? models.value : undefined
@@ -246,25 +288,17 @@ export function SideChatComposer({
   }
 
   const selectRoute = (provider: string, model: string, reasoningEffort?: string): void => {
-    if (api === undefined) return
-    const payload: {
-      sessionId: never
-      provider: string
-      model: string
-      reasoningEffort?: string
-    } = {
-      sessionId: session.sessionId as never,
-      provider,
-      model,
-    }
-    if (reasoningEffort !== undefined) payload.reasoningEffort = reasoningEffort
-    void api.sessions.selectModel(payload).then((result) => {
-      const res = result.result
-      if (res.ok) applySelection(res.value.selected)
-      else onError(String(res.error?.message ?? '模型切换失败'))
-    }).catch((cause) => {
-      onError(cause instanceof Error ? cause.message : '模型切换失败')
-    })
+    if (modelDirectories === undefined) return
+    const selection: ModelSelection = { provider, model }
+    if (reasoningEffort !== undefined) selection.reasoningEffort = reasoningEffort
+    // The directory applies the durable projection itself, so the shared
+    // snapshot is the source of truth afterwards — the old route read the
+    // selection back out of an RPC result and could race a newer switch.
+    void selectModel(modelDirectories, session.sessionId, selection)
+      .then(() => applySelection(selection))
+      .catch((cause) => {
+        onError(cause instanceof Error ? cause.message : '模型切换失败')
+      })
   }
 
   const onSelectModel = (provider: string, model: string): void => {
@@ -301,14 +335,23 @@ export function SideChatComposer({
     <form className="dsh-codex-sidechat-composer" onSubmit={onSubmit}>
       {draftIds.length > 0 && (
         <div className="dsh-codex-sidechat-attachments">
-          {draftIds.map((id) => (
-            <span key={String(id)} className="dsh-codex-sidechat-attachment-chip">
-              🖼 图片
+          {draftPreviews.map((preview) => (
+            <span key={preview.key} className="dsh-codex-sidechat-attachment-chip">
+              {/* The draft's own object URL, exactly as the main composer shows
+                  it: a real thumbnail, not a placeholder glyph. */}
+              {preview.url === undefined
+                ? <span className="dsh-codex-sidechat-attachment-fallback" aria-hidden="true">🖼</span>
+                : <img
+                    className="dsh-codex-sidechat-attachment-thumb"
+                    src={preview.url}
+                    alt={preview.name}
+                  />}
+              <span className="dsh-codex-sidechat-attachment-name">{preview.name}</span>
               <button
                 type="button"
                 className="dsh-codex-sidechat-attachment-remove"
-                onClick={() => removeDraft(id)}
-                aria-label="移除附件"
+                onClick={() => removeDraft(preview.id)}
+                aria-label={`移除 ${preview.name}`}
               >
                 ✕
               </button>
@@ -323,11 +366,18 @@ export function SideChatComposer({
           value={draft}
           placeholder="给智能体发消息"
           onChange={event => setDraft(event.target.value)}
+          onPaste={onPaste}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              void submit()
-            }
+            if (event.key !== 'Enter' || event.shiftKey) return
+            // Enter must not send while an IME candidate window is open: the
+            // keypress belongs to the composition (confirming 中文/日本語
+            // candidates), and firing here both submitted a half-finished
+            // sentence and swallowed the confirmation. `isComposing` is the
+            // standard signal; `keyCode === 229` covers the browsers that do
+            // not set it.
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return
+            event.preventDefault()
+            void submit()
           }}
         />
         <div className="dsh-codex-sidechat-composer-tools">
@@ -581,11 +631,3 @@ function effortChoices(reasoning: ModelReasoning | undefined): readonly EffortCh
   return out
 }
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
-    reader.onerror = () => reject(reader.error ?? new Error('read file failed'))
-    reader.readAsDataURL(file)
-  })
-}

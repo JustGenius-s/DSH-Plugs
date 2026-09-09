@@ -11,6 +11,7 @@ The consolidated Codex shell for DSH: message navigation, turn collapsing, a sid
 - **File links in chat** — chat file links open in the side-panel preview instead of the OS default app (toggleable). Interception rides the Host Remote `session/openWorkspacePath`, which the chat view has used since DSH 0.1.3; the patch reads the namespace getter per call so a remounted Remote never leaves it stale.
 - **Terminal panel** — Warp-style blocks backed by a real login-shell PTY over WebSocket (`/dsh-codex/terminal/ws`), with completions, history, ghost hints, and full-screen program (vim/htop) alt-screen support. Follows the app theme.
 - **Git graph panel** — read-only commit graph walking `git log` (`/dsh-codex/git-graph`), with lane layout, branch filter, and a commit context menu (copy, checkout, branch, cherry-pick, revert, reset).
+- **Side chat** — a temporary conversation beside the current session (`/side`, or a `侧聊` tab). It shares the parent's sandbox but never its history: the transcript starts empty, and what it inherits instead is a bounded **context digest** of the parent's recent turns, injected as model-facing context so the side agent answers with the main task in mind. Two settings govern it: the panel switch, and whether a new side chat takes the digest at all. Turning the panel off also releases the side chats it owns.
 
 ## Design
 

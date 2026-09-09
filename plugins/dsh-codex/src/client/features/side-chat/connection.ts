@@ -35,6 +35,64 @@ export function connectionApiOfConnection(
  * service, then falls back to a plain property read for contexts that expose
  * the service directly. Both reads are guarded.
  */
+/** The durable image reference carried by a session event. */
+export interface DurableImageRef {
+  readonly attachmentId?: string
+  readonly name?: string
+}
+
+/**
+ * The `ctx.uiConversation` image face.
+ *
+ * This is the API the MAIN transcript renders images through
+ * (`loadImage` in the official chat view), so using it here is what makes a
+ * side-chat image look and behave like a main-conversation image: one
+ * session-authorized, cached read per attachment instead of a bespoke
+ * fetch that could disagree with how the host serves the same bytes.
+ */
+export interface UiConversationFace {
+  imageUrl(sessionId: never, attachment: DurableImageRef): Promise<string>
+  peekImageUrl?(sessionId: never, attachment: DurableImageRef): string | undefined
+}
+
+/** Resolve the `uiConversation` image face off a Cordis context. */
+export function uiConversationOf(ctx: object): UiConversationFace | undefined {
+  let service: { imageUrl?: unknown } | undefined
+  try {
+    const getter = (ctx as { get?: unknown }).get
+    if (typeof getter === 'function') service = (getter as (name: string) => unknown).call(ctx, 'uiConversation') as typeof service
+    else service = (ctx as { uiConversation?: typeof service }).uiConversation
+  } catch {
+    service = undefined
+  }
+  if (service === null || typeof service !== 'object') return undefined
+  if (typeof service.imageUrl !== 'function') return undefined
+  return service as UiConversationFace
+}
+
+/**
+ * Resolve the 0.1.2 Typert session remote (`ctx.remote.session`).
+ *
+ * Attachment reads moved there from the `connection.api` envelope, which no
+ * longer carries a `sessions.*` namespace. Wrapped in the shape the transcript
+ * expects so the image loader keeps one code path, and returned as undefined
+ * when the namespace is not mounted — the caller falls back to the envelope.
+ */
+export function remoteSessionApiOf(ctx: object): { session: { attachment: unknown } } | undefined {
+  let remote: { session?: unknown } | undefined
+  try {
+    const getter = (ctx as { get?: unknown }).get
+    if (typeof getter === 'function') remote = (getter as (name: string) => unknown).call(ctx, 'remote') as { session?: unknown }
+    else remote = (ctx as { remote?: { session?: unknown } }).remote
+  } catch {
+    remote = undefined
+  }
+  const session = remote?.session
+  if (session === null || typeof session !== 'object') return undefined
+  if (typeof (session as { attachment?: unknown }).attachment !== 'function') return undefined
+  return { session: session as { attachment: unknown } }
+}
+
 export function connectionApiOf(ctx: object): unknown | undefined {
   // Read through `ctx.get`, the accessor that never throws for an undeclared
   // service, then fall back to a plain property read for contexts that expose
@@ -57,4 +115,158 @@ export function connectionApiOf(ctx: object): unknown | undefined {
     // A throwing proxy (undeclared service): there is simply no api yet.
     return undefined
   }
+}
+
+/**
+ * Resolve one image block to a browser URL.
+ *
+ * `uiConversation.imageUrl` is preferred: it is the call the MAIN transcript
+ * uses, so the side chat shows the same cached, session-authorized read as
+ * the main conversation instead of a second fetch that can disagree with it.
+ * The envelope/remote read is the fallback for a host without that face.
+ */
+export async function resolveImageUrl(input: {
+  // The block's reference is loosely typed (`attachmentId?: unknown`) because
+  // it arrives from session events, so the id is narrowed here rather than at
+  // every call site.
+  attachment: { attachmentId?: unknown; name?: unknown }
+  sessionId: string
+  api?: ImageApi | undefined
+  uiConversation?: UiConversationFace | undefined
+}): Promise<string> {
+  const { sessionId, api, uiConversation } = input
+  const attachmentId = input.attachment.attachmentId
+  if (typeof attachmentId !== 'string' || attachmentId === '') {
+    throw new Error('image block has no attachment id')
+  }
+  const attachment: DurableImageRef = typeof input.attachment.name === 'string'
+    ? { attachmentId, name: input.attachment.name }
+    : { attachmentId }
+  if (uiConversation !== undefined) {
+    // A cached URL is already displayable; skip the round-trip entirely.
+    const peeked = uiConversation.peekImageUrl?.(sessionId as never, attachment)
+    if (typeof peeked === 'string' && peeked !== '') return peeked
+    return await uiConversation.imageUrl(sessionId as never, attachment)
+  }
+  if (api === undefined) throw new Error('no image transport is mounted')
+  return await readAttachmentData(api, sessionId, attachmentId)
+}
+
+/**
+ * One attachment read, normalized across both transports.
+ *
+ * DSH 0.1.2 moved session reads off the `connection.api` envelope onto Typert
+ * remotes (`ctx.remote.session`). The two answer differently — the envelope
+ * wrapped its payload in `{ result: { ok, value } }`, while the remote
+ * resolves to the value and rejects on failure — so this adapts each to one
+ * outcome rather than making callers know which transport they hold.
+ */
+export type ImageApi =
+  | {
+      sessions: {
+        attachment(request: {
+          sessionId: never
+          attachmentId: never
+        }): Promise<{ result: { ok: boolean; value?: { data?: string }; error?: { message?: string } } }>
+      }
+    }
+  | {
+      session: {
+        attachment(request: {
+          sessionId: never
+          attachmentId: never
+        }): Promise<{ data: string }>
+      }
+    }
+
+/** Read one attachment's inline data URL through whichever face is mounted. */
+export async function readAttachmentData(
+  api: ImageApi,
+  sessionId: string,
+  attachmentId: string,
+): Promise<string> {
+  if ('session' in api) {
+    const value = await api.session.attachment({
+      sessionId: sessionId as never,
+      attachmentId: attachmentId as never,
+    })
+    if (typeof value?.data !== 'string' || value.data === '') {
+      // An empty payload is not a successful read: returning '' would set an
+      // empty src on the <img> and render a broken image with no error state.
+      throw new Error('attachment read returned no data')
+    }
+    return value.data
+  }
+  const response = await api.sessions.attachment({
+    sessionId: sessionId as never,
+    attachmentId: attachmentId as never,
+  })
+  const result = response.result
+  if (!result.ok) throw new Error(result.error?.message ?? 'attachment read failed')
+  const data = result.value?.data
+  // Same rule as the remote path: a successful read with no bytes is a
+  // failure, not an empty image.
+  if (typeof data !== 'string' || data === '') throw new Error('attachment read returned no data')
+  return data
+}
+
+/* ── draft attachments ──────────────────────────────────────────────────
+ * Kept in the pure module so the chip/thumbnail logic and the paste filter
+ * are testable without the CSS-importing component graph the composer pulls
+ * in.
+ */
+
+/** One draft attachment chip: what to render and which id to release. */
+export interface DraftPreview {
+  key: string
+  id: unknown
+  /** The draft's object URL, or undefined when the descriptor carries none. */
+  url?: string
+  name: string
+}
+
+/**
+ * Resolve draft ids to the chips the composer renders.
+ *
+ * Read through `draftImages` because that is where the service keeps the
+ * browser-owned preview URL; a chip built from the id alone can only ever be
+ * a placeholder glyph.
+ */
+export function draftPreviewsOf(
+  conversation: { draftImages(ids: readonly unknown[]): readonly unknown[] } | undefined,
+  ids: readonly unknown[],
+): DraftPreview[] {
+  if (conversation === undefined) {
+    return ids.map((id, index) => ({ key: String(id ?? index), id, name: '图片' }))
+  }
+  const descriptors = conversation.draftImages(ids) as readonly {
+    id?: unknown
+    previewUrl?: string
+    file?: File
+  }[]
+  return descriptors.map((descriptor, index) => {
+    const name = descriptor.file?.name ?? '图片'
+    const url = typeof descriptor.previewUrl === 'string' && descriptor.previewUrl !== ''
+      ? descriptor.previewUrl
+      : undefined
+    return {
+      key: String(descriptor.id ?? ids[index] ?? index),
+      id: descriptor.id ?? ids[index],
+      ...(url === undefined ? {} : { url }),
+      name,
+    }
+  })
+}
+
+/**
+ * The image files on a clipboard, if any.
+ *
+ * A paste may carry an image, text, or both; only images become attachments,
+ * and a text-only paste must return empty so the textarea keeps its own
+ * behaviour.
+ */
+export function imageFilesOf(clipboardData: DataTransfer | null): File[] {
+  if (clipboardData === null) return []
+  const files = Array.from(clipboardData.files ?? [])
+  return files.filter(file => file.type.startsWith('image/'))
 }

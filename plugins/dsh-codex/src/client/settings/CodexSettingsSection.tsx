@@ -279,6 +279,21 @@ function SettingsBody(props: CodexSettingsInjected) {
         </FieldRow>
       </Group>
 
+      <Group title={t('groupSideChat')}>
+        <FieldRow label={t('sideChatEnabled')}>
+          <Switch label={t('sideChatEnabled')} checked={value.sideChatEnabled} onChange={next => set('sideChatEnabled', next)} />
+        </FieldRow>
+        {/* Only offered while the panel itself is enabled: a sub-option that
+            cannot take effect is a lie about the state of the feature. */}
+        {value.sideChatEnabled
+          ? (
+            <FieldRow label={t('sideChatContextEnabled')}>
+              <Switch label={t('sideChatContextEnabled')} checked={value.sideChatContextEnabled} onChange={next => set('sideChatContextEnabled', next)} />
+            </FieldRow>
+          )
+          : null}
+      </Group>
+
       <Group title={t('groupTerminal')}>
         <FieldRow label={t('terminalEnabled')}>
           <Switch label={t('terminalEnabled')} checked={value.terminalEnabled} onChange={next => set('terminalEnabled', next)} />

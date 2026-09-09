@@ -6,6 +6,15 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+// Attachment reads live in the pure module so they can be tested without the
+// CSS-importing component graph this file pulls in.
+import {
+  readAttachmentData,
+  resolveImageUrl,
+  type DurableImageRef,
+  type ImageApi,
+  type UiConversationFace,
+} from './connection'
 import type {
   AssistantBlock,
   ChatConversationViewNode,
@@ -49,8 +58,12 @@ import {
 import {
   chatRowsOf,
   contextRowsOf,
+  debugSnapshot,
+  debugToolBlock,
+  hasQueuedWork,
   hasVisibleContent,
-  pendingSteeringOf,
+  queuedRowsOf,
+  type ChatLike,
 } from './snapshot'
 import {
   isTerminalCall,
@@ -321,6 +334,10 @@ function ToolCard({ block }: { block: ToolCallBlock }) {
   const command = pickString(args, ['command'])
   const resultView = settled ? block.resultView : undefined
   const terminal = isTerminalCall(variant, view)
+  // Probe the block's real shape once per call: a bash call that does not
+  // render as a terminal means the field names this reads (`name`/`argsRaw`/
+  // `content`) do not match what this runtime's tool node actually carries.
+  debugToolBlock(block, { name, settled, terminal, hasCommand: command.length > 0, outputLen: output.length })
   // Expandable when there is anything to see: a result body, a structured
   // result card, a command line, or nested child calls.
   const subCount = block.subCalls?.length ?? 0
@@ -373,10 +390,13 @@ function ToolCard({ block }: { block: ToolCallBlock }) {
       >
         {terminal ? (
           <div className="dsh-codex-sidechat-terminal">
+            {/* maxLines: Infinity matches the main chat: a terminal folds by its
+                224px output scroll cap, not a head/tail line cut. */}
             <TerminalBlock
               command={command || summary || ''}
               output={output.length > 0 ? output : undefined}
               running={!settled}
+              maxLines={Infinity}
               labels={{ copy: '复制', copied: '已复制', running: '运行中', done: '完成', failed: '失败' }}
             />
           </div>
@@ -551,16 +571,18 @@ function MessageImages({
   blocks,
   sessionId,
   api,
+  uiConversation,
 }: {
   blocks: readonly unknown[]
   sessionId: string
-  api: ImageApi | undefined
+  api?: ImageApi | undefined
+  uiConversation?: UiConversationFace | undefined
 }) {
   const images = useMemo(
     () => blocks.filter(isImageBlock),
     [blocks],
   )
-  if (images.length === 0 || api === undefined) return null
+  if (images.length === 0 || (api === undefined && uiConversation === undefined)) return null
   return (
     <div className="dsh-codex-sidechat-images">
       {images.map((image, index) => (
@@ -569,30 +591,24 @@ function MessageImages({
           image={image}
           sessionId={sessionId}
           api={api}
+          uiConversation={uiConversation}
         />
       ))}
     </div>
   )
 }
 
-/** The session-authorized image loader face (subset of IApiClient). */
-export interface ImageApi {
-  sessions: {
-    attachment(request: {
-      sessionId: never
-      attachmentId: never
-    }): Promise<{ result: { ok: boolean; value?: { data?: string }; error?: { message?: string } } }>
-  }
-}
-
 function MessageImage({
   image,
   sessionId,
   api,
+  uiConversation,
 }: {
   image: { attachment?: ImageAttachmentRefLike }
   sessionId: string
-  api: ImageApi
+  api?: ImageApi
+  /** The main transcript's own image face; preferred when mounted. */
+  uiConversation?: UiConversationFace
 }) {
   const [state, setState] = useState<{ kind: 'loading' } | { kind: 'ready'; url: string } | {
     kind: 'error'
@@ -600,19 +616,20 @@ function MessageImage({
 
   useEffect(() => {
     let alive = true
-    const attachmentId = image.attachment?.attachmentId
-    if (attachmentId === undefined) {
+    const attachment = image.attachment
+    if (attachment === undefined || attachment === null) {
       setState({ kind: 'error' })
       return
     }
-    void api.sessions.attachment({
-      sessionId: sessionId as never,
-      attachmentId: attachmentId as never,
-    }).then((response) => {
+    void resolveImageUrl({
+      attachment,
+      sessionId,
+      api,
+      uiConversation,
+    }).then((url) => {
       if (!alive) return
-      const value = response.result
-      if (value.ok && typeof value.value?.data === 'string' && value.value.data.length > 0) {
-        setState({ kind: 'ready', url: value.value.data })
+      if (typeof url === 'string' && url.length > 0) {
+        setState({ kind: 'ready', url })
         return
       }
       setState({ kind: 'error' })
@@ -654,20 +671,34 @@ function UserBubble({
   content,
   sessionId,
   api,
+  uiConversation,
+  pending = false,
 }: {
   content: readonly unknown[]
   sessionId?: string
   api?: ImageApi
+  uiConversation?: UiConversationFace
+  /** True while the message is queued and has not entered the log yet. */
+  pending?: boolean
 }) {
   const text = textOfContent(content)
   const hasImages = content.some(isImageBlock)
   if (text.length === 0 && !hasImages) return null
   return (
     <div className="dsh-codex-sidechat-user">
-      <div className="dsh-codex-sidechat-user-bubble">
+      <div
+        className={pending
+          ? 'dsh-codex-sidechat-user-bubble is-pending'
+          : 'dsh-codex-sidechat-user-bubble'}
+      >
         {text.length > 0 && <MessageText text={text} />}
         {hasImages && sessionId !== undefined && (
-          <MessageImages blocks={content} sessionId={sessionId} api={api} />
+          <MessageImages
+            blocks={content}
+            sessionId={sessionId}
+            api={api}
+            uiConversation={uiConversation}
+          />
         )}
       </div>
     </div>
@@ -728,11 +759,13 @@ function ChatNodeView({
   node,
   sessionId,
   api,
+  uiConversation,
   t,
 }: {
   node: ChatConversationViewNode
   sessionId?: string
   api?: ImageApi
+  uiConversation?: UiConversationFace
   t?: (key: string) => string
 }) {
   if (node.visibility === 'hidden') return null
@@ -745,6 +778,7 @@ function ChatNodeView({
           content={Array.isArray(data?.content) ? data.content as readonly unknown[] : []}
           sessionId={sessionId}
           api={api}
+          uiConversation={uiConversation}
         />
       )
     case 'assistant-step': {
@@ -916,17 +950,28 @@ function ContextRow({
  */
 export function SideChatTranscript({
   snapshot,
+  chat,
   t,
   sessionId,
   api,
+  uiConversation,
   contextState,
 }: {
+  /** Control face (running / queue / pending) — `session.getSnapshot()`. */
   snapshot: ConversationSnapshot | undefined
+  /**
+   * The chat content snapshot (order/nodes) from `uiConversation.target('chat')`.
+   * This is the ONLY place conversation rows live since DSH 0.1.2 — the control
+   * snapshot carries no `chat` field, so reading rows off it yielded undefined.
+   */
+  chat?: ChatLike
   t: (key: string) => string
   /** Session id used to authorize durable image reads. */
   sessionId?: string
   /** The `IApiClient` face, for session-authorized image loading. */
   api?: ImageApi
+  /** The `ctx.uiConversation` face: the main transcript's own image reads. */
+  uiConversation?: UiConversationFace
   /**
    * Whether the parent's context reached this side chat, as reported at open
    * time. Rendered in the empty state because the injected context is not yet
@@ -937,12 +982,18 @@ export function SideChatTranscript({
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
 
+  // Runtime probe: record what BOTH sources carry on each update, so the
+  // failing half (control face vs chat content) is read from the trace.
+  useEffect(() => {
+    debugSnapshot(sessionId, snapshot, chat)
+  }, [snapshot, chat, sessionId])
+
   useEffect(() => {
     if (!following) return
     const el = scrollRef.current
     if (el === null) return
     el.scrollTop = el.scrollHeight
-  }, [snapshot, following])
+  }, [chat, following])
 
   const onScroll = (): void => {
     const el = scrollRef.current
@@ -958,12 +1009,19 @@ export function SideChatTranscript({
     setFollowing(true)
   }
 
+  // Content rows come from the chat target (order/nodes); control state
+  // (running/queue) from the control snapshot. A side chat renders content the
+  // moment EITHER carries any.
+  const chatRows = chatRowsOf<ChatConversationViewNode>(chat)
+  const hasChat = (chat !== undefined && hasVisibleContent(chat)) || snapshot?.running === true
+    || (snapshot?.pending?.length ?? 0) > 0 || hasQueuedWork(snapshot)
+
   // Empty state: keep the hero, but render any context rows beneath it. A
   // freshly opened side chat's only node IS its inherited parent context, and
   // hiding it is what made this feature look broken — the user sees an empty
   // chat with no evidence the main conversation came along.
-  if (snapshot === undefined || !hasVisibleContent(snapshot)) {
-    const contextNodes = contextRowsOf<ChatConversationViewNode>(snapshot)
+  if (!hasChat) {
+    const contextNodes = contextRowsOf<ChatConversationViewNode>(chat)
     return (
       <div className="dsh-codex-sidechat-empty">
         <div className="dsh-codex-sidechat-empty-hero">
@@ -994,10 +1052,12 @@ export function SideChatTranscript({
     )
   }
 
-  // Same defensive reads as `hasVisibleContent`: the Chat slice, the queue,
-  // and the pending list all arrive asynchronously.
-  const pendingSteering = pendingSteeringOf<{ id: string; content: readonly unknown[] }>(snapshot)
-  const chatRows = chatRowsOf<ChatConversationViewNode>(snapshot)
+  // Same defensive reads as the content test: the queue and pending list arrive
+  // asynchronously on the control face.
+  // A sent-but-unstarted prompt lives in the queue (as `queued`), not in the
+  // log — rendering it here is what makes the message appear immediately
+  // instead of only once its turn begins.
+  const queuedRows = queuedRowsOf<{ id: string; content: readonly unknown[] }>(snapshot)
 
   return (
     <div className="dsh-codex-sidechat-transcript-wrap">
@@ -1007,12 +1067,26 @@ export function SideChatTranscript({
         onScroll={onScroll}
       >
         {chatRows.map(node => (
-          <ChatNodeView key={node.key} node={node} sessionId={sessionId} api={api} t={t} />
+          <ChatNodeView
+            key={node.key}
+            node={node}
+            sessionId={sessionId}
+            api={api}
+            uiConversation={uiConversation}
+            t={t}
+          />
         ))}
-        {snapshot.running && <TurnStatus />}
-        {pendingSteering.map(item => (
-          <UserBubble key={item.id} content={item.content} sessionId={sessionId} api={api} />
+        {queuedRows.map(item => (
+          <UserBubble
+            key={item.id}
+            content={item.content}
+            sessionId={sessionId}
+            api={api}
+            uiConversation={uiConversation}
+            pending
+          />
         ))}
+        {snapshot?.running === true && <TurnStatus />}
       </div>
       {!following && (
         <div className="dsh-codex-sidechat-to-bottom-slot">

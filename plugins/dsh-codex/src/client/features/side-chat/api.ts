@@ -7,12 +7,28 @@ import {
   SIDE_CHAT_CLOSE_PATH,
   SIDE_CHAT_LIST_PATH,
   SIDE_CHAT_OPEN_PATH,
+  SIDE_CHAT_DISABLED_REASON,
   type SideChatContextState,
   type SideChatOpenResult,
   type SideChatSummary,
 } from '../../../shared/side-chat'
 
 export type { SideChatSummary }
+
+/**
+ * Side chat is switched off in the settings.
+ *
+ * The Host answers `409 { disabled: true, reason }` instead of a plain error,
+ * and this carries that fact as a type so the panel can render a translated
+ * "switched off" state rather than an error bar with a stack — a feature the
+ * user turned off is not a failure.
+ */
+export class SideChatDisabledError extends Error {
+  constructor(readonly reason: string = SIDE_CHAT_DISABLED_REASON) {
+    super(reason)
+    this.name = 'SideChatDisabledError'
+  }
+}
 
 /**
  * Structured request failure surfaced to the panel.
@@ -45,6 +61,19 @@ export function hostStackOf(payload: unknown): string | undefined {
   return typeof stack === 'string' && stack !== '' ? stack : undefined
 }
 
+/**
+ * Whether one open-response payload is the "feature switched off" answer.
+ *
+ * Keyed off `disabled`, never off the status code alone: 409 is a shape the
+ * Host can also reach for unrelated conflicts, and the panel must not mistake
+ * one of those for the user's own switch.
+ */
+export function isDisabledPayload(payload: unknown, status: number): boolean {
+  if (status !== 409) return false
+  return typeof payload === 'object' && payload !== null
+    && (payload as { disabled?: unknown }).disabled === true
+}
+
 async function request(path: string, init?: RequestInit): Promise<any> {
   const response = await fetch(path, {
     ...init,
@@ -58,6 +87,12 @@ async function request(path: string, init?: RequestInit): Promise<any> {
     throw new SideChatApiError(response.status, `unexpected response from ${path}`)
   }
   if (!response.ok) {
+    // A switched-off feature is reported as a state, not a failure: it carries
+    // no `error` and no stack, so surfacing it through the error bar would show
+    // an empty message with an empty stack instead of "侧聊已关闭".
+    if (isDisabledPayload(payload, response.status)) {
+      throw new SideChatDisabledError()
+    }
     const message = (payload as { error?: unknown })?.error
     throw new SideChatApiError(
       response.status,
@@ -85,9 +120,14 @@ export const sideChatApi = {
       if (typeof payload.sideSessionId !== 'string') {
         throw new SideChatApiError(500, 'open response missing sideSessionId')
       }
-      // `context` is absent on a host built before context inheritance; default
-      // to 'none' so an older host cannot make the panel claim it inherited.
-      const context = payload.context === 'inherited' ? 'inherited' : 'none'
+      // `context` is absent on a host built before context inheritance, and
+      // 'off' only exists on a host that knows the setting — both collapse to
+      // 'none' rather than letting an older host make the panel claim more
+      // than it was told.
+      const context: SideChatContextState =
+        payload.context === 'inherited' ? 'inherited'
+          : payload.context === 'off' ? 'off'
+            : 'none'
       return { sideSessionId: payload.sideSessionId, context }
     })
   },

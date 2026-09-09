@@ -56,6 +56,9 @@ ${fitRulesFor(FIT_SELECTORS)}
 /* User bubble — one-to-one with the main chat's gdEzaW_bubble. */
 .dsh-codex-sidechat-user{flex-direction:column;align-items:flex-end;gap:6px;display:flex;min-width:0}
 .dsh-codex-sidechat-user-bubble{background:var(--dsw-specific-bubble);max-width:min(525px,82%);color:var(--dsw-alias-label-primary);border-radius:22px;padding:10px 16px;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word}
+/* A queued message is accepted but has not entered the log yet: it must be
+   visibly "on its way" rather than indistinguishable from a durable turn. */
+.dsh-codex-sidechat-user-bubble.is-pending{opacity:.62}
 
 /* Assistant markdown — Sxvs8a: 16/28, 16px stack gap. */
 .dsh-codex-sidechat-md{color:var(--dsw-alias-label-primary);flex-direction:column;font-size:16px;line-height:28px;display:flex;min-width:0}
@@ -85,8 +88,21 @@ ${fitRulesFor(FIT_SELECTORS)}
    - Cards get a content height so a long read / diff / search collapses inside
      its own card instead of pushing the transcript to an unusable length.
    - min-width:0 lets a card shrink below its content's intrinsic width. */
-.dsh-codex-sidechat-terminal{min-width:0;max-width:100%;margin-left:22px}
-.dsh-codex-sidechat-terminal > *{--dsl-terminal-output-max-height:320px}
+.dsh-codex-sidechat-terminal{min-width:0;max-width:100%;margin:4px 0 4px 22px}
+/* Match the main chat's terminal card (ui-tool ToolRow .terminalBody):
+   the smaller monospace face, 18px line height, a 224px output scroll cap, and
+   a hairline border. The earlier build set only a 320px height with no font or
+   border, so the card read as plain wrapped text instead of a terminal. The
+   gutter is narrowed for the side panel's extra 22px indent (the run-state dot
+   moves into the row indent, content geometry intact). */
+.dsh-codex-sidechat-terminal > *{
+  --dsl-terminal-font:var(--dsw-font-markdown-code-block-small);
+  --dsl-terminal-line-height:18px;
+  --dsl-terminal-output-max-height:224px;
+  --dsl-terminal-gutter:14px;
+  --dsl-terminal-radius:10px;
+  border:.5px solid var(--dsw-alias-border-l1);
+}
 .dsh-codex-sidechat-code{min-width:0;max-width:100%;margin-left:22px}
 
 /* Tool row — o3BgMG DisclosureRow + sweep while running. */
@@ -96,13 +112,13 @@ ${fitRulesFor(FIT_SELECTORS)}
 .dsh-codex-sidechat-toolrow-leading{flex-shrink:0}
 .dsh-codex-sidechat-toolrow-chevron{color:var(--dsw-alias-label-secondary)}
 .dsh-codex-sidechat-toolrow-title{font-weight:400}
-.dsh-codex-sidechat-toolrow-summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;font-size:14px;line-height:24px;overflow:hidden}
+.dsh-codex-sidechat-toolrow-summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px));overflow:hidden}
 .dsh-codex-sidechat-toolrow-summary.is-error{color:var(--dsw-alias-state-error-primary)}
 /* Nested-call count: how many child calls this root owns. */
 .dsh-codex-sidechat-toolrow-badge{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-caption);border-radius:6px;flex:none;padding:0 5px;margin-right:8px;font-size:11px;font-weight:600;line-height:18px}
 /* Explicit running marker — the sweep animation alone reads as decoration. */
 .dsh-codex-sidechat-toolrow-state{color:var(--dsw-alias-label-caption);flex:none;margin-right:8px;font-size:12px;line-height:18px}
-.dsh-codex-sidechat-toolrow-body{color:var(--dsw-alias-label-tertiary);white-space:pre-wrap;word-break:break-word;padding:4px 0 4px 22px;font-size:14px;line-height:24px}
+.dsh-codex-sidechat-toolrow-body{color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word;padding:4px 0 4px 22px;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px))}
 .dsh-codex-sidechat-toolrow-body.is-error{color:var(--dsw-alias-state-error-primary)}
 /* Structured result cards (read / search / web / diff).
 
@@ -177,6 +193,11 @@ ${fitRulesFor(FIT_SELECTORS)}
 .dsh-codex-sidechat-attachment-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:16px}
 .dsh-codex-sidechat-attachment-remove{border:none;background:transparent;color:inherit;cursor:pointer;font-size:12px;line-height:16px;padding:0}
 .dsh-codex-sidechat-attachment-remove:hover{color:var(--dsw-alias-state-error-primary)}
+/* The chip shows the draft's real thumbnail, so it is sized like the main
+   composer's preview rather than being a text pill. */
+.dsh-codex-sidechat-attachment-thumb{display:block;width:20px;height:20px;border-radius:4px;object-fit:cover;flex:none}
+.dsh-codex-sidechat-attachment-fallback{font-size:12px;line-height:16px}
+.dsh-codex-sidechat-attachment-name{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .dsh-codex-sidechat-card{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-specific-input-major);box-shadow:var(--dsw-shadow-lv2);border-radius:22px;display:flex;flex-direction:column;gap:12px;padding-top:10px;font-size:16px;line-height:24px;position:relative}
 .dsh-codex-sidechat-composer-input{box-sizing:border-box;width:100%;resize:none;border:none;background:transparent;color:var(--dsw-alias-label-primary);caret-color:var(--dsw-alias-state-business-primary);padding:4px 16px 0;font-family:inherit;font-size:16px;line-height:24px;outline:none}

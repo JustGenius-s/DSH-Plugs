@@ -16,6 +16,7 @@ export const SIDE_CHAT_ROUTE_PREFIX = '/dsh-codex/side-chat'
 export const SIDE_CHAT_OPEN_PATH = `${SIDE_CHAT_ROUTE_PREFIX}/open`
 export const SIDE_CHAT_LIST_PATH = `${SIDE_CHAT_ROUTE_PREFIX}/list`
 export const SIDE_CHAT_CLOSE_PATH = `${SIDE_CHAT_ROUTE_PREFIX}/close`
+export const SIDE_CHAT_DEBUG_PATH = `${SIDE_CHAT_ROUTE_PREFIX}/debug`
 
 /** The slash command that opens a side chat from the composer. */
 export const SIDE_COMMAND = 'side'
@@ -46,11 +47,23 @@ export interface SideChatSummary {
 }
 
 /**
- * How much of the parent conversation a side chat received at creation.
+ * Why a side chat received no digest.
  *
  * `inherited` — a recall digest of the parent's recent turns was injected as
  * model-facing context, so the side agent answers with the main task in mind.
  * `none` — the parent had nothing usable to inherit (a blank parent, or the
  * digest could not be built).
+ * `off` — context inheritance is switched off in the settings, so the side
+ * chat starts blank on purpose.
  */
-export type SideChatContextState = 'inherited' | 'none'
+export type SideChatContextState = 'inherited' | 'none' | 'off'
+
+/** Why the host refused to open a side chat. */
+export const SIDE_CHAT_DISABLED_REASON = 'side-chat-disabled' as const
+export type SideChatDisabledReason = typeof SIDE_CHAT_DISABLED_REASON
+
+/** The host's answer when side chat is switched off. */
+export interface SideChatDisabled {
+  readonly disabled: true
+  readonly reason: SideChatDisabledReason
+}

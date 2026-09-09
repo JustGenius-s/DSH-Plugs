@@ -31,6 +31,12 @@ export const inject = [
   CLIENT_SERVICES.remote,
   // Chat file links resolve through `session/openWorkspacePath` since DSH 0.1.3.
   CLIENT_SERVICES.remoteSession,
+  // Per-session model directory: DSH 0.1.2 removed the `connection.api`
+  // envelope RPCs (`sessions.models` / `selectModel`), so the side-chat model
+  // picker reads the catalog through this service instead.
+  CLIENT_SERVICES.modelDirectories,
+  // Durable image reads, the same way the main transcript loads them.
+  CLIENT_SERVICES.uiConversation,
   CLIENT_SERVICES.sessions,
   // Terminal selections and file review comments register `@` reference codecs here.
   CLIENT_SERVICES.inputTriggers,
