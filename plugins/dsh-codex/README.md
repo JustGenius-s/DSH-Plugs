@@ -1,15 +1,16 @@
 # @just-genius/dsh-codex
 
-The consolidated Codex shell for DSH: message navigation, turn collapsing, a side-panel host with file preview, a Warp-style terminal, and a git commit graph — all configurable from one Codex settings section.
+Codex-style additions for DSH: message navigation, turn collapsing, Side Chat, Terminal, and Git mounted into DSH's official right Sidebar — all configurable from one Codex settings section. Files use DSH's built-in implementation by default.
 
 ## Features
 
 - **Navigator** — a vertical tick rail on the transcript, one tick per user message, with active highlight and smooth jump.
 - **Worked-for collapsing** — completed turns that ran tools collapse into a Cursor-style **Worked for** row; the closing assistant message stays visible as the conclusion.
-- **Side panels** — a right-side `side.panel` host with a scrollable tab strip, plus the imperative `ctx.sidePanels` service other features use to open panels.
-- **Files panel** — session-cwd file tree with status badges, read-only preview and git diff view. Right-click any row for: add to the conversation as an `@path` chip (a file inserts `@path`, a folder a folder chip with the canonical trailing-slash `@dir/` mention, byte-identical to a settled pick from the built-in `@` picker), reveal in the native file manager, copy path, and copy relative path. Clicking a line drops a read-only caret (blinking, but never editable) at the clicked column, with the current line lightly highlighted. Syntax highlighting uses shiki's `light-plus` / `dark-plus` (VSCode's default token colors) and follows the app's light/dark switch; line-number gutters stay pinned during horizontal scroll.
-- **File links in chat** — chat file links open in the side-panel preview instead of the OS default app (toggleable). Interception rides the Host Remote `session/openWorkspacePath`, which the chat view has used since DSH 0.1.3; the patch reads the namespace getter per call so a remounted Remote never leaves it stale.
-- **Terminal panel** — Warp-style blocks backed by a real login-shell PTY over WebSocket (`/dsh-codex/terminal/ws`), with completions, history, ghost hints, and full-screen program (vim/htop) alt-screen support. Follows the app theme.
+- **Official Sidebar extensions** — Side Chat, Terminal, Changes, and Graph register through `ctx.sidebarRightTabs`; DSH owns Files, file previews, the tab strip, splits, floating panes, fullscreen mode, resizing, and collapse/expand controls.
+- **Files** — the workspace tree stays with DSH. `dsh-resource://file/**` uses DSH's viewer by default; the retained Codex preview can be enabled from Codex settings for comparison.
+- **Retained custom tabs** — DSH's disposable active-body seat only hosts a mount point. Side Chat, Terminal, Changes, Graph, and the optional custom Files bodies keep their actual React roots and DOM across tab switches, pane moves, dock/float changes, and Session switches; their official `tab.signal` is the sole tab-close lifetime.
+- **Side Chat** — opens an independent temporary agent beside the current task, optionally seeded with a digest of the main conversation. Its first user message becomes the official tab title, and closing the tab disposes the side session through `tab.signal`.
+- **Terminal panel** — Warp-style blocks backed by a real login-shell PTY over WebSocket (`/dsh-codex/terminal/ws`), with completions, history, ghost hints, and full-screen program (vim/htop) alt-screen support. Aborting its official `tab.signal` terminates the PTY.
 - **Git graph panel** — read-only commit graph walking `git log` (`/dsh-codex/git-graph`), with lane layout, branch filter, and a commit context menu (copy, checkout, branch, cherry-pick, revert, reset).
 
 ## Design
@@ -23,7 +24,7 @@ The consolidated Codex shell for DSH: message navigation, turn collapsing, a sid
 - Client features are plain modules with a `definition.ts` (slot registrations, config gates); the feature manager mounts them in order, so a feature is added by dropping in a folder.
 - The terminal renders the whole transcript onto **one canvas** (`cell-render.ts`): headless xterm grids are pure data, `doc-model.ts` flattens blocks into a linear document, and the painter draws only the visible window — one surface, one scrollbar, one selection model.
 - Highlighting is bundled eagerly (single-file client bundle, no lazy chunks): `createHighlighterCoreSync` + the JS regex engine, dual-theme tokenize so theme switching needs no re-highlight.
-- Legacy localStorage keys from the retired standalone side-panel / terminal plugins are still read, so existing panel state survives the consolidation.
+- Sidebar layout and tab state follow DSH's official per-session lifecycle; this plugin keeps no parallel shell or launcher state.
 
 ## Develop
 

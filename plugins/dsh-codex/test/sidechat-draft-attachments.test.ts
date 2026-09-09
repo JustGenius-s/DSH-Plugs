@@ -1,23 +1,23 @@
 /**
  * Draft attachment chips, pasted images, and durable image resolution.
  *
- * Three things were broken here and each is pinned by a test:
+ * The adapter pins both the attachment behavior and the DSH service contract:
  *
- * 1. The composer serialized attachments with its own FileReader, which
- *    produced a full `data:image/png;base64,…` URL where the wire expects
- *    BARE base64 — so an uploaded image never rendered.
- * 2. There was no paste handler at all, so a copied image could only be
- *    attached by saving it to disk and using the file picker.
- * 3. Chips were placeholder glyphs: the draft's real preview URL (the thing
- *    the main composer renders) was never read.
+ * DSH 0.1.5 replaced the old `*DraftImages` calls with a unified draft-
+ * attachment API. Validating that face before render prevents a renamed
+ * method from taking down the whole Side Chat again.
  */
 
 import { describe, expect, it, vi } from 'vitest'
 import {
+  conversationAttachmentsOf,
+  conversationAttachmentsOfService,
   draftPreviewsOf,
   imageFilesOf,
   resolveImageUrl,
+  sideChatPromptContent,
   type ImageApi,
+  type SideChatConversationFace,
   type UiConversationFace,
 } from '../src/client/features/side-chat/connection'
 
@@ -27,14 +27,47 @@ const file = (name: string, type = 'image/png'): File =>
 const clipboard = (files: File[]): DataTransfer =>
   ({ files, items: [], types: [] }) as unknown as DataTransfer
 
+const conversationFace = (
+  overrides: Partial<SideChatConversationFace> = {},
+): SideChatConversationFace => ({
+  createDrafts: () => [],
+  resolveDraftAttachments: () => [],
+  serializeDraftAttachments: async () => ({ attachments: [] }),
+  releaseDraftAttachment: () => {},
+  ...overrides,
+})
+
+describe('conversationAttachmentsOf', () => {
+  it('accepts the complete DSH 0.1.5 draft-attachment face', () => {
+    const conversation = conversationFace()
+    expect(conversationAttachmentsOfService(conversation)).toBe(conversation)
+    expect(conversationAttachmentsOf({ get: () => conversation })).toBe(conversation)
+  })
+
+  it('rejects the removed draftImages face before render', () => {
+    const legacy = {
+      createDraftImages: () => [],
+      draftImages: () => [],
+      serializeDraftImages: async () => [],
+      releaseDraftImage: () => {},
+    }
+    expect(conversationAttachmentsOfService(legacy)).toBeUndefined()
+  })
+
+  it('rejects an incomplete face and survives a throwing context', () => {
+    expect(conversationAttachmentsOfService({ createDrafts: () => [] })).toBeUndefined()
+    expect(conversationAttachmentsOf({ get: () => { throw new Error('not injected') } })).toBeUndefined()
+  })
+})
+
 describe('draftPreviewsOf', () => {
   it('renders each draft with its real preview URL and file name', () => {
-    const conversation = {
-      draftImages: () => [
-        { id: 'd1', previewUrl: 'blob:one', file: file('shot.png') },
-        { id: 'd2', previewUrl: 'blob:two', file: file('photo.jpg', 'image/jpeg') },
+    const conversation = conversationFace({
+      resolveDraftAttachments: () => [
+        { kind: 'image', id: 'd1', previewUrl: 'blob:one', file: file('shot.png') },
+        { kind: 'image', id: 'd2', previewUrl: 'blob:two', file: file('photo.jpg', 'image/jpeg') },
       ],
-    }
+    })
     const previews = draftPreviewsOf(conversation, ['d1', 'd2'])
     expect(previews.map(item => item.url)).toEqual(['blob:one', 'blob:two'])
     expect(previews.map(item => item.name)).toEqual(['shot.png', 'photo.jpg'])
@@ -43,7 +76,9 @@ describe('draftPreviewsOf', () => {
   })
 
   it('falls back to a glyph when the descriptor carries no preview URL', () => {
-    const conversation = { draftImages: () => [{ id: 'd1', file: file('a.png') }] }
+    const conversation = conversationFace({
+      resolveDraftAttachments: () => [{ kind: 'image', id: 'd1', file: file('a.png') }],
+    })
     const [preview] = draftPreviewsOf(conversation, ['d1'])
     expect(preview.url).toBeUndefined()
     expect(preview.name).toBe('a.png')
@@ -56,10 +91,60 @@ describe('draftPreviewsOf', () => {
   })
 
   it('handles a descriptor with no file (name unknown)', () => {
-    const conversation = { draftImages: () => [{ id: 'd1', previewUrl: 'blob:x' }] }
+    const conversation = conversationFace({
+      resolveDraftAttachments: () => [{
+        kind: 'image',
+        id: 'd1',
+        previewUrl: 'blob:x',
+        file: undefined as unknown as File,
+      }],
+    })
     const [preview] = draftPreviewsOf(conversation, ['d1'])
     expect(preview.url).toBe('blob:x')
     expect(preview.name).toBe('图片')
+  })
+
+  it('does not call the service for an empty draft', () => {
+    const resolveDraftAttachments = vi.fn(() => [])
+    expect(draftPreviewsOf({ resolveDraftAttachments }, [])).toEqual([])
+    expect(resolveDraftAttachments).not.toHaveBeenCalled()
+  })
+
+  it('keeps stale chips removable if resolution fails or omits an id', () => {
+    const throwing = conversationFace({
+      resolveDraftAttachments: () => { throw new Error('service replaced') },
+    })
+    expect(draftPreviewsOf(throwing, ['d1'])[0]).toMatchObject({ id: 'd1', name: '图片' })
+
+    const missing = conversationFace({ resolveDraftAttachments: () => [] })
+    expect(draftPreviewsOf(missing, ['d2'])[0]).toMatchObject({ id: 'd2', name: '图片' })
+  })
+})
+
+describe('sideChatPromptContent', () => {
+  it('uses the 0.1.5 serializer and places attachments before text', async () => {
+    const serializeDraftAttachments = vi.fn(async () => ({ attachments: [
+      { type: 'image' as const, mediaType: 'image/png' as const, data: 'AAA', name: 'shot.png' },
+      { type: 'file' as const, receiptId: 'receipt-1' },
+    ] }))
+    const conversation = conversationFace({ serializeDraftAttachments })
+
+    await expect(sideChatPromptContent(conversation, ['d1', 'd2'], 'hello')).resolves.toEqual([
+      { type: 'image', mediaType: 'image/png', data: 'AAA', name: 'shot.png' },
+      { type: 'file', receiptId: 'receipt-1' },
+      { type: 'text', text: 'hello' },
+    ])
+    expect(serializeDraftAttachments).toHaveBeenCalledWith(['d1', 'd2'])
+  })
+
+  it('does not require the service for a text-only prompt', async () => {
+    await expect(sideChatPromptContent(undefined, [], 'hello')).resolves.toEqual([
+      { type: 'text', text: 'hello' },
+    ])
+  })
+
+  it('fails instead of silently dropping attachments when the service is absent', async () => {
+    await expect(sideChatPromptContent(undefined, ['d1'], 'hello')).rejects.toThrow('附件服务不可用')
   })
 })
 

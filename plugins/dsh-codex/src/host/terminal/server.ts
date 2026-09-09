@@ -16,15 +16,21 @@
 
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import type { SubprocessTerminalHandle, SubprocessTerminalSignal } from '@just-genius/dsh-plugin-runtime/host'
-import { HOST_SERVICES } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, readJsonBody, sendJson } from '@just-genius/dsh-plugin-runtime/host'
 import { execFile } from 'node:child_process'
-import type { IncomingMessage } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { basename } from 'node:path'
 import { promisify } from 'node:util'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { DEFAULT_CONFIG, type DshCodexConfig, type TerminalShell } from '../../shared/config'
-import type { BlockContext, ClientMessage, ServerMessage } from '../../shared/terminal-protocol'
+import {
+  TERMINAL_TERMINATE_PATH,
+  type BlockContext,
+  type ClientMessage,
+  type ServerMessage,
+  type TerminalTerminateRequest,
+} from '../../shared/terminal-protocol'
 import { completeTerminalInput } from './completion'
 import { loadShellHistory } from './history'
 import { resizeSubprocessTerminal } from '../adapters/subprocess-terminal'
@@ -49,6 +55,8 @@ const DETACH_GRACE_MS = 10 * 60 * 1000
 const REPLAY_MAX_CHARS = 1024 * 1024
 /** Host pings every attached socket on this cadence; two misses kill it. */
 const HEARTBEAT_MS = 30_000
+/** Covers a close racing the initial PTY spawn/registration. */
+const PENDING_TERMINATION_MS = 30_000
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{8,64}$/
 
 export interface TerminalSession {
@@ -106,6 +114,29 @@ export function createDshCodexTerminalServer(
 ): DshCodexTerminalServer {
   const wss = new WebSocketServer({ noServer: true })
   const sessions = new Map<string, TerminalSession>()
+  const pendingTerminations = new Map<string, ReturnType<typeof setTimeout>>()
+
+  const consumePendingTermination = (token: string): boolean => {
+    const timer = pendingTerminations.get(token)
+    if (timer === undefined) return false
+    clearTimeout(timer)
+    pendingTerminations.delete(token)
+    return true
+  }
+
+  const requestTermination = (token: string): void => {
+    const session = sessions.get(token)
+    if (session !== undefined) {
+      closeSession(session)
+      sessions.delete(token)
+      return
+    }
+    const previous = pendingTerminations.get(token)
+    if (previous !== undefined) clearTimeout(previous)
+    pendingTerminations.set(token, setTimeout(() => {
+      pendingTerminations.delete(token)
+    }, PENDING_TERMINATION_MS))
+  }
 
   const disposeRoute = ctx.webServer.registerUpgrade({
     path: WS_PATH,
@@ -115,20 +146,37 @@ export function createDshCodexTerminalServer(
       })
     },
   })
+  const disposeTerminate = ctx.webServer.register({
+    kind: 'exact',
+    path: TERMINAL_TERMINATE_PATH,
+    handler: (req, res) => handleTerminate(req, res, requestTermination),
+  })
 
   const onConnection = (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const sessionId = parseSessionId(url.searchParams.get('session'))
+    if (sessionId !== undefined && consumePendingTermination(sessionId)) {
+      ws.close()
+      return
+    }
     // A reconnect carries the same session id: reattach to the PTY that
     // survived the drop instead of spawning a fresh shell (Warp behavior).
     const existing = sessionId === undefined ? undefined : sessions.get(sessionId)
-    if (existing !== undefined && !existing.closed) {
+    if (existing !== undefined && !existing.closed && !existing.exited) {
       attachSocket(existing, ws, sessions, true)
       return
+    }
+    if (existing !== undefined) {
+      closeSession(existing)
+      sessions.delete(existing.id)
     }
     void openSession(ctx, ws, req, getConfig, sessionId, sessions)
       .then((session) => {
         if (session === undefined || session.closed) return
+        if (consumePendingTermination(session.id)) {
+          closeSession(session)
+          return
+        }
         sessions.set(session.id, session)
       })
       .catch((error) => {
@@ -159,10 +207,38 @@ export function createDshCodexTerminalServer(
       wss.off('connection', onConnection)
       for (const session of sessions.values()) closeSession(session)
       sessions.clear()
+      for (const timer of pendingTerminations.values()) clearTimeout(timer)
+      pendingTerminations.clear()
+      disposeTerminate()
       disposeRoute()
       wss.close()
     },
   }
+}
+
+async function handleTerminate(
+  req: IncomingMessage,
+  res: ServerResponse,
+  terminate: (token: string) => void,
+): Promise<void> {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { ok: false, message: 'method not allowed' })
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    sendJson(res, 400, { ok: false, message: errorMessage(error) })
+    return
+  }
+  const token = (body as Partial<TerminalTerminateRequest> | null)?.token
+  if (typeof token !== 'string' || !SESSION_ID_RE.test(token)) {
+    sendJson(res, 400, { ok: false, message: 'invalid terminal token' })
+    return
+  }
+  terminate(token)
+  sendJson(res, 200, { ok: true })
 }
 
 /**

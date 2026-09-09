@@ -1,18 +1,122 @@
 import { createElement, useSyncExternalStore } from 'react'
-import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import type {
+  ClientContext,
+  SessionId,
+  SettingsScope,
+  SidebarRightService,
+  SidebarRightTabDefinition,
+} from '@just-genius/dsh-plugin-runtime/client'
+import { IconFolderOpenOutline16 } from '@just-genius/dsh-plugin-ui'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
-import type {} from '../side-panels/contract'
-import type { SidePanelsStore } from '../side-panels/service'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
+import { registerSidebarTab, type SidebarTabProps } from '../../sidebar-right'
+import {
+  createSidebarTabKeepAliveRegistry,
+  sidebarTabOccurrenceKey,
+  SidebarTabKeepAliveMount,
+} from '../../sidebar-tab-keep-alive'
 import { insertFileReference } from './add-to-chat'
 import { createFileReviewCommentApi } from './review-comment'
 import { setHighlightThemes } from './highlight'
 import { FilesPanel, type FilesPanelProps } from './files-panel'
+import { createFilesTabStateRegistry } from './tree-store'
+import {
+  FILE_ADDRESS_PATTERN,
+  fileAddressFor,
+  fileTitleFromAddress,
+  filesNavigationFrom,
+  parseFileAddress,
+  type FilesNavigationState,
+} from './resource-address'
 
-const PANEL_SLOT = 'side.panel'
+export const FILES_TAB_KIND = 'files'
+export const FILES_TAB_ID = '@just-genius/dsh-codex/files'
+export const OFFICIAL_FILE_VIEWER_KIND = 'text'
+export const FILE_VIEWER_KIND = 'dsh-codex-file'
+export const FILE_VIEWER_ID = '@just-genius/dsh-codex/file-viewer'
+
 const NS = 'settings.codex'
+
+export function filesTabDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
+  return {
+    id: FILES_TAB_ID,
+    kind: FILES_TAB_KIND,
+    priority: 'extension',
+    title: () => t('view.files'),
+    guide: [{
+      order: 10,
+      title: () => t('view.files'),
+      description: () => t('sidebar.filesDescription'),
+      icon: IconFolderOpenOutline16,
+    }],
+  }
+}
+
+export function fileViewerDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
+  return {
+    id: FILE_VIEWER_ID,
+    kind: FILE_VIEWER_KIND,
+    patterns: [FILE_ADDRESS_PATTERN],
+    priority: 'extension',
+    canOpen: address => parseFileAddress(address) !== undefined,
+    title: address => fileTitleFromAddress(address, t('view.files')),
+  }
+}
+
+/** Reclassify the visible file tab after its preferred viewer changes. */
+export function switchActiveFileViewer(
+  sidebar: Pick<SidebarRightService, 'active' | 'openResource'>,
+  customEnabled: boolean,
+): boolean {
+  const active = sidebar.active()
+  if (active === undefined || parseFileAddress(active.contentId) === undefined) return false
+
+  if (customEnabled) {
+    if (active.kind === FILE_VIEWER_KIND) return false
+    sidebar.openResource(active.contentId, {
+      kind: FILE_VIEWER_KIND,
+      replaceTab: active.id,
+      revealIfOpened: false,
+    })
+    return true
+  }
+
+  if (active.kind !== FILE_VIEWER_KIND) return false
+  // The extension registration has already left, so normal resource
+  // resolution selects DSH's best built-in/fallback viewer.
+  sidebar.openResource(active.contentId, {
+    replaceTab: active.id,
+    revealIfOpened: false,
+  })
+  return true
+}
+
+function useFilesConfig(scope: SettingsScope<DshCodexConfig>): DshCodexConfig {
+  const settings = useSyncExternalStore(
+    listener => scope.subscribe(listener),
+    () => scope.getSnapshot(),
+    () => scope.getSnapshot(),
+  )
+  return { ...DEFAULT_CONFIG, ...settings.value }
+}
+
+function openFilesTarget(
+  actions: ReturnType<SidebarTabProps['useTabInfo']>['tab']['actions'],
+  sessionId: string,
+  cwd: string | undefined,
+  state: FilesNavigationState,
+): void {
+  if (state.mode === 'tree') {
+    actions.openTab(FILES_TAB_KIND)
+    return
+  }
+  if (state.file === undefined) return
+  actions.openResource(fileAddressFor(sessionId, cwd, state.file), {
+    params: { mode: state.mode ?? 'preview', sha: state.sha },
+  })
+}
 
 export function createFilesFeature(
   ctx: ClientContext,
@@ -21,100 +125,112 @@ export function createFilesFeature(
 ): CodexFeature {
   return {
     id: 'files',
-    requires: ['sidePanels'],
     activate() {
-      const store = ctx.sidePanels as SidePanelsStore
-      const reviewComments = createFileReviewCommentApi(ctx)
-
-      // Keep the shared highlighter's light/dark pair in sync with settings.
-      // The settings page (a separate tab) writes through the same scope, so
-      // the subscription below is the single source of truth for the panel.
-      const applyHighlightThemes = (): void => {
-        const snapshot = scope.getSnapshot()
-        const value = { ...DEFAULT_CONFIG, ...snapshot.value }
-        setHighlightThemes(value.highlightThemeLight, value.highlightThemeDark)
-      }
-      applyHighlightThemes()
-      const disposeThemeSync = scope.subscribe(applyHighlightThemes)
-
-      // `multi`: every open is a NEW instance (tab). One form per instance —
-      // switching form or opening a file opens another `files` tab.
-      const disposeDescriptor = ctx.sidePanels.describe('files', {
-        icon: 'files',
-        multi: true,
-        caption: (instance, siblings, label) => {
-          const file = instance.state?.file
-          if (file) return file.slice(file.lastIndexOf('/') + 1)
-          if (siblings.length < 2) return label
-          const ordinal = siblings.findIndex(item => item.key === instance.key) + 1
-          return ordinal > 0 ? `${label} ${ordinal}` : label
-        },
-      })
-
-      const open = (state: import('../side-panels/service').PanelNavState): void => {
-        ctx.sidePanels.open('files', state)
-      }
-
-      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => bindEnabledSlot(
+      return bindEnabledSlot(
         scope,
-        config => config.filesEnabled,
-        () => ctx.slots.register(
-            {
-              name: PANEL_SLOT,
-              id: 'files',
-              order: 35,
-              locale: NS as never,
-              label: () => t('view.files'),
-            },
-            function FilesPanelSlot(props: {
-              sessionId: string
-              cwd?: string
-              instanceKey?: string
-              visible?: boolean
-              t: (key: string) => string
-            }) {
-              // Each instance reads its OWN navigation state off the store by
-              // its instance key (multi: every tab is an independent subtree).
-              const snapshot = useSyncExternalStore(
-                store.subscribe,
-                store.getSnapshot,
-                store.getSnapshot,
-              )
-              const settings = useSyncExternalStore(
-                (listener) => scope.subscribe(listener),
-                () => scope.getSnapshot(),
-                () => scope.getSnapshot(),
-              )
-              const instance = snapshot.instances.find(
-                (item) => item.panelId === 'files' && item.key === props.instanceKey,
-              )
-              const navState = instance?.state
-              const config = { ...DEFAULT_CONFIG, ...settings.value }
-              const panelProps: FilesPanelProps = {
-                sessionId: props.sessionId,
-                cwd: props.cwd,
-                instanceKey: props.instanceKey,
-                t: props.t,
-                navState,
-                onOpen: open,
-                showIgnored: config.filesShowGitIgnored,
-                highlightThemeLight: config.highlightThemeLight,
-                highlightThemeDark: config.highlightThemeDark,
-                visible: props.visible !== false,
-                onAddToChat: (path, kind) => insertFileReference(ctx, props.sessionId, path, kind),
-                onAddComment: (comment) => reviewComments.insert(props.sessionId, comment),
-              }
-              return createElement(FilesPanel, panelProps)
-            } as never,
-          ),
-      ))
+        config => config.customFilesEnabled,
+        () => {
+          const reviewComments = createFileReviewCommentApi(ctx)
+          const tabStates = createFilesTabStateRegistry()
+          const retainedTabs = createSidebarTabKeepAliveRegistry()
 
-      return () => {
-        disposeThemeSync()
-        disposeDescriptor()
-        disposeInjection()
-        reviewComments.dispose()
-      }
+          const applyHighlightThemes = (): void => {
+            const value = { ...DEFAULT_CONFIG, ...scope.getSnapshot().value }
+            setHighlightThemes(value.highlightThemeLight, value.highlightThemeDark)
+          }
+          applyHighlightThemes()
+          const disposeThemeSync = scope.subscribe(applyHighlightThemes)
+
+          const FilesPageTab = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            const cwd = props.useSessions(state => state.byId[props.sessionId]?.cwd)
+            const config = useFilesConfig(scope)
+            const treeStore = tabStates.acquire(
+              sidebarTabOccurrenceKey(props.sessionId, tab.id),
+              tab.signal,
+            )
+            const panelProps: FilesPanelProps = {
+              cwd,
+              t: props.t,
+              navState: { mode: 'tree' },
+              treeStore,
+              onOpen: state => openFilesTarget(tab.actions, props.sessionId, cwd, state),
+              highlightThemeLight: config.highlightThemeLight,
+              highlightThemeDark: config.highlightThemeDark,
+              visible: tab.visible,
+              onAddToChat: (path, kind) => insertFileReference(ctx, props.sessionId, path, kind),
+              onAddComment: comment => reviewComments.insert(props.sessionId, comment),
+            }
+            return createElement(SidebarTabKeepAliveMount, {
+              registry: retainedTabs,
+              sessionId: props.sessionId,
+              tabId: tab.id,
+              signal: tab.signal,
+              visible: tab.visible,
+              render: visible => createElement(FilesPanel, {
+                ...panelProps,
+                visible,
+              }),
+            })
+          }
+
+          const FileViewerTab = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            const parsed = parseFileAddress(tab.navigation.address)
+            const resourceSessionId = (parsed?.scope === 'session'
+              ? parsed.sessionId
+              : props.sessionId) as SessionId
+            const cwd = props.useSessions(state => state.byId[resourceSessionId]?.cwd)
+            const config = useFilesConfig(scope)
+            const navState = filesNavigationFrom(tab.navigation.address, tab.navigation.params)
+            const panelProps: FilesPanelProps = {
+              cwd,
+              t: props.t,
+              navState,
+              onOpen: state => openFilesTarget(tab.actions, resourceSessionId, cwd, state),
+              highlightThemeLight: config.highlightThemeLight,
+              highlightThemeDark: config.highlightThemeDark,
+              visible: tab.visible,
+              onAddToChat: (path, kind) => insertFileReference(ctx, props.sessionId, path, kind),
+              onAddComment: comment => reviewComments.insert(props.sessionId, comment),
+            }
+            return createElement(SidebarTabKeepAliveMount, {
+              registry: retainedTabs,
+              sessionId: props.sessionId,
+              tabId: tab.id,
+              signal: tab.signal,
+              visible: tab.visible,
+              render: visible => createElement(FilesPanel, {
+                ...panelProps,
+                visible,
+              }),
+            })
+          }
+
+          const disposeFilesPage = registerSidebarTab(
+            ctx,
+            filesTabDefinition(t),
+            FilesPageTab,
+            { locale: NS },
+          )
+          const disposeViewer = registerSidebarTab(
+            ctx,
+            fileViewerDefinition(t),
+            FileViewerTab,
+            { locale: NS },
+          )
+
+          return () => {
+            disposeViewer()
+            disposeFilesPage()
+            retainedTabs.dispose()
+            tabStates.dispose()
+            disposeThemeSync()
+            reviewComments.dispose()
+          }
+        },
+        enabled => switchActiveFileViewer(ctx.sidebarRight, enabled),
+      )
     },
   }
 }

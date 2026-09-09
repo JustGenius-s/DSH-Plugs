@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   IconCheckOutline16,
+  IconBranchOutline16,
   IconChevronDownOutline14,
   IconEllipsisOutline16,
   IconLoadingOutline16,
@@ -14,7 +15,6 @@ import {
   Toast,
   type MenuEntry,
 } from '@just-genius/dsh-plugin-ui'
-import { PanelIconGraph } from '../side-panels/icons'
 import {
   GIT_GRAPH_ACTION_PATH,
   GIT_GRAPH_MESSAGE_PATH,
@@ -321,7 +321,7 @@ export function GitChangesView(props: GitChangesViewProps) {
             title={t('view.gitGraphGraph')}
             onClick={openGraph}
           >
-            <PanelIconGraph size={16} />
+            <IconBranchOutline16 size={16} />
           </button>
           <span className="dsh-git-changes-spacer" />
           <div className="dsh-git-changes-commit">
@@ -391,7 +391,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         onFilesChange={onFilesChange}
       />
       <Menu
-        open={commitMenuOpen}
+        open={visible && commitMenuOpen}
         portal
         dense
         side="bottom"
@@ -403,7 +403,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         onClose={() => setCommitMenuOpen(false)}
       />
       <Menu
-        open={overflowOpen}
+        open={visible && overflowOpen}
         portal
         dense
         side="bottom"
@@ -415,7 +415,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         onClose={() => setOverflowOpen(false)}
       />
       <Modal
-        open={commitAll !== null}
+        open={visible && commitAll !== null}
         onClose={() => setCommitAll(null)}
         title={t('gitGraph.commitAllTitle')}
         closeLabel={t('gitGraph.close')}
@@ -444,7 +444,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         )}
       />
       <Modal
-        open={discardFile !== null}
+        open={visible && discardFile !== null}
         onClose={() => setDiscardFile(null)}
         title={t('gitGraph.discard')}
         closeLabel={t('gitGraph.close')}
@@ -473,7 +473,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         )}
       />
       <Modal
-        open={discardDir !== null}
+        open={visible && discardDir !== null}
         onClose={() => setDiscardDir(null)}
         title={t('gitGraph.discard')}
         closeLabel={t('gitGraph.close')}
@@ -500,7 +500,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         )}
       />
       <RiskConfirmation
-        open={discardOpen}
+        open={visible && discardOpen}
         title={t('gitGraph.discardAll')}
         description={t('gitGraph.confirmDiscard')}
         acknowledgeLabel={t('gitGraph.confirmDiscardAck')}
@@ -515,7 +515,7 @@ export function GitChangesView(props: GitChangesViewProps) {
           void run('discard-all')
         }}
       />
-      {toast !== null ? (
+      {visible && toast !== null ? (
         <Toast
           key={`toast-${toast.seq}`}
           text={toast.text}

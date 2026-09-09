@@ -2,11 +2,8 @@
  * QuickActionsControls: the reusable trigger + menu + manager for the
  * codespace "quick actions" feature.
  *
- * Two visual variants share one behavior:
- *  - 'header'   — a compact toolbar Button (checklist label + chevron).
- *  - 'launcher' — a plain Button (checklist + label).
- *
- * Both open a portaled Menu listing the stored actions (ids `run:<id>`), a
+ * The compact terminal-toolbar trigger opens a portaled Menu listing the
+ * stored actions (ids `run:<id>`), a
  * separator, then a `manage` row that opens the editor Modal. Selecting a run
  * closes the menu and calls `execute`; a rejection surfaces as a short inline
  * error instead of throwing from the event handler.
@@ -100,11 +97,12 @@ injectStyles('@just-genius/dsh-codex', '@just-genius/dsh-codex/quick-actions.css
 export interface QuickActionsControlsProps {
   store: QuickActionsStore
   execute: (action: QuickAction) => Promise<void>
+  /** Keep portaled controls out of the document while their tab is hidden. */
+  visible?: boolean
   t: (key: string) => string
-  variant?: 'header' | 'launcher'
 }
 
-export function QuickActionsControls({ store, execute, t, variant = 'header' }: QuickActionsControlsProps) {
+export function QuickActionsControls({ store, execute, visible = true, t }: QuickActionsControlsProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [menuOpen, setMenuOpen] = useState(false)
   const [manageOpen, setManageOpen] = useState(false)
@@ -146,7 +144,7 @@ export function QuickActionsControls({ store, execute, t, variant = 'header' }: 
     }
   }
 
-  const triggerButton = variant === 'header' ? (
+  const triggerButton = (
     <Button
       variant="toolbar"
       size="sm"
@@ -159,27 +157,18 @@ export function QuickActionsControls({ store, execute, t, variant = 'header' }: 
     >
       <IconChecklistOutline14 size={14} />
     </Button>
-  ) : (
-    <Button
-      variant="ghost"
-      size="sm"
-      style={triggerButtonStyle}
-      aria-label={t('quickActions')}
-      title={t('quickActions')}
-      aria-expanded={menuOpen}
-      aria-haspopup="menu"
-      onClick={openMenu}
-    >
-      <IconChecklistOutline14 size={14} />
-    </Button>
   )
-  const trigger = <Tooltip label={t('quickActions')} delayMs={500} side="bottom">{triggerButton}</Tooltip>
+  const trigger = (
+    <Tooltip label={t('quickActions')} delayMs={500} side="bottom" disabled={!visible}>
+      {triggerButton}
+    </Tooltip>
+  )
 
   return (
     <>
       <div style={controlsStyle}>
         <Menu
-          open={menuOpen}
+          open={visible && menuOpen}
           portal
           dense
           side="bottom"
@@ -194,7 +183,12 @@ export function QuickActionsControls({ store, execute, t, variant = 'header' }: 
         )}
       </div>
       {manageOpen && (
-        <ManageModal store={store} t={t} onClose={() => setManageOpen(false)} />
+        <ManageModal
+          store={store}
+          visible={visible}
+          t={t}
+          onClose={() => setManageOpen(false)}
+        />
       )}
     </>
   )
@@ -202,11 +196,12 @@ export function QuickActionsControls({ store, execute, t, variant = 'header' }: 
 
 interface ManageModalProps {
   store: QuickActionsStore
+  visible: boolean
   t: (key: string) => string
   onClose: () => void
 }
 
-function ManageModal({ store, t, onClose }: ManageModalProps) {
+function ManageModal({ store, visible, t, onClose }: ManageModalProps) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
   // The single in-page editor draft: null while nothing is being edited, an
   // existing action while a row is expanded, or a new (unsaved) action while
@@ -238,7 +233,7 @@ function ManageModal({ store, t, onClose }: ManageModalProps) {
 
   return (
     <Modal
-      open
+      open={visible}
       onClose={onClose}
       title={t('quickActions.manage')}
       closeLabel={t('quickActions.cancel')}
@@ -446,7 +441,7 @@ function ActionEditor({ draft, t, isNew, onChange, onDelete }: ActionEditorProps
   )
 }
 
-// Inline styles for the floating trigger only — the manager page's visual
+// Inline styles for the terminal-toolbar trigger only — the manager page's visual
 // language lives in the injected QUICK_ACTIONS_CSS sheet above.
 
 const controlsStyle: CSSProperties = {

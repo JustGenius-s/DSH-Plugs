@@ -64,7 +64,7 @@ export function FileDiffView(props: {
   }
 
   return (
-    <div className="dsh-files-view">
+    <div className="dsh-files-view" data-dsh-codex-retained-scroll="">
       <div className="dsh-files-diff-body">
         {list.map((row, index) => {
           const commentSide = commentSideForRow(row)

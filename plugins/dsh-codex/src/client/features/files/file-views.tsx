@@ -46,6 +46,7 @@ export function FileMarkdownView(props: { content: string; themeKey?: string }) 
   return (
     <div
       className="dsh-files-md-body"
+      data-dsh-codex-retained-scroll=""
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )

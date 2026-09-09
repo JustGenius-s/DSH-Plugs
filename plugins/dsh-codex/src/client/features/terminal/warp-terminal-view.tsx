@@ -43,12 +43,11 @@ import {
   wordCaret,
   type CompletionMenu,
 } from './input-model'
+import { terminalDocumentNeedsScroll } from './layout'
 import { useCursorBlink, useTerminalTheme } from './browser-lifecycle'
 
 ensureWarpTerminalStyles()
 
-/** Beat between the close's SIGINT/kill frames and closing the socket. */
-const TERMINATE_FLUSH_MS = 300
 const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const LINE_HEIGHT = 1.2
 
@@ -178,13 +177,8 @@ export interface WarpTerminalViewProps {
   terminalFontSize: number
   controllerStore?: TerminalControllerStore
   controllerId?: string
-  /**
-   * Live "a command is running in this terminal" flag for the side-panel
-   * shell's close guard: the running command's first line, or null when idle.
-   */
-  busyRef?: { current: string | null }
-  /** Filled by this view: stop the shell when the panel tab is closed. */
-  terminateRef?: { current: (() => void) | null }
+  /** False while the retained official tab body is hidden or detached. */
+  visible?: boolean
   t: (key: string) => string
   /**
    * Insert the selected terminal text into the conversation as a `@终端`
@@ -197,6 +191,7 @@ export interface WarpTerminalViewProps {
 
 export function WarpTerminalView(props: WarpTerminalViewProps) {
   const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t, controllerStore, controllerId, onAddToContext } = props
+  const visible = props.visible !== false
   const sessionCwd = cwd
 
   const [blocks, setBlocks] = useState<Block[]>([])
@@ -232,7 +227,6 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const runningIdRef = useRef<string | null>(null)
-  const terminateStartedRef = useRef(false)
   const startedAtRef = useRef<Map<string, number>>(new Map())
   const currentContextRef = useRef<BlockContext | null>(null)
   const blocksRef = useRef<Block[]>([])
@@ -342,7 +336,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   }, [])
 
   const { theme, palette } = useTerminalTheme()
-  const cursorVisible = useCursorBlink(altActive)
+  const cursorVisible = useCursorBlink(visible && altActive)
 
   const paint = useCallback(() => {
     const canvas = canvasRef.current
@@ -802,37 +796,10 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     connection.updateShell(terminalShell)
   }, [connection, terminalShell])
 
-  useEffect(() => () => {
-    // A deliberate close already sent SIGINT/kill; let those frames flush
-    // before the socket goes away, or the host only sees a detach.
-    if (terminateStartedRef.current) return
-    connection.dispose()
-  }, [connection])
-
-  // Closing the panel tab must stop the task: interrupt the foreground
-  // command, tear the PTY down, and only then drop the connection.
-  useEffect(() => {
-    const ref = props.terminateRef
-    if (ref === undefined) return
-    ref.current = () => {
-      if (terminateStartedRef.current) return
-      terminateStartedRef.current = true
-      connection.send({ type: 'signal', signal: 'SIGINT' })
-      connection.send({ type: 'kill' })
-      window.setTimeout(() => connection.dispose(), TERMINATE_FLUSH_MS)
-    }
-    return () => { ref.current = null }
-  }, [connection, props.terminateRef])
-
-  // Publish the running command so the shell can confirm a close.
-  useEffect(() => {
-    const ref = props.busyRef
-    if (ref === undefined) return
-    const command = runningId === null ? '' : (blocks.find(block => block.id === runningId)?.command ?? '')
-    const firstLine = command.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
-    ref.current = runningId === null ? null : firstLine
-    return () => { ref.current = null }
-  }, [props.busyRef, runningId, blocks])
+  // The retained content root now unmounts only when its official tab signal
+  // ends (or the feature unloads), so this releases the browser connection at
+  // the same boundary as the tab-owned Host PTY.
+  useEffect(() => () => connection.dispose(), [connection])
 
   // `submitCommand` is the single send path shared by the interactive editor
   // (`runDraft`) and the controller (`run`). It mirrors the pre-existing
@@ -958,7 +925,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // while the alt screen is active — the canvas never holds keyboard focus (the
   // command textarea does), so a canvas onKeyDown would never fire.
   useEffect(() => {
-    if (!altActive) return
+    if (!visible || !altActive) return
     const onKey = (event: KeyboardEvent) => {
       const data = keyToBytes(event)
       if (data === null) return
@@ -968,7 +935,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [altActive, connection])
+  }, [altActive, connection, visible])
 
   // While the editor is hidden (command running), keystrokes land on the
   // focused scroll surface and go straight to the PTY, like a normal
@@ -1079,11 +1046,11 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // only the scroll dismissal: scrolling moves the selection the menu acts on,
   // and a menu left floating over unrelated text would be lying.
   useEffect(() => {
-    if (contextMenu === null) return
+    if (!visible || contextMenu === null) return
     const onScroll = () => setContextMenu(null)
     window.addEventListener('scroll', onScroll, true)
     return () => window.removeEventListener('scroll', onScroll, true)
-  }, [contextMenu])
+  }, [contextMenu, visible])
 
   // Add the current selection to the conversation as a @终端 chip; clears the
   // selection when the composer applied it.
@@ -1132,6 +1099,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   // Copy on Cmd/Ctrl+C when there is a selection (then clear it). Without a
   // selection the key falls through so Ctrl+C still reaches a running command.
   useEffect(() => {
+    if (!visible) return
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
         if (selectionRef.current === null) return
@@ -1147,7 +1115,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [copySelection, schedulePaint])
+  }, [copySelection, schedulePaint, visible])
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current
@@ -1225,6 +1193,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const chips = contextChips(currentContext)
 
   const totalHeight = (doc?.totalRows ?? 0) * metrics.cellHeight
+  const documentScrollable = terminalDocumentNeedsScroll(totalHeight, editorHeight, viewHeight)
   const rangeById = new Map((doc?.ranges ?? []).map((r) => [r.id, r]))
   const viewportTop = scrollTop
   const viewportBottom = scrollTop + viewHeight
@@ -1262,7 +1231,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         </div>
       )}
 
-      <div className="dsh-warp-terminal-scroll" ref={scrollRef} onScroll={onScroll} tabIndex={-1} onKeyDown={onScrollKeyDown} onPaste={onScrollPaste}>
+      <div className={'dsh-warp-terminal-scroll' + (documentScrollable ? ' is-scrollable' : '')} ref={scrollRef} onScroll={onScroll} tabIndex={-1} onKeyDown={onScrollKeyDown} onPaste={onScrollPaste}>
         <div className="dsh-warp-terminal-doc" style={{ height: totalHeight + editorHeight }}>
           <div className="dsh-warp-terminal-viewport" style={{ height: viewHeight }}>
             <canvas
@@ -1552,7 +1521,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
           the cursor, so it matches the files and git-graph menus instead of
           carrying its own card. */}
       <Menu
-        open={contextMenu !== null}
+        open={visible && contextMenu !== null}
         portal
         dense
         anchor={<span className="dsh-warp-terminal-menu-anchor" aria-hidden="true" />}

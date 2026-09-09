@@ -5,8 +5,6 @@ import {
   DEFAULT_CONFIG,
   FULL_SESSION_LOAD_LIMIT_MAX,
   FULL_SESSION_LOAD_LIMIT_MIN,
-  PANEL_LAUNCHER_WIDTH_MAX,
-  PANEL_LAUNCHER_WIDTH_MIN,
   SETTINGS_NAMESPACE,
   type DshCodexConfig,
 } from './shared/config'
@@ -14,6 +12,7 @@ import { createDshCodexGitGraphServer } from './host/git-graph/server'
 import { createDshCodexFilesServer } from './host/files/server'
 import { createDshCodexSideChatServer } from './host/side-chat/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
+import { createEnabledResourceGate } from './host/enabled-resource'
 
 export const name = 'dsh-codex'
 export const inject = [
@@ -42,11 +41,9 @@ export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   fullSessionLoadLimit: Schema.number().min(FULL_SESSION_LOAD_LIMIT_MIN).max(FULL_SESSION_LOAD_LIMIT_MAX).default(DEFAULT_CONFIG.fullSessionLoadLimit),
   terminalEnabled: Schema.boolean().default(DEFAULT_CONFIG.terminalEnabled),
   gitGraphEnabled: Schema.boolean().default(DEFAULT_CONFIG.gitGraphEnabled),
-  filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),
-  fileLinksInPanel: Schema.boolean().default(DEFAULT_CONFIG.fileLinksInPanel),
+  customFilesEnabled: Schema.boolean().default(DEFAULT_CONFIG.customFilesEnabled),
   sideChatEnabled: Schema.boolean().default(DEFAULT_CONFIG.sideChatEnabled),
   sideChatContextEnabled: Schema.boolean().default(DEFAULT_CONFIG.sideChatContextEnabled),
-  filesShowGitIgnored: Schema.boolean().default(DEFAULT_CONFIG.filesShowGitIgnored),
   highlightThemeLight: Schema.string().default(DEFAULT_CONFIG.highlightThemeLight),
   highlightThemeDark: Schema.string().default(DEFAULT_CONFIG.highlightThemeDark),
   terminalShell: Schema.union([
@@ -56,10 +53,6 @@ export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   ]).default(DEFAULT_CONFIG.terminalShell),
   terminalScrollback: Schema.number().min(500).max(20_000).default(DEFAULT_CONFIG.terminalScrollback),
   terminalFontSize: Schema.number().min(10).max(24).default(DEFAULT_CONFIG.terminalFontSize),
-  panelDefaultWidth: Schema.number().min(300).max(1080).default(DEFAULT_CONFIG.panelDefaultWidth),
-  panelMaxWidth: Schema.number().min(300).max(1080).default(DEFAULT_CONFIG.panelMaxWidth),
-  panelLauncherWidth: Schema.number().min(PANEL_LAUNCHER_WIDTH_MIN).max(PANEL_LAUNCHER_WIDTH_MAX).default(DEFAULT_CONFIG.panelLauncherWidth),
-  panelRememberTabs: Schema.boolean().default(DEFAULT_CONFIG.panelRememberTabs),
   quickActions: Schema.array(Schema.object({
     id: Schema.string(),
     name: Schema.string(),
@@ -74,10 +67,14 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
   const entry = { ...DEFAULT_CONFIG, ...config }
   let source = (): DshCodexConfig => entry
   let currentConfig = entry
+  let refreshFilesRoutes: (() => void) | undefined
 
   installSettingsSection(ctx, SETTINGS_NAMESPACE as never, ConfigSchema, entry, {
     setSource: (nextSource) => { source = nextSource },
-    onChange: () => { currentConfig = source() },
+    onChange: () => {
+      currentConfig = source()
+      refreshFilesRoutes?.()
+    },
   })
 
   ctx.effect(() => {
@@ -99,7 +96,16 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
   }, 'dsh-codex: side-chat routes')
 
   ctx.effect(() => {
-    const server = createDshCodexFilesServer(ctx)
-    return () => server.dispose()
-  }, 'dsh-codex: files routes')
+    const routes = createEnabledResourceGate(() => {
+      const server = createDshCodexFilesServer(ctx)
+      return () => server.dispose()
+    })
+    const refresh = (): void => routes.setEnabled(currentConfig.customFilesEnabled)
+    refreshFilesRoutes = refresh
+    refresh()
+    return () => {
+      if (refreshFilesRoutes === refresh) refreshFilesRoutes = undefined
+      routes.dispose()
+    }
+  }, 'dsh-codex: settings-gated files routes')
 }

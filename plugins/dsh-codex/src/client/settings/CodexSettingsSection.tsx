@@ -6,12 +6,9 @@ import { Switch } from '@just-genius/dsh-plugin-ui'
 import { HIGHLIGHT_THEME_OPTIONS, type HighlightThemeKind } from '../features/files/themes'
 import {
   clampFullSessionLoadLimit,
-  clampPanelLauncherWidth,
   DEFAULT_CONFIG,
   FULL_SESSION_LOAD_LIMIT_MAX,
   FULL_SESSION_LOAD_LIMIT_MIN,
-  PANEL_LAUNCHER_WIDTH_MAX,
-  PANEL_LAUNCHER_WIDTH_MIN,
   type DshCodexConfig,
   type StickyUserBubbleMode,
   type TerminalShell,
@@ -252,34 +249,20 @@ function SettingsBody(props: CodexSettingsInjected) {
           : null}
       </Group>
 
-      <Group title={t('groupPanel')}>
-        <FieldRow label={t('panelLauncherWidth')}>
-          <NumberField label={t('panelLauncherWidth')} min={PANEL_LAUNCHER_WIDTH_MIN} max={PANEL_LAUNCHER_WIDTH_MAX} step={10} value={value.panelLauncherWidth} onChange={next => set('panelLauncherWidth', clampPanelLauncherWidth(next))} />
-        </FieldRow>
-        <FieldRow label={t('panelDefaultWidth')}>
-          <NumberField label={t('panelDefaultWidth')} min={300} max={1080} step={10} value={value.panelDefaultWidth} onChange={next => set('panelDefaultWidth', next)} />
-        </FieldRow>
-        <FieldRow label={t('panelMaxWidth')}>
-          <NumberField label={t('panelMaxWidth')} min={300} max={1080} step={10} value={value.panelMaxWidth} onChange={next => set('panelMaxWidth', next)} />
-        </FieldRow>
-        <FieldRow label={t('panelRememberTabs')}>
-          <Switch label={t('panelRememberTabs')} checked={value.panelRememberTabs} onChange={next => set('panelRememberTabs', next)} />
-        </FieldRow>
-      </Group>
-
       <Group title={t('groupFiles')}>
-        <FieldRow label={t('fileLinksInPanel')}>
-          <Switch label={t('fileLinksInPanel')} checked={value.fileLinksInPanel} onChange={next => set('fileLinksInPanel', next)} />
+        <FieldRow label={t('customFilesEnabled')}>
+          <Switch label={t('customFilesEnabled')} checked={value.customFilesEnabled} onChange={next => set('customFilesEnabled', next)} />
         </FieldRow>
-        <FieldRow label={t('filesShowGitIgnored')}>
-          <Switch label={t('filesShowGitIgnored')} checked={value.filesShowGitIgnored} onChange={next => set('filesShowGitIgnored', next)} />
-        </FieldRow>
-        <FieldRow label={t('highlightThemeLight')}>
-          <HighlightThemeMenu label={t('highlightThemeLight')} kind="light" value={value.highlightThemeLight} onChange={next => set('highlightThemeLight', next)} />
-        </FieldRow>
-        <FieldRow label={t('highlightThemeDark')}>
-          <HighlightThemeMenu label={t('highlightThemeDark')} kind="dark" value={value.highlightThemeDark} onChange={next => set('highlightThemeDark', next)} />
-        </FieldRow>
+        {value.customFilesEnabled ? (
+          <>
+            <FieldRow label={t('highlightThemeLight')}>
+              <HighlightThemeMenu label={t('highlightThemeLight')} kind="light" value={value.highlightThemeLight} onChange={next => set('highlightThemeLight', next)} />
+            </FieldRow>
+            <FieldRow label={t('highlightThemeDark')}>
+              <HighlightThemeMenu label={t('highlightThemeDark')} kind="dark" value={value.highlightThemeDark} onChange={next => set('highlightThemeDark', next)} />
+            </FieldRow>
+          </>
+        ) : null}
       </Group>
 
       <Group title={t('groupGitGraph')}>

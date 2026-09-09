@@ -55,7 +55,12 @@ describe('readAttachmentData', () => {
 describe('remoteSessionApiOf', () => {
   const face = { attachment: async () => ({ data: 'x' }) }
 
-  it('reads the session namespace through ctx.get', () => {
+  it('reads the dotted session namespace directly through ctx.get', () => {
+    const ctx = { get: (name: string) => (name === 'remote.session' ? face : undefined) }
+    expect(remoteSessionApiOf(ctx)).toEqual({ session: face })
+  })
+
+  it('supports a legacy remote carrier returned by ctx.get', () => {
     const ctx = { get: (name: string) => (name === 'remote' ? { session: face } : undefined) }
     expect(remoteSessionApiOf(ctx)).toEqual({ session: face })
   })
@@ -83,5 +88,16 @@ describe('remoteSessionApiOf', () => {
       },
     })
     expect(remoteSessionApiOf(throwing)).toBeUndefined()
+  })
+
+  it('survives a traceable remote carrier that guards its session namespace', () => {
+    const remote = new Proxy({}, {
+      get(_target, prop) {
+        if (prop === 'session') throw new Error('cannot get property "remote.session" without inject')
+        return undefined
+      },
+    })
+    const ctx = { get: (name: string) => (name === 'remote' ? remote : undefined) }
+    expect(remoteSessionApiOf(ctx)).toBeUndefined()
   })
 })

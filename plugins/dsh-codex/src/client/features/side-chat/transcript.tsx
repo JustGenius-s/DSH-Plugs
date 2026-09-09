@@ -29,7 +29,6 @@ import type {
   ToolResultView,
 } from './types'
 import {
-  CodeBlock,
   DisclosureRow,
   IconApiOutline14,
   IconBrowseOutline16,
@@ -46,6 +45,9 @@ import {
   IconSparkle16,
   IconThinkOutline14,
   IconUserOutline16,
+} from '@just-genius/dsh-plugin-ui'
+import {
+  CodeBlock,
   DiffBlock,
   JsonBlock,
   MessageText,
@@ -54,7 +56,7 @@ import {
   SearchBlock,
   TerminalBlock,
   type MarkdownCodeLabels,
-} from '@just-genius/dsh-plugin-ui'
+} from '@just-genius/dsh-plugin-ui/official-primitives'
 import {
   chatRowsOf,
   contextRowsOf,
@@ -1063,6 +1065,7 @@ export function SideChatTranscript({
     <div className="dsh-codex-sidechat-transcript-wrap">
       <div
         className="dsh-codex-sidechat-transcript"
+        data-dsh-codex-retained-scroll=""
         ref={scrollRef}
         onScroll={onScroll}
       >

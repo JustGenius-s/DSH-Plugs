@@ -30,7 +30,7 @@ export function createQuickActionsStore(
   // A stable snapshot is essential: useSyncExternalStore re-renders whenever
   // getSnapshot() returns a different reference, so during settings loading
   // (value undefined) a freshly built `{actions: []}` would loop forever and
-  // take the whole side-panel shell down with it.
+  // take the terminal tab down with it.
   const channel = createSnapshotChannel<QuickActionsSnapshot>({
     actions: scope.getSnapshot().value?.quickActions ?? EMPTY_ACTIONS,
   })

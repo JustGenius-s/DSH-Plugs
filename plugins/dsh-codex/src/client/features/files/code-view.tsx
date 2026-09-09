@@ -60,12 +60,15 @@ export function FileCodeView(props: {
   /** File-extension language hint; unknown ids render plain. */
   lang?: string
   labels: ViewLabels
+  /** Whether this retained viewer is the active visible tab. */
+  visible?: boolean
   /** Light/dark theme pair, so a settings change re-highlights this view. */
   themeKey?: string
   path?: string
   onAddComment?: (comment: FileReviewComment) => boolean
 }) {
   const { content, lang, labels, themeKey = '' } = props
+  const visible = props.visible !== false
   const lines = useMemo(() => splitLines(content), [content])
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
   // The caret is a marker, not a browser cursor: the clicked column is
@@ -173,10 +176,12 @@ export function FileCodeView(props: {
   // Preview takes keyboard focus on mount / click so Cmd/Ctrl+F works like
   // VS Code's editor (find is scoped to the focused surface).
   useEffect(() => {
+    if (!visible) return
     shellRef.current?.focus({ preventScroll: true })
-  }, [content])
+  }, [content, visible])
 
   useEffect(() => {
+    if (!visible) return
     const onKey = (event: KeyboardEvent): void => {
       const shell = shellRef.current
       if (shell === null) return
@@ -222,7 +227,7 @@ export function FileCodeView(props: {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [findOpen, openFind, closeFind, goToMatch, activeMatch])
+  }, [findOpen, openFind, closeFind, goToMatch, activeMatch, visible])
 
   // Keep the active match in view when navigating.
   useLayoutEffect(() => {
@@ -323,7 +328,11 @@ export function FileCodeView(props: {
           onKeyDown={onFindInputKeyDown}
         />
       ) : null}
-      <div className="dsh-files-view" ref={scrollerRef}>
+      <div
+        className="dsh-files-view"
+        data-dsh-codex-retained-scroll=""
+        ref={scrollerRef}
+      >
         <div className="dsh-files-code">
           {lines.map((line, index) => {
             const lineNumber = index + 1

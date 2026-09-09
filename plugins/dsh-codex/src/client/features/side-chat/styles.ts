@@ -7,29 +7,20 @@
 // instead of the 748px main-column width, but the surfaces, fonts, radii and
 // colors are one-to-one with the main chat.
 
-import { fitRulesFor, injectStyles } from '@just-genius/dsh-plugin-ui'
+import { injectStyles } from '@just-genius/dsh-plugin-ui'
 
 // Assistant answers, tool output and terminal blocks render through the
 // forwarded `dsh-client-ui-primitives` components, whose own CSS modules are
-// NOT injected into a plugin bundle (see packages/ui/src/primitives-fit.ts).
-// Without these rules the browser's defaults apply and a default <pre> never
-// wraps, so any long code line pushes a horizontal scrollbar into the side
-// panel. Scoping the shared fit rules to this feature's own containers keeps
-// every surface reflowing to the panel width.
-const FIT_SELECTORS = [
-  '.dsh-codex-sidechat-md-body',
-  '.dsh-codex-sidechat-toolresult',
-  '.dsh-codex-sidechat-toolrow-body',
-  '.dsh-codex-sidechat-think-body',
-  '.dsh-codex-sidechat-user-bubble',
-  '.dsh-codex-sidechat-irq-body',
-  '.dsh-codex-sidechat-sources',
-  '.dsh-codex-sidechat-empty-context',
-]
+// supplied by DSH. These local rules only let their content shrink and wrap
+// inside this feature's narrow Sidebar; no other plugin consumes them.
+const CONTENT_SCOPE = ':where(.dsh-codex-sidechat-md-body,.dsh-codex-sidechat-toolresult,.dsh-codex-sidechat-toolrow-body,.dsh-codex-sidechat-think-body,.dsh-codex-sidechat-user-bubble,.dsh-codex-sidechat-irq-body,.dsh-codex-sidechat-sources,.dsh-codex-sidechat-empty-context)'
 
 const CSS = `
-${fitRulesFor(FIT_SELECTORS)}
-.dsh-codex-sidechat{display:flex;flex-direction:column;flex:1;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}
+${CONTENT_SCOPE}{min-width:0;max-width:100%}
+${CONTENT_SCOPE} *{min-width:0;max-width:100%;box-sizing:border-box}
+${CONTENT_SCOPE} :where(pre,code){overflow-wrap:anywhere;word-break:break-word}
+${CONTENT_SCOPE} pre{white-space:pre-wrap}
+.dsh-codex-sidechat{box-sizing:border-box;display:flex;flex-direction:column;width:100%;height:100%;min-width:0;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family)}
 .dsh-codex-sidechat-error{display:flex;align-items:flex-start;gap:8px;padding:8px 16px;color:var(--dsw-alias-state-error-primary);font-size:13px;line-height:20px;border-bottom:1px solid var(--dsw-alias-border-l2);flex:none}
 /* Message over an optional stack: a long trace must not squeeze the dismiss
    button out, and the bar stays single-line when there is no stack. */

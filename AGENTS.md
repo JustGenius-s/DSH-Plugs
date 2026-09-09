@@ -8,4 +8,4 @@
 
 ## Dependency Updates
 - Update dependencies at most weekly, then record the date below.
-- Last updated: to be filled in after the first dependency update (format: YYYY-MM-DD).
+- Last updated: 2026-09-09

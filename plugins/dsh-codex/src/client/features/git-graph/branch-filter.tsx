@@ -54,10 +54,12 @@ export function scopeLabel(
 export function BranchFilter(props: {
   refs: readonly GitGraphScopeRef[]
   selected: readonly string[]
+  visible?: boolean
   t: (key: string) => string
   onToggle: (id: string) => void
 }) {
   const { refs, selected, t, onToggle } = props
+  const visible = props.visible !== false
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [pos, setPos] = useState<{
@@ -78,7 +80,7 @@ export function BranchFilter(props: {
   }, [open])
 
   useLayoutEffect(() => {
-    if (!open) return
+    if (!open || !visible) return
     const place = (): void => {
       const trigger = triggerRef.current?.getBoundingClientRect()
       const pop = popRef.current
@@ -102,10 +104,10 @@ export function BranchFilter(props: {
       window.removeEventListener('resize', place)
       window.removeEventListener('scroll', place, true)
     }
-  }, [matches, open, query, showAll])
+  }, [matches, open, query, showAll, visible])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !visible) return
     const onPointerDown = (event: PointerEvent): void => {
       if (!(event.target instanceof Node)) return
       if (rootRef.current?.contains(event.target) === true) return
@@ -121,7 +123,7 @@ export function BranchFilter(props: {
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [open])
+  }, [open, visible])
 
   if (refs.length === 0) return null
 
@@ -153,7 +155,7 @@ export function BranchFilter(props: {
           <IconChevronDownOutline14 aria-hidden="true" />
         </Button>
       </span>
-      {open && typeof document !== 'undefined'
+      {open && visible && typeof document !== 'undefined'
         ? createPortal(
           <div
             ref={popRef}

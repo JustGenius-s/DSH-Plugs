@@ -8,6 +8,10 @@
       "types": "./lib/index.d.ts",
       "import": "./lib/index.js"
     },
+    "./official-primitives": {
+      "types": "./lib/official-primitives.d.ts",
+      "import": "./lib/official-primitives.js"
+    },
     "./theme.css": "./src/theme/all.css",
     "./css-modules": {
       "types": "./lib/css-modules.d.ts",
@@ -26,6 +30,7 @@
     "clean": "rm -rf lib"
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",
     "react": ">=18.2.0",
     "react-dom": ">=18.2.0"
   },
@@ -36,6 +41,7 @@
     "markdown-it": "^14.1.0"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",

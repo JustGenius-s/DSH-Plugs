@@ -2,7 +2,7 @@
  * Shared repo-change SSE per workspace cwd.
  *
  * Files tree / Git changes / Git graph each used to open their own
- * `EventSource` on `/dsh-codex/git-graph/watch`. Inactive side-panel panes
+ * `EventSource` on `/dsh-codex/git-graph/watch`. Inactive Sidebar panes
  * stay mounted, so three-plus tabs easily exhaust the browser's ~6
  * HTTP/1.1 connections to this origin (chat + other streams already use
  * some). New file/diff fetches then hang forever, and sending a message

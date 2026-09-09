@@ -1,5 +1,11 @@
 /** Wire protocol between the browser terminal view and the host PTY bridge. */
 
+export const TERMINAL_TERMINATE_PATH = '/dsh-codex/terminal/terminate'
+
+export interface TerminalTerminateRequest {
+  token: string
+}
+
 export type TerminalSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL' | 'SIGTSTP' | 'SIGHUP'
 
 /** The Warp-style prompt context attached to each block (cwd, git, node, ...). */

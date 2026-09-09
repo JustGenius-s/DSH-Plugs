@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
@@ -24,6 +25,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 export type {} from '@deepseek-ai/cordis-plugin-loader'
 export type {} from '@deepseek-ai/dsh-agent'
 export type {} from '@deepseek-ai/dsh-agent-default-model'
+export type {} from '@deepseek-ai/dsh-agent-presets'
 export type {} from '@deepseek-ai/dsh-commands'
 export type {} from '@deepseek-ai/dsh-credentials'
 export type {} from '@deepseek-ai/dsh-fs'
@@ -43,11 +45,14 @@ export type { Context } from '@deepseek-ai/cordis'
 export type { Entry } from '@deepseek-ai/cordis-plugin-loader'
 export { default as Schema } from '@deepseek-ai/schemastery'
 export type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
+export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
+export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
 export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
-export type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+export { SessionId } from '@deepseek-ai/dsh-session'
+export type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
 /**
  * Context handed to every `systemPrompt` provider at assembly time.
  *
@@ -69,6 +74,7 @@ export { defineTool } from '@deepseek-ai/dsh-tools'
 export const HOST_SERVICES = {
   agents: 'agents',
   agentDefaultModel: 'agentDefaultModel',
+  agentPresets: 'agentPresets',
   commands: 'commands',
   credentials: 'credentials',
   fs: 'fs',

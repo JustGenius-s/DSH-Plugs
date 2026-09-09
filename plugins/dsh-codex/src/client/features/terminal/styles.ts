@@ -8,8 +8,12 @@ import { injectStyles } from '@just-genius/dsh-plugin-ui'
 import { XTERM_CSS } from './xterm-css'
 
 const BLOCK_CSS = `
+.dsh-codex-terminal-tab{display:flex;flex:1;min-width:0;min-height:0;height:100%;flex-direction:column;overflow:hidden}
+.dsh-codex-terminal-toolbar{display:flex;flex:none;align-items:center;justify-content:flex-end;min-height:32px;padding:2px 8px}
+.dsh-codex-terminal-tab>.dsh-warp-terminal{height:auto;flex:1;min-height:0}
 .dsh-warp-terminal{height:100%;display:flex;flex-direction:column;overflow:hidden;padding:8px 12px 12px;box-sizing:border-box;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
-.dsh-warp-terminal-scroll{position:relative;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;outline:none}
+.dsh-warp-terminal-scroll{position:relative;flex:1;min-height:0;overflow-y:hidden;overscroll-behavior:contain;outline:none}
+.dsh-warp-terminal-scroll.is-scrollable{overflow-y:auto}
 .dsh-warp-terminal-doc{position:relative;width:100%}
 /* The viewport is a sticky, viewport-height layer pinned to the visible top of
    the scroll area. The canvas and the per-block overlays live inside it in the

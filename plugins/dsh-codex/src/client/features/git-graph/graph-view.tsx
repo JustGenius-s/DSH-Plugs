@@ -237,6 +237,7 @@ export function GitGraphView(props: GitGraphViewProps) {
       <BranchFilter
         refs={state.refs}
         selected={activeScope}
+        visible={visible}
         t={t}
         onToggle={onToggleScope}
       />
@@ -267,7 +268,7 @@ export function GitGraphView(props: GitGraphViewProps) {
           onOpenPreview={(file, sha) => onOpenPreview?.(file, sha)}
         />
       ) : null}
-      {toast !== null ? (
+      {visible && toast !== null ? (
         <Toast
           key={toast.seq}
           text={toast.text}
@@ -281,6 +282,7 @@ export function GitGraphView(props: GitGraphViewProps) {
       <CommitContextMenu
         menu={menu}
         cwd={cwd}
+        visible={visible}
         t={t}
         onClose={() => setMenu(null)}
         onRan={() => { void load(true, 0) }}

@@ -1,17 +1,67 @@
-import { createElement, useSyncExternalStore } from 'react'
-import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
-import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
+import { createElement } from 'react'
+import type {
+  ClientContext,
+  SettingsScope,
+  SidebarRightTabActions,
+  SidebarRightTabDefinition,
+} from '@just-genius/dsh-plugin-runtime/client'
+import { IconBranchOutline16 } from '@just-genius/dsh-plugin-ui'
+import type { DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
-import type {} from '../side-panels/contract'
-import type { SidePanelsStore } from '../side-panels/service'
+import { bindEnabledSlot } from '../../bind-enabled-slot'
+import { registerSidebarTab, type SidebarTabProps } from '../../sidebar-right'
+import {
+  createSidebarTabKeepAliveRegistry,
+  SidebarTabKeepAliveMount,
+} from '../../sidebar-tab-keep-alive'
+import { fileAddressFor } from '../files/resource-address'
 import { GitChangesView } from './changes-view'
 import { GitGraphView } from './graph-view'
-import { bindEnabledSlot } from '../../bind-enabled-slot'
 
-const PANEL_SLOT = 'side.panel'
-const PANEL_ID = 'git-graph'
+export const GIT_CHANGES_TAB_KIND = 'dsh-codex-git-changes'
+export const GIT_CHANGES_TAB_ID = '@just-genius/dsh-codex/git-changes'
+export const GIT_GRAPH_TAB_KIND = 'dsh-codex-git-graph'
+export const GIT_GRAPH_TAB_ID = '@just-genius/dsh-codex/git-graph'
+
 const NS = 'settings.codex'
+
+export function gitChangesTabDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
+  return {
+    id: GIT_CHANGES_TAB_ID,
+    kind: GIT_CHANGES_TAB_KIND,
+    priority: 'extension',
+    title: () => t('view.gitGraph'),
+    guide: [{
+      order: 30,
+      title: () => t('view.gitGraph'),
+      description: () => t('sidebar.gitDescription'),
+      icon: IconBranchOutline16,
+    }],
+  }
+}
+
+export function gitGraphTabDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
+  return {
+    id: GIT_GRAPH_TAB_ID,
+    kind: GIT_GRAPH_TAB_KIND,
+    priority: 'extension',
+    title: () => t('view.gitGraphGraph'),
+  }
+}
+
+function openFile(
+  actions: SidebarRightTabActions,
+  sessionId: string,
+  cwd: string | undefined,
+  file: string,
+  mode: 'preview' | 'diff',
+  sha?: string,
+): void {
+  actions.openResource(fileAddressFor(sessionId, cwd, file), {
+    params: { mode, sha },
+  })
+}
 
 export function createGitGraphFeature(
   ctx: ClientContext,
@@ -20,90 +70,99 @@ export function createGitGraphFeature(
 ): CodexFeature {
   return {
     id: 'git-graph',
-    requires: ['sidePanels'],
     activate() {
-      const store = ctx.sidePanels as SidePanelsStore
-
-      // One panel, two views (like `files` tree vs preview): the default
-      // instance shows the working-tree changes; the Graph button opens a
-      // second instance of the SAME panel rendering the commit graph.
-      const disposeDescriptor = ctx.sidePanels.describe(PANEL_ID, {
-        icon: 'changes',
-        multi: true,
-      })
-      const openFile = (file: string, sha?: string): void => {
-        ctx.sidePanels.open('files', { mode: 'diff', file, sha })
-      }
-      const openPreview = (file: string, sha?: string): void => {
-        ctx.sidePanels.open('files', { mode: 'preview', file, sha })
-      }
-      const openGraph = (): void => {
-        const existing = store.getSnapshot().instances.find(
-          (item) => item.panelId === PANEL_ID && item.state?.view === 'graph',
-        )
-        if (existing !== undefined) {
-          store.activateInstance(existing.key)
-          return
-        }
-        ctx.sidePanels.open(PANEL_ID, {
-          view: 'graph',
-          title: t('view.gitGraphGraph'),
-        })
-      }
-
-      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => bindEnabledSlot(
+      return bindEnabledSlot(
         scope,
         config => config.gitGraphEnabled,
-        () => ctx.slots.register(
-            {
-              name: PANEL_SLOT,
-              id: PANEL_ID,
-              order: 30,
-              locale: NS as never,
-              label: () => t('view.gitGraph'),
-            },
-            function GitPanelSlot(props: {
-              cwd?: string
-              instanceKey?: string
-              visible?: boolean
-              t: (key: string) => string
-            }) {
-              // Each instance reads its OWN navigation state off the store by
-              // its instance key (multi: every tab is an independent subtree).
-              const snapshot = useSyncExternalStore(
-                store.subscribe,
-                store.getSnapshot,
-                store.getSnapshot,
-              )
-              const instance = snapshot.instances.find(
-                (item) => item.panelId === PANEL_ID && item.key === props.instanceKey,
-              )
-              const visible = props.visible !== false
-              if (instance?.state?.view === 'graph') {
-                return createElement(GitGraphView, {
-                  cwd: props.cwd,
-                  t: props.t,
-                  visible,
-                  onOpenFile: openFile,
-                  onOpenPreview: openPreview,
-                })
-              }
-              return createElement(GitChangesView, {
-                cwd: props.cwd,
+        () => {
+          const retainedTabs = createSidebarTabKeepAliveRegistry()
+
+          const GitChangesTab = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            const cwd = props.useSessions(state => state.byId[props.sessionId]?.cwd)
+            return createElement(SidebarTabKeepAliveMount, {
+              registry: retainedTabs,
+              sessionId: props.sessionId,
+              tabId: tab.id,
+              signal: tab.signal,
+              visible: tab.visible,
+              render: visible => createElement(GitChangesView, {
+                cwd,
                 t: props.t,
                 visible,
-                onOpenFile: openFile,
-                onOpenPreview: openPreview,
-                onOpenGraph: openGraph,
-              })
-            } as never,
-          ),
-      ))
+                onOpenFile: (file, sha) => openFile(
+                  tab.actions,
+                  props.sessionId,
+                  cwd,
+                  file,
+                  'diff',
+                  sha,
+                ),
+                onOpenPreview: (file, sha) => openFile(
+                  tab.actions,
+                  props.sessionId,
+                  cwd,
+                  file,
+                  'preview',
+                  sha,
+                ),
+                onOpenGraph: () => tab.actions.openTab(GIT_GRAPH_TAB_KIND),
+              }),
+            })
+          }
 
-      return () => {
-        disposeDescriptor()
-        disposeInjection()
-      }
+          const GitGraphTab = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            const cwd = props.useSessions(state => state.byId[props.sessionId]?.cwd)
+            return createElement(SidebarTabKeepAliveMount, {
+              registry: retainedTabs,
+              sessionId: props.sessionId,
+              tabId: tab.id,
+              signal: tab.signal,
+              visible: tab.visible,
+              render: visible => createElement(GitGraphView, {
+                cwd,
+                t: props.t,
+                visible,
+                onOpenFile: (file, sha) => openFile(
+                  tab.actions,
+                  props.sessionId,
+                  cwd,
+                  file,
+                  'diff',
+                  sha,
+                ),
+                onOpenPreview: (file, sha) => openFile(
+                  tab.actions,
+                  props.sessionId,
+                  cwd,
+                  file,
+                  'preview',
+                  sha,
+                ),
+              }),
+            })
+          }
+
+          const disposeChanges = registerSidebarTab(
+            ctx,
+            gitChangesTabDefinition(t),
+            GitChangesTab,
+            { locale: NS },
+          )
+          const disposeGraph = registerSidebarTab(
+            ctx,
+            gitGraphTabDefinition(t),
+            GitGraphTab,
+            { locale: NS },
+          )
+          return () => {
+            disposeGraph()
+            disposeChanges()
+            retainedTabs.dispose()
+          }
+        },
+      )
     },
   }
 }

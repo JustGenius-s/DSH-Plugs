@@ -1,5 +1,5 @@
 /**
- * A render-time error boundary for the side-panel host.
+ * A render-time error boundary for Sidebar extension content.
  *
  * The recurring side-chat failures ("Cannot read properties of undefined
  * (reading 'length')") are thrown DURING RENDER, so no `try/catch` around an
@@ -72,7 +72,7 @@ function safeJson(value: unknown): string {
 }
 
 interface ErrorBoundaryProps {
-  children: ReactNode
+  children?: ReactNode
   /** Shown above the stack, e.g. the panel label, so one card is attributable. */
   label?: string
   /** Called after a failure is caught, for host-side logging. */
@@ -85,10 +85,8 @@ interface ErrorBoundaryState {
 
 /**
  * Catch render errors from one subtree and show them with their stack.
- *
- * Deliberately keyed by nothing: a panel that throws stays broken until its
- * owner remounts it (switching tabs does), which is the honest behaviour —
- * silently retrying a render that crashes would loop.
+ * Deliberately keyed by nothing: a tab that throws stays broken until that tab
+ * is closed and reopened; silently retrying a render that crashes would loop.
  */
 export class SidePanelErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {

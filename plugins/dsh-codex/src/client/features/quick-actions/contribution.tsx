@@ -1,59 +1,68 @@
-import { createElement } from 'react'
+import { createElement, type ReactNode } from 'react'
 import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
-import { getSessions } from '@just-genius/dsh-plugin-runtime/client'
 import type { DshCodexConfig, QuickAction } from '../../../shared/config'
-import { currentSessionLocation } from '../../host-adapters/sessions'
-import type { SidePanelActionsContribution } from '../side-panels/actions'
-import type { SidePanelsStore } from '../side-panels/service'
 import type { TerminalControllerStore } from '../terminal/controller'
+import { TERMINAL_TAB_KIND, terminalControllerId } from '../terminal/contract'
 import { QuickActionsControls } from './controls'
 import { createQuickActionsStore } from './store'
+
+export interface QuickActionsTerminalContext {
+  sessionId: string
+  terminalId: string
+  cwd?: string
+  visible?: boolean
+}
+
+export interface QuickActionsContribution {
+  render(context: QuickActionsTerminalContext): ReactNode
+  dispose(): void
+}
 
 export function createQuickActionsContribution(
   ctx: ClientContext,
   scope: SettingsScope<DshCodexConfig>,
   controllers: TerminalControllerStore,
   t: (key: string) => string,
-): SidePanelActionsContribution {
+): QuickActionsContribution {
   const quickActions = createQuickActionsStore(scope)
 
-  const execute = async (action: QuickAction): Promise<void> => {
-    const panels = ctx.sidePanels as SidePanelsStore
-    const { sessionId, cwd: sessionCwd } = currentSessionLocation(getSessions(ctx))
-    const snapshot = panels.getSnapshot()
-    let activeTerminal = snapshot.activeKey === null
-      ? undefined
-      : snapshot.instances.find(item => item.key === snapshot.activeKey && item.panelId === 'terminal')
+  const execute = async (
+    action: QuickAction,
+    initial: QuickActionsTerminalContext,
+  ): Promise<void> => {
+    let activeTerminal = initial
 
     for (const step of action.steps) {
       const command = step.command.trim()
       if (command === '') throw new Error('quick action requires a non-empty command')
-      if (!sessionId) throw new Error('quick action requires a current session')
 
-      if (step.target === 'current') {
-        if (activeTerminal === undefined) {
-          throw new Error('quick action current-target requires an active terminal')
+      if (step.target === 'new') {
+        const cwd = activeTerminal.cwd?.trim() ?? ''
+        if (cwd === '') throw new Error('quick action new-target requires a cwd')
+        ctx.sidebarRight.openTab(TERMINAL_TAB_KIND, {
+          revealIfOpened: false,
+          params: { cwd },
+        })
+        const tab = ctx.sidebarRight.active()
+        if (tab === undefined || tab.kind !== TERMINAL_TAB_KIND) {
+          throw new Error('quick action failed to open a terminal')
         }
-        await (await controllers.waitFor(`${sessionId}:${activeTerminal.key}`)).run(command)
-        continue
+        activeTerminal = {
+          sessionId: initial.sessionId,
+          terminalId: terminalControllerId(initial.sessionId, tab.id),
+          cwd,
+        }
       }
 
-      const cwd = (activeTerminal?.state?.cwd ?? sessionCwd)?.trim() ?? ''
-      if (cwd === '') throw new Error('quick action new-target requires a cwd')
-      const key = panels.open('terminal', { cwd })
-      if (key === undefined) throw new Error('quick action failed to open a terminal')
-      activeTerminal = panels.getSnapshot().instances.find(
-        item => item.key === key && item.panelId === 'terminal',
-      )
-      await (await controllers.waitFor(`${sessionId}:${key}`)).run(command)
+      await (await controllers.waitFor(activeTerminal.terminalId)).run(command)
     }
   }
 
   return {
-    render: variant => createElement(QuickActionsControls, {
-      variant,
+    render: context => createElement(QuickActionsControls, {
       store: quickActions,
-      execute,
+      execute: action => execute(action, context),
+      visible: context.visible,
       t,
     }),
     dispose: () => quickActions.dispose(),

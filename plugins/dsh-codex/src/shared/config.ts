@@ -30,8 +30,8 @@ export interface DshCodexConfig {
   fullSessionLoadLimit: number
   terminalEnabled: boolean
   gitGraphEnabled: boolean
-  filesEnabled: boolean
-  fileLinksInPanel: boolean
+  /** Prefer the retained Codex file tree and previews over DSH's built-ins. */
+  customFilesEnabled: boolean
   /** Offer the side-chat panel: a blank conversation beside the current session. */
   sideChatEnabled: boolean
   /**
@@ -41,8 +41,6 @@ export interface DshCodexConfig {
    * the digest only tells the side agent what the main task is about.
    */
   sideChatContextEnabled: boolean
-  /** When true, the files tree lists gitignored paths (VS Code default). */
-  filesShowGitIgnored: boolean
   /** Light syntax-highlight theme id for the files panel (see client catalog). */
   highlightThemeLight: string
   /** Dark syntax-highlight theme id for the files panel (see client catalog). */
@@ -50,16 +48,8 @@ export interface DshCodexConfig {
   terminalShell: TerminalShell
   terminalScrollback: number
   terminalFontSize: number
-  panelDefaultWidth: number
-  panelMaxWidth: number
-  panelLauncherWidth: number
-  panelRememberTabs: boolean
   quickActions: QuickAction[]
 }
-
-/** Inclusive bounds for the collapsed floating launcher card. */
-export const PANEL_LAUNCHER_WIDTH_MIN = 140
-export const PANEL_LAUNCHER_WIDTH_MAX = 400
 
 /** Inclusive bounds for full-session-load's user-message cap. */
 export const FULL_SESSION_LOAD_LIMIT_MIN = 5
@@ -75,29 +65,15 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   fullSessionLoadLimit: 25,
   terminalEnabled: true,
   gitGraphEnabled: true,
-  filesEnabled: true,
-  fileLinksInPanel: true,
+  customFilesEnabled: false,
   sideChatEnabled: true,
   sideChatContextEnabled: true,
-  filesShowGitIgnored: true,
   highlightThemeLight: 'codex-light',
   highlightThemeDark: 'codex-dark',
   terminalShell: 'auto',
   terminalScrollback: 5000,
   terminalFontSize: 12,
-  panelDefaultWidth: 360,
-  panelMaxWidth: 720,
-  panelLauncherWidth: 220,
-  panelRememberTabs: true,
   quickActions: [],
-}
-
-export function clampPanelLauncherWidth(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_CONFIG.panelLauncherWidth
-  return Math.min(
-    PANEL_LAUNCHER_WIDTH_MAX,
-    Math.max(PANEL_LAUNCHER_WIDTH_MIN, Math.round(value)),
-  )
 }
 
 export function clampFullSessionLoadLimit(value: number): number {
