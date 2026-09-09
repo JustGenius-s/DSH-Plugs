@@ -7,6 +7,7 @@ import { createFilesFeature } from './features/files'
 import { createFullSessionLoadFeature } from './features/full-session-load'
 import { createGitGraphFeature } from './features/git-graph'
 import { createNavigatorFeature } from './features/navigator'
+import { createSideChatFeature } from './features/side-chat'
 import { createSidePanelsFeature } from './features/side-panels'
 import { createStickyUserBubbleFeature } from './features/sticky-user-bubble'
 import { createTerminalFeature } from './features/terminal'
@@ -32,6 +33,12 @@ export const inject = [
   CLIENT_SERVICES.remote,
   // Chat file links resolve through `session/openWorkspacePath` since DSH 0.1.3.
   CLIENT_SERVICES.remoteSession,
+  // Per-session model directory: DSH 0.1.2 removed the `connection.api`
+  // envelope RPCs (`sessions.models` / `selectModel`), so the side-chat model
+  // picker reads the catalog through this service instead.
+  CLIENT_SERVICES.modelDirectories,
+  // Durable image reads, the same way the main transcript loads them.
+  CLIENT_SERVICES.uiConversation,
   CLIENT_SERVICES.sessions,
   // Terminal selections and file review comments register `@` reference codecs here.
   CLIENT_SERVICES.inputTriggers,
@@ -72,6 +79,7 @@ export function apply(ctx: ClientContext): void {
     createFullSessionLoadFeature(ctx, scope),
     createStickyUserBubbleFeature(ctx, scope, t),
     createSidePanelsFeature(ctx, scope, t, quickActions),
+    createSideChatFeature(ctx, scope, t),
     createTerminalFeature(ctx, scope, t, terminalControllers),
     createGitGraphFeature(ctx, scope, t),
     createFilesFeature(ctx, scope, t),

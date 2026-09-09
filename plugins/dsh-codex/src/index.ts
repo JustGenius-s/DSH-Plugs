@@ -12,6 +12,7 @@ import {
 } from './shared/config'
 import { createDshCodexGitGraphServer } from './host/git-graph/server'
 import { createDshCodexFilesServer } from './host/files/server'
+import { createDshCodexSideChatServer } from './host/side-chat/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
 
 export const name = 'dsh-codex'
@@ -22,6 +23,10 @@ export const inject = [
   HOST_SERVICES.llm,
   HOST_SERVICES.agentDefaultModel,
   HOST_SERVICES.fs,
+  HOST_SERVICES.agents,
+  HOST_SERVICES.sessions,
+  HOST_SERVICES.agentPresets,
+  HOST_SERVICES.commands,
 ] as const
 
 /** Host-side schema for the one durable Codex configuration namespace. */
@@ -39,6 +44,8 @@ export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
   gitGraphEnabled: Schema.boolean().default(DEFAULT_CONFIG.gitGraphEnabled),
   filesEnabled: Schema.boolean().default(DEFAULT_CONFIG.filesEnabled),
   fileLinksInPanel: Schema.boolean().default(DEFAULT_CONFIG.fileLinksInPanel),
+  sideChatEnabled: Schema.boolean().default(DEFAULT_CONFIG.sideChatEnabled),
+  sideChatContextEnabled: Schema.boolean().default(DEFAULT_CONFIG.sideChatContextEnabled),
   filesShowGitIgnored: Schema.boolean().default(DEFAULT_CONFIG.filesShowGitIgnored),
   highlightThemeLight: Schema.string().default(DEFAULT_CONFIG.highlightThemeLight),
   highlightThemeDark: Schema.string().default(DEFAULT_CONFIG.highlightThemeDark),
@@ -82,6 +89,14 @@ export function apply(ctx: Context, config?: Partial<DshCodexConfig>): void {
     const server = createDshCodexGitGraphServer(ctx)
     return () => server.dispose()
   }, 'dsh-codex: git-graph routes')
+
+  ctx.effect(() => {
+    // Live config, not a boot snapshot: both side-chat switches are read per
+    // open request, so a settings change lands on the next side chat with no
+    // plugin restart.
+    const server = createDshCodexSideChatServer(ctx, () => currentConfig)
+    return () => server.dispose()
+  }, 'dsh-codex: side-chat routes')
 
   ctx.effect(() => {
     const server = createDshCodexFilesServer(ctx)

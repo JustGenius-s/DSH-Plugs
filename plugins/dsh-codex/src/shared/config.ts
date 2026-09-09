@@ -32,6 +32,15 @@ export interface DshCodexConfig {
   gitGraphEnabled: boolean
   filesEnabled: boolean
   fileLinksInPanel: boolean
+  /** Offer the side-chat panel: a blank conversation beside the current session. */
+  sideChatEnabled: boolean
+  /**
+   * Hand a new side chat a digest of the parent conversation as context.
+   *
+   * Context, not history: the side chat's own transcript still starts empty —
+   * the digest only tells the side agent what the main task is about.
+   */
+  sideChatContextEnabled: boolean
   /** When true, the files tree lists gitignored paths (VS Code default). */
   filesShowGitIgnored: boolean
   /** Light syntax-highlight theme id for the files panel (see client catalog). */
@@ -68,6 +77,8 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   gitGraphEnabled: true,
   filesEnabled: true,
   fileLinksInPanel: true,
+  sideChatEnabled: true,
+  sideChatContextEnabled: true,
   filesShowGitIgnored: true,
   highlightThemeLight: 'codex-light',
   highlightThemeDark: 'codex-dark',
