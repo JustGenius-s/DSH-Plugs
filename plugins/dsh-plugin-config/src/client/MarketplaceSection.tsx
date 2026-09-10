@@ -191,18 +191,6 @@ export function MarketplaceSection(props: MarketplaceSectionInjected & {
     }
   }, [loadCatalog, listInstalled, request, refreshKey])
 
-  useEffect(() => {
-    if (!catalog) return
-    setOpenSources((current) => {
-      if (Object.keys(current).length > 0) return current
-      const ids = sourceOrder(catalog)
-      const next: Record<string, boolean> = {}
-      const preferred = ids.includes(AWESOME_SOURCE) ? AWESOME_SOURCE : ids[0]
-      for (const id of ids) next[id] = id === preferred
-      return next
-    })
-  }, [catalog])
-
   const matched = useMemo(() => {
     if (!catalog) return []
     const needle = query.trim().toLocaleLowerCase()

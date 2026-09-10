@@ -1,0 +1,29 @@
+{
+  "name": "@just-genius/dsh-agent-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pure logic for DSH Agent capability packs: manifest validation, variable substitution, MCP HTTP client, and enable/disable/uninstall state machine.",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm -w exec vitest run --config packages/agent-plugin/vitest.config.ts",
+    "clean": "rm -rf lib"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

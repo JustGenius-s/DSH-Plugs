@@ -33,6 +33,15 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(lightningcss@1.33.0)
 
+  packages/agent-plugin:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   packages/runtime:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -439,6 +448,9 @@ importers:
 
   plugins/dsh-plugin-config:
     dependencies:
+      '@just-genius/dsh-agent-plugin':
+        specifier: workspace:*
+        version: link:../../packages/agent-plugin
       '@just-genius/dsh-plugin-runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

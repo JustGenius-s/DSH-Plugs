@@ -1,0 +1,18 @@
+{
+  "name": "tapd",
+  "version": "0.1.0",
+  "description": "TAPD project collaboration agent pack — coming soon.",
+  "displayName": { "en": "TAPD", "zh": "TAPD" },
+  "keywords": ["tapd", "project", "tencent"],
+  "auth": "headers",
+  "headerSecrets": ["API_USER", "API_PASSWORD"],
+  "comingSoon": true,
+  "variables": {
+    "WORKSPACE_ID": {
+      "type": "string",
+      "label": { "zh": "工作空间", "en": "Workspace" },
+      "description": "TAPD workspace id",
+      "required": true
+    }
+  }
+}

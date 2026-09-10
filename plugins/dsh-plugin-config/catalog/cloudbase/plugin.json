@@ -1,0 +1,20 @@
+{
+  "name": "cloudbase",
+  "version": "0.1.0",
+  "description": "Tencent CloudBase hosted MCP — database, functions, hosting, and storage for AI coding workflows.",
+  "displayName": {
+    "en": "Tencent CloudBase",
+    "zh": "腾讯云 CloudBase"
+  },
+  "keywords": ["tencent", "cloudbase", "tcb", "mcp"],
+  "auth": "headers",
+  "headerSecrets": ["SecretId", "SecretKey"],
+  "variables": {
+    "ENV_ID": {
+      "type": "string",
+      "label": { "zh": "环境 ID", "en": "Environment ID" },
+      "description": "CloudBase environment id (env_id).",
+      "required": true
+    }
+  }
+}

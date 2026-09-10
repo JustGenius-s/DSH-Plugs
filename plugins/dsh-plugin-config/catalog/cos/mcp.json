@@ -1,0 +1,10 @@
+{
+  "cos": {
+    "type": "http",
+    "url": "https://example.invalid/mcp/cos",
+    "headers": {
+      "X-TencentCloud-SecretId": "${SecretId}",
+      "X-TencentCloud-SecretKey": "${SecretKey}"
+    }
+  }
+}

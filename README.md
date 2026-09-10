@@ -48,7 +48,7 @@ Click a `dsh-notification` system banner to focus the window and open that sessi
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
-**Settings → 插件管理** in one tab: collapsible installed inventory (group by origin / mount plane, enable·disable·uninstall) plus the [awesome-dsh-plugin](https://awesome-dsh-plugin.com/) marketplace. Shared top search. Replaces the official read-only Plugin list.
+**Settings → 插件管理** in one tab for two kinds: Cordis npm plugins (awesome-dsh-plugin marketplace + profile inventory) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis plugins still need restart. Replaces the official read-only Plugin list.
 
 ### [@just-genius/dsh-wechat-chat](plugins/dsh-wechat-chat)
 
@@ -65,6 +65,11 @@ only package that directly adapts official DSH host/client APIs. All plugins
 depend on this boundary instead of importing `@deepseek-ai/*` packages or
 pinning their versions independently.
 
+[`packages/agent-plugin`](packages/agent-plugin) (`@just-genius/dsh-agent-plugin`) is the
+pure logic for Agent capability packs: manifest validation, variable substitution,
+hosted MCP HTTP, OAuth, and install/enable/disable state. Host UI lives in
+`dsh-plugin-config`.
+
 [`packages/ui`](packages/ui) (`@just-genius/dsh-plugin-ui`) ships DSH `--dsw-*` theme tokens plus React primitives (`Button`, `Input`, `Menu`, `Modal`, Markdown, confirmation and toast UI) and settings chrome. Plugins bundle it at build time; standalone apps (e.g. Vellum) can depend on it via `file:` / npm and call `installTheme()` once at boot. See [packages/ui/README.md](packages/ui/README.md).
 
 Official DSH contracts are pinned at the shared boundary to the newest tested
@@ -79,6 +84,7 @@ DSH-Plugs/
 ├── tsconfig.base.json    # shared TS config
 ├── packages/
 │   ├── runtime/          # @just-genius/dsh-plugin-runtime
+│   ├── agent-plugin/     # @just-genius/dsh-agent-plugin (Agent pack logic)
 │   └── ui/               # @just-genius/dsh-plugin-ui
 └── plugins/
     └── <plugin>/         # one plugin per folder
