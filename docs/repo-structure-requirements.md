@@ -104,7 +104,7 @@
 2. `build` 与 `typecheck` 和两道门禁的先后关系？
 3. 各 workspace 包是否实现同名 script？缺 script 时 `pnpm -r` 的实际含义（尤其无 `typecheck` 的包）？
 4. `check-dependency-contracts.mjs` 与 `check-client-modules.mjs` 的发现范围（一级子目录）、跳过条件（如缺少 `lib/client.js` 则 `continue`）？
-5. 标准插件的 tsdown 双配置约定；已见变体（线索：`dsh-whale-girl` 另有 overlay 配置；`dsh-flow` 有 `test/`；`dsh-codex` 另 export `side-panels`）。
+5. 标准插件的 tsdown 双配置约定；已见变体（线索：`dsh-whale-girl` 另有 overlay 配置；`dsh-codex`、`dsh-flow` 有 `test/`）。
 
 ### Q5. 依赖约束
 

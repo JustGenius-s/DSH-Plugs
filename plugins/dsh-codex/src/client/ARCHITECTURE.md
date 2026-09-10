@@ -66,6 +66,20 @@ mounted official title seat. Switching tabs only detaches its DOM; aborting the
 official `tab.signal` unmounts the retained panel and closes the temporary Host
 session.
 
+## Error reporting
+
+`error-boundary.tsx` is shared, cross-feature client infrastructure — it sits
+beside `sidebar-tab-keep-alive.tsx` rather than inside any one feature.
+
+DSH's own `SlotErrorBoundary` already wraps every slot entry, so a render
+crash does not take down the app. Its crash face is only
+`<div data-slot-error>`: it logs the error to the console and shows the user
+nothing. `SidePanelErrorBoundary` renders the message, `error.stack` and the
+React component stack in place with a copy button, so a failure is locatable
+without DevTools. `describeError()` is exported separately because
+non-render failures (async, Host boundary) should produce the same shape;
+`side-chat/panel.tsx` reuses it for its error bar.
+
 ## Lifecycle rule
 
 The owner that creates a store, controller, observer or transport disposes it.

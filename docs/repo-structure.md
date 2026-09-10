@@ -226,7 +226,7 @@ Client 三项（缺一须标明）：① `package.json` 有 `dsh.client`；② b
 
 | 目录 | npm name | version | 类型 | 有 client | host 入口 | browser 入口 | build | typecheck | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `dsh-codex` | `@just-genius/dsh-codex` | `0.2.1` | plugin | 是：① `dsh.client.platform=web` + inject；② `src/client/index.tsx` → `lib/client.js` + `exports["./client"]`；③ `cordis.patch.yml` | `main`/`exports["."]` → `lib/index.js`（`src/index.ts`） | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另 export `./side-panels`；host tsdown 双 entry |
+| `dsh-codex` | `@just-genius/dsh-codex` | `0.2.1` | plugin | 是：① `dsh.client.platform=web` + inject；② `src/client/index.tsx` → `lib/client.js` + `exports["./client"]`；③ `cordis.patch.yml` | `main`/`exports["."]` → `lib/index.js`（`src/index.ts`） | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
 | `dsh-debug-mode` | `@just-genius/dsh-debug-mode` | `0.1.0` | plugin | 是（同上三项，入口 `src/client/index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-desktop-update` | `@just-genius/dsh-desktop-update` | `0.2.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-flow` | `@just-genius/dsh-flow` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
@@ -239,7 +239,7 @@ Client 三项（缺一须标明）：① `package.json` 有 `dsh.client`；② b
 | `dsh-wechat-chat` | `@just-genius/dsh-wechat-chat` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-whale-girl` | `@just-genius/dsh-whale-girl` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 三 tsdown + 拷 overlay.html | `tsc --noEmit` | 另有 `tsdown.overlay.config.ts`、`assets/`、`lib/overlay.js` |
 
-标准插件 `files` 一般为：`lib/index.js`、`lib/client.js`、`cordis.patch.yml`、`lib/**/*.d.ts`。codex 另含 `lib/side-panels.js`；whale-girl 另含 `lib/overlay.js`、`lib/overlay.html`、`assets`、`LICENSE`。
+标准插件 `files` 一般为：`lib/index.js`、`lib/client.js`、`cordis.patch.yml`、`lib/**/*.d.ts`。whale-girl 另含 `lib/overlay.js`、`lib/overlay.html`、`assets`、`LICENSE`。
 
 ### 3.3 README 有、磁盘无（幽灵包）
 
@@ -445,7 +445,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 
 | 变体 | 包 | 事实 |
 | --- | --- | --- |
-| 额外 host entry / export | `dsh-codex` | host tsdown entry 含 `side-panels: src/side-panels.ts`；`exports["./side-panels"]` → `lib/side-panels.js` |
+| `test/` | `dsh-codex` | `test/*.test.ts` + `"test": "pnpm exec vitest run --config ./vitest.config.ts"` |
 | 额外 overlay 配置 | `dsh-whale-girl` | `tsdown.overlay.config.ts`：`src/client/overlay.ts` → IIFE `lib/overlay.js`；build 还 `cp src/overlay.html` |
 | `test/` | `dsh-flow` | `test/*.test.ts` + `"test": "pnpm -w exec vitest run --config ./vitest.config.ts"` |
 | `test/`（JS 例外包） | `dsh-synapse` | `test/*.test.js` + `"test": "node --test test/*.test.js"` |
@@ -529,10 +529,9 @@ plugins/<folder>/
 ### 8.4 合法变体（必须单独成行）
 
 1. **额外 tsdown**：`dsh-whale-girl` 的 overlay 配置。
-2. **额外 export**：`dsh-codex` 的 `./side-panels`。
-3. **`test/`**：`dsh-flow`、`dsh-synapse`。
-4. **`assets/`**：`dsh-whale-girl`。
-5. **纯 JS 根入口**：`dsh-synapse`（无 `src/`、无 `@just-genius` scope、无 runtime、无 typecheck）。
+2. **`test/`**：`dsh-codex`、`dsh-flow`、`dsh-synapse`。
+3. **`assets/`**：`dsh-whale-girl`。
+4. **纯 JS 根入口**：`dsh-synapse`（无 `src/`、无 `@just-genius` scope、无 runtime、无 typecheck）。
 6. **client 入口 `.ts`**：`dsh-model-custom-ex`、`dsh-plugin-config`。
 7. **包内辅助 scripts**：`dsh-codex/scripts/`（`test-watch.mjs`、`probe-commit.ts`；后者直 `require` 官方包，依赖合约会失败）。
 8. **未 alwaysBundle ui**：`dsh-wechat-chat`。
