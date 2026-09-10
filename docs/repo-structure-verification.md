@@ -26,7 +26,7 @@
 | S10 | 通过 | §5.3 | 11 包 runtime+ui；仅 synapse 两者都无；ui 为 `devDependencies` |
 | S11 | 通过 | §1.5 | 根无 `tsconfig.json`；基座选项与各包 `extends` / 覆盖分组与磁盘一致 |
 | S12 | 通过 | §3.3–3.4 | 幽灵包 `dsh-notify-jump`、`dsh-session-archive`；磁盘遗漏点名 `dsh-synapse`。README「Plugins」13 个标题，无 synapse |
-| S13 | 通过 | §3.2 synapse 行、§6.6、§8.4 | synapse 标例外并列缺项；变体单独成行（含 wechat 未 bundle ui、三包 host `neutral`） |
+| S13 | 通过 | §3.2 synapse 行、§6.6、§8.4 | synapse 标例外并列缺项；变体单独成行（撰写当时含 wechat 未 bundle ui、三包 host `neutral`；wechat 例外随该插件 2026-09-10 删除而移除） |
 | S14 | 通过 | 全文 | 中文；`node_modules` / `.pnpm-store` / `lib` 内容不当结构主体 |
 | S15 | 通过 | §1–§8 | Q1–Q6 均有对应章节/表，无「见源码」空答 |
 
@@ -63,7 +63,7 @@
 | `dsh-plugin-config` | `@just-genius/dsh-plugin-config` 0.1.0 | 一致 |
 | `dsh-synapse` | `dsh-synapse` 0.4.1 | 一致 |
 | `dsh-sync` | `@just-genius/dsh-sync` 0.1.0 | 一致 |
-| `dsh-wechat-chat` | `@just-genius/dsh-wechat-chat` 0.1.0 | 一致 |
+| ~~`dsh-wechat-chat`~~ | ~~`@just-genius/dsh-wechat-chat` 0.1.0~~ | **已删除**（无人使用，于 2026-09-10 移除；正文与 requirements 枚举已同步） |
 | `dsh-whale-girl` | `@just-genius/dsh-whale-girl` 0.1.0 | 一致 |
 
 无 `dsh-notify-jump` / `dsh-session-archive` 目录。
@@ -97,7 +97,7 @@ node scripts/check-client-modules.mjs  → 退出码 1
 
 1. **依赖合约覆盖不全**：只写 synapse 会使合约失败。磁盘上 `dsh-codex/scripts/probe-commit.ts` 同样命中源码正则。已写入 §6.4、§7.2、§8.4、附录 R2/R5。
 2. **host `platform`**：写成「多数 node，仅 codex 为 neutral」。实际 `dsh-desktop-update`、`dsh-model-custom-ex` 的 host tsdown 也是 `neutral`。
-3. **ui alwaysBundle**：写成各标准包 client 配置都 bundle ui。`dsh-wechat-chat` 只 bundle runtime，ui 仅用于 tsdown 的 `dshCssModules`。
+3. **ui alwaysBundle**：写成各标准包 client 配置都 bundle ui。撰写当时 `dsh-wechat-chat` 只 bundle runtime，ui 仅用于 tsdown 的 `dshCssModules`（该插件已于 2026-09-10 删除，故此例外不再存在）。
 4. **门禁退出码**：原稿声明未跑。验证阶段已跑两道脚本并回写 R5 / §11（仍未跑完整 `pnpm build` / `-r tsc`）。
 
 未改业务代码。根结构、12+2 清单、name/version、client 三项、workspace 边界、TS 基座分组、README 幽灵/遗漏包等其余断言与磁盘一致。
@@ -118,6 +118,6 @@ node scripts/check-client-modules.mjs  → 退出码 1
 
 ## 6. 总结论
 
-修正后的 `docs/repo-structure.md` **可用于导航该仓库**：能定位 workspace 边界、12 插件 + 2 共享包、入口与 client 判定、根脚本与门禁、以及 synapse / multi-repo / probe-commit / wechat-chat 等合法变体与当前合约失败点。
+修正后的 `docs/repo-structure.md` **可用于导航该仓库**：能定位 workspace 边界、12 插件（撰写当时；`dsh-wechat-chat` 于 2026-09-10 删除，现为 11 个）+ 2 共享包、入口与 client 判定、根脚本与门禁、以及 synapse / multi-repo / probe-commit 等合法变体与当前合约失败点。
 
 不要按 README 插件列表当完整清单（缺 synapse、多两个幽灵包）。不要假设根 `pnpm typecheck` / `pnpm build` 当前会通过。

@@ -5,7 +5,6 @@
     - id: dsh-codex
       name: '@just-genius/dsh-codex'
       config:
-        navigatorEnabled: true
         terminalEnabled: true
         gitGraphEnabled: true
         terminalShell: auto

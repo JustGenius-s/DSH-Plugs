@@ -84,7 +84,7 @@
 
 ### Q2. 插件清单与职责
 
-1. `plugins/` 一级目录完整枚举（一行一个，禁止合并）。当前磁盘线索：`dsh-codex`、`dsh-debug-mode`、`dsh-desktop-update`、`dsh-flow`、`dsh-memory`、`dsh-model-custom-ex`、`dsh-multi-repo`、`dsh-plugin-config`、`dsh-synapse`、`dsh-sync`、`dsh-wechat-chat`、`dsh-whale-girl`。
+1. `plugins/` 一级目录完整枚举（一行一个，禁止合并）。当前磁盘线索：`dsh-codex`、`dsh-debug-mode`、`dsh-desktop-update`、`dsh-flow`、`dsh-memory`、`dsh-model-custom-ex`、`dsh-multi-repo`、`dsh-plugin-config`、`dsh-synapse`、`dsh-sync`、`dsh-whale-girl`。
 2. 每个目录的 npm `name`、`version`、一句话职责（取自该包 `description` 或 README 首段，不作功能教程）。
 3. 每个插件：host 入口、browser 入口、`dsh.client` / `dsh.bundle`、是否有 client、构建与 typecheck 脚本。
 4. README 已列但磁盘无的插件（线索：`dsh-notify-jump`、`dsh-session-archive`）？磁盘有但 README 未列的插件（线索：`dsh-synapse`）？

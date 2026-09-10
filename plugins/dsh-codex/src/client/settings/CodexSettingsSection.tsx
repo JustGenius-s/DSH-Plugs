@@ -210,15 +210,6 @@ function SettingsBody(props: CodexSettingsInjected) {
       {snapshot.status === 'loading' ? <p style={{ color: 'var(--dsw-alias-label-secondary)' }}>{t('statusLoading')}</p> : null}
       {snapshot.status === 'unavailable' ? <p style={{ color: 'var(--dsw-alias-label-secondary)' }}>{t('statusUnavailable')}</p> : null}
 
-      <Group title={t('groupNavigator')}>
-        <FieldRow label={t('navigatorEnabled')}>
-          <Switch label={t('navigatorEnabled')} checked={value.navigatorEnabled} onChange={next => set('navigatorEnabled', next)} />
-        </FieldRow>
-        <FieldRow label={t('conversationCollapseEnabled')}>
-          <Switch label={t('conversationCollapseEnabled')} checked={value.conversationCollapseEnabled} onChange={next => set('conversationCollapseEnabled', next)} />
-        </FieldRow>
-      </Group>
-
       <Group title={t('groupConversation')}>
         <FieldRow label={t('stickyUserBubbleEnabled')}>
           <Switch label={t('stickyUserBubbleEnabled')} checked={value.stickyUserBubbleEnabled} onChange={next => set('stickyUserBubbleEnabled', next)} />

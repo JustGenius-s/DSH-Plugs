@@ -8,7 +8,7 @@
 
 ### [@just-genius/dsh-codex](plugins/dsh-codex)
 
-Codex-style message navigation and Cursor-style per-turn **Worked for** collapsing, plus Side Chat, Terminal, and Git tab types for DSH's official right Sidebar. Files use DSH's built-in packages by default, with the retained custom preview available from Codex settings; the Warp-style terminal is backed by a real login-shell PTY. Optional: pin the newest question while scrolling, and drain a session's full history on open.
+Side Chat, Terminal, and Git tab types for DSH's official right Sidebar. Files use DSH's built-in packages by default, with the retained custom preview available from Codex settings; the Warp-style terminal is backed by a real login-shell PTY. Optional: pin the newest question while scrolling, and drain a session's full history on open.
 
 ### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
 
@@ -49,10 +49,6 @@ Click a `dsh-notification` system banner to focus the window and open that sessi
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
 **Settings → 插件管理** in one tab for two kinds: Cordis npm plugins (awesome-dsh-plugin marketplace + profile inventory) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis plugins still need restart. Replaces the official read-only Plugin list.
-
-### [@just-genius/dsh-wechat-chat](plugins/dsh-wechat-chat)
-
-Turns the web surface into a WeChat-style messenger: chat list, green/white bubbles, and an agent that texts short progress updates while it works. Switch back from 我.
 
 ### [@just-genius/dsh-whale-girl](plugins/dsh-whale-girl)
 
