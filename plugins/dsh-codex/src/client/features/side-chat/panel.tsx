@@ -1,7 +1,7 @@
 /**
- * The side-chat panel: ONE side-panels tab renders ONE side chat. Because the
- * side-chat feature is `multi`, opening a new "侧聊" instance in the side-panel
- * host creates a new tab; this component mounts, forks a fresh blank side
+ * The side-chat panel: ONE official Sidebar tab renders ONE side chat. Opening
+ * a new "侧聊" tab creates an independent occurrence; this component mounts,
+ * forks a fresh blank side
  * session on the host (sharing the parent's cwd/sandbox, preset and model but
  * never loading the parent's history), binds it through `sessions.binding()`,
  * renders its Chat presentation nodes with the same Markdown / Think / tool
@@ -18,7 +18,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { ConversationSnapshot } from '@just-genius/dsh-plugin-runtime/client'
 import { sideChatApi, SideChatDisabledError } from './api'
 import { chatRowsOf } from './snapshot'
-import type { ImageApi, UiConversationFace } from './connection'
+import type {
+  ImageApi,
+  SideChatConversationFace,
+  UiConversationFace,
+} from './connection'
 import { SideChatComposer } from './composer'
 import { SideChatTranscript } from './transcript'
 import { describeError, type ErrorDetail } from '../side-panels/error-boundary'
@@ -81,9 +85,9 @@ function waitForListed(sessions: SideChatSessionsFace, id: string): Promise<void
 export interface SideChatPanelProps {
   /** The parent session this side chat is forked from (the main conversation). */
   parentSessionId: string
-  /** The side-panels instance key this tab renders (`<panelId>#<n>`). */
-  instanceKey?: string
-  /** A restored tab's owned side session id (from the persisted instance state). */
+  /** Collision-free identity of this official `(Session, tab.id)` occurrence. */
+  tabKey: string
+  /** The occurrence's already-owned side session id, if its body remounts. */
   initialSideSessionId?: string
   sessions: SideChatSessionsFace
   /**
@@ -96,15 +100,11 @@ export interface SideChatPanelProps {
   uiConversation?: unknown
   /** The `ctx.modelDirectories` resolver (model directory / selection). */
   modelDirectories?: unknown
-  /** The `ctx.conversation` face (draft-image attachment handling). */
-  conversation?: unknown
+  /** The validated `ctx.conversation` draft-attachment face. */
+  conversation?: SideChatConversationFace
   t: (key: string) => string
-  /**
-   * Stable `store.updateInstanceState` method (bound once by the host) so the
-   * persist effect below can depend on it without re-firing every render.
-   * The instance key travels via `instanceKey`.
-   */
-  updateInstanceState?: (key: string, patch: { title?: string; sideSessionId?: string }) => void
+  /** Stable metadata channel shared with the separately-mounted official title. */
+  updateTabState: (key: string, patch: { title?: string; sideSessionId?: string }) => void
 }
 
 /**
@@ -114,7 +114,7 @@ export interface SideChatPanelProps {
  */
 export function SideChatPanel({
   parentSessionId,
-  instanceKey,
+  tabKey,
   initialSideSessionId,
   sessions,
   api,
@@ -122,7 +122,7 @@ export function SideChatPanel({
   modelDirectories,
   conversation,
   t,
-  updateInstanceState,
+  updateTabState,
 }: SideChatPanelProps) {
   const [sideSessionId, setSideSessionId] = useState<string | null>(
     initialSideSessionId ?? null,
@@ -139,16 +139,16 @@ export function SideChatPanel({
   // host reported it at open time.
   const [contextState, setContextState] = useState<SideChatContextState | null>(null)
 
-  // Persist the owned side session id so a restored tab reconnects to the same
-  // live side chat instead of forking a duplicate. Only fires when the id
-  // actually changes (stable method identity + value compare).
+  // Publish the owned side session id so a disposable official body wrapper
+  // can reconnect to this occurrence if it ever remounts. Normal tab switches
+  // retain this component and do not run its cleanup.
   const persistedIdRef = useRef<string | null>(null)
   useEffect(() => {
-    if (sideSessionId === null || instanceKey === undefined || updateInstanceState === undefined) return
+    if (sideSessionId === null) return
     if (persistedIdRef.current === sideSessionId) return
     persistedIdRef.current = sideSessionId
-    updateInstanceState(instanceKey, { sideSessionId })
-  }, [sideSessionId, instanceKey, updateInstanceState])
+    updateTabState(tabKey, { sideSessionId })
+  }, [sideSessionId, tabKey, updateTabState])
 
   // Fork a fresh blank side session once on mount, unless a restored instance
   // already owns one. Guard against double-mount (StrictMode / HMR).
@@ -242,12 +242,8 @@ export function SideChatPanel({
 
   const running = snapshot?.running === true
 
-  // Tab caption: the side chat's first own user message (its title), persisted
-  // to the side-panels host so the tab reads meaningfully instead of "侧聊 1".
-  // Guarded with a ref: `updateInstanceState` arrives as a fresh bound function
-  // every render, so without a value compare this effect would call into the
-  // store each render → emit → shell re-render → new bound function → infinite
-  // loop that takes the whole side-panels shell down with it.
+  // Tab caption: publish the side chat's first own user message to the official
+  // title seat, which is mounted independently from this retained body.
   const firstUserText = useMemo(() => {
     if (chatSnapshot === undefined) return ''
     // The title reads the chat target, not the control snapshot: the control
@@ -270,11 +266,10 @@ export function SideChatPanel({
   const persistedTitleRef = useRef<string | null>(null)
   useEffect(() => {
     if (firstUserText.length === 0) return
-    if (instanceKey === undefined || updateInstanceState === undefined) return
     if (persistedTitleRef.current === firstUserText) return
     persistedTitleRef.current = firstUserText
-    updateInstanceState(instanceKey, { title: firstUserText })
-  }, [firstUserText, instanceKey, updateInstanceState])
+    updateTabState(tabKey, { title: firstUserText })
+  }, [firstUserText, tabKey, updateTabState])
 
   const handleError = useCallback((message: string) => setError({ message }), [])
 
@@ -335,7 +330,7 @@ export function SideChatPanel({
             pending={snapshot?.pending}
             runningCalls={snapshot?.runningCalls}
             modelDirectories={modelDirectories as import('./model-directory').ModelDirectoryResolverFace | undefined}
-            conversation={conversation as import('./composer').SideChatConversationFace | undefined}
+            conversation={conversation}
             onError={handleError}
             t={t}
           />

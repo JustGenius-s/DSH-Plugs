@@ -1,7 +1,7 @@
 # dsh-codex client architecture
 
-`dsh-codex` contains a small client platform (side panels) and several product
-features. Keep dependencies flowing in one direction:
+`dsh-codex` contains product features mounted into DSH's client extension
+surfaces. Keep dependencies flowing in one direction:
 
 ```text
 host-adapters / infrastructure
@@ -31,11 +31,40 @@ React presentation
 - Cross-feature calls use declared services/contracts. They do not reach into
   another feature's component or store implementation.
 
-## Side-panel platform
+## Right-Sidebar integration
 
-The side-panel service is infrastructure. Terminal, Files, Git and Quick
-Actions are consumers. Platform code may know panel contracts but must not
-import feature-specific state or views.
+DSH 0.1.5+ owns the complete right-Sidebar shell, docking layout and tab
+lifecycle. `sidebar-right.ts` is the single compatibility adapter for its
+registry and keyed body/title slots. Side Chat, Terminal and Git register tab
+types; they must not recreate layout, tabs, launchers, persistence or close
+chrome.
+
+DockSurface only renders the active body in each docked pane. Every custom body
+therefore uses `sidebar-tab-keep-alive.tsx`: the slot body is a disposable
+holder, while the real React root and its DOM stay alive under a key composed
+from `(sessionId, tab.id)`. Switching, moving, docking or floating a tab only
+detaches and reattaches that root. The renderer receives `visible: false` while
+detached so watches and portaled UI go quiet; only `tab.signal` (or feature
+disposal) unmounts it. This retains component hooks, uncontrolled DOM state and
+scroll positions instead of reconstructing a component from copied state.
+
+File links use the official `dsh-resource://file/**` navigation path. The custom
+Files client and Host implementations remain in the tree behind the persisted
+`customFilesEnabled` Codex setting. It defaults to `false`; changing it updates
+the `files` page takeover, viewer registration and Host routes. The page uses
+the official registry's `extension`-over-`builtin` behavior, so an existing
+`files` tab swaps bodies in place; a resource tab is replaced because it keeps
+the viewer kind it opened with. Custom tree state lives in a feature-owned
+store keyed by official `(sessionId, tab.id)` as the tree's request/cache model;
+the retained renderer additionally preserves its presentation state. `tab.signal` releases
+both lifetimes. Terminal cleanup is likewise bound to the official tab
+occurrence's `AbortSignal`, never to the disposable DockSurface holder.
+
+Side Chat uses the same retained-root path. A feature-owned metadata channel
+shares its temporary session id and first-message title with the separately
+mounted official title seat. Switching tabs only detaches its DOM; aborting the
+official `tab.signal` unmounts the retained panel and closes the temporary Host
+session.
 
 ## Lifecycle rule
 

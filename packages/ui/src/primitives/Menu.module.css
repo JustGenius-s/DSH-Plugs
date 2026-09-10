@@ -3,8 +3,14 @@
   display: inline-flex;
 }
 
-/* Dropdown card (figma MenuDropdown 122:9481 / 419:16920): menu surface,
- * r12, inverted hairline border, shadow-lv3, 4px inset padding. */
+/* Dropdown card (figma MenuDropdown 122:9481 / 419:16920): hairline border,
+ * shadow-lv3, 4px inset padding. Three deliberate departures from the design:
+ * the fill is the side panel's own surface, so a menu opened over a panel
+ * reads as part of it rather than as a lighter layer-3 card; the border is the
+ * same .5px --dsw-alias-border-l3 hairline the left sidebar column draws (the
+ * design's --dsw-alias-border-inverted is transparent in light theme); and the
+ * radii are a step tighter (8/6 instead of 12/10) to match that flatter
+ * surface. */
 .list,
 .submenu {
   /* min-widths below are the design's outer card widths — include the pad. */
@@ -13,9 +19,9 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  border: 1px solid var(--dsw-alias-border-inverted);
-  border-radius: 12px;
-  background: var(--dsw-specific-menu);
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background: var(--dsw-specific-sidebar-fill);
   box-shadow: var(--dsw-shadow-lv3);
   /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens. The
      declaration sits on the card rather than on `.scrollable .viewport`
@@ -92,8 +98,9 @@
   position: relative;
 }
 
-/* Menu cell (figma .Menu_cell): min-h 40, r10, pad 10/8, 14/22 primary,
- * gap 8 between leading icon / label / trailing check. */
+/* Menu cell (figma .Menu_cell): min-h 40, pad 10/8, 14/22 primary,
+ * gap 8 between leading icon / label / trailing check. r6 keeps the card's
+ * 2px step below its 8px corner. */
 .item {
   display: flex;
   align-items: center;
@@ -102,7 +109,7 @@
   min-height: 40px;
   padding: 8px 10px;
   border: none;
-  border-radius: 10px;
+  border-radius: 6px;
   background: transparent;
   cursor: pointer;
   font-size: 14px;
@@ -128,14 +135,14 @@
 .submenu.compactList {
   min-width: 164px;
   padding: 2px;
-  border-radius: 7px;
+  border-radius: 6px;
 }
 
 .compactList .item {
   min-height: 26px;
   gap: 6px;
   padding: 3px 7px;
-  border-radius: 5px;
+  border-radius: 4px;
   font-size: 12px;
   line-height: 18px;
 }

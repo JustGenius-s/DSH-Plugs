@@ -611,15 +611,16 @@ test('shows only the current conversation cards on the canvas', async () => {
   assert.doesNotMatch(pan, /catch \(error\) \{ return originalConversationCards\(threads\) \}/)
 })
 
-test('hides the host message rail and side panels only while the map view is mounted', async () => {
+test('hides the host message rail only while the map view is mounted', async () => {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   const mount = source.slice(source.indexOf('function SynapseMapView'), source.indexOf('// Invisible header resident'))
 
-  // The codex rail and right-side panels are host chrome that would overlay
-  // the canvas; they are hidden for the lifetime of the map view only.
-  assert.match(source, /CHROME_HIDE_SELECTORS = \['\.dsh-codex-nav-rail', '\.dsh-side-panels', '\.dsh-side-panels-launcher'\]/)
+  // The custom Sidebar shell is gone; the Codex rail is the only plugin chrome
+  // that overlays this conversation view.
+  assert.match(source, /CHROME_HIDE_SELECTORS = \['\.dsh-codex-nav-rail'\]/)
+  assert.doesNotMatch(source, /dsh-side-panels/)
   // DSH's composer dock is removed outright (display:none) so the canvas keeps
-  // its space; the codex panels only go invisible to preserve their layout.
+  // its space; the rail only goes invisible for the map's lifetime.
   assert.match(source, /COMPOSER_HIDE_SELECTORS = \['\[data-composer-seat\]'\]/)
   assert.match(source, /\.dsh-synapse-composer-hidden\{display:none !important\}/)
   assert.match(mount, /setChromeHidden\(true\)/)
@@ -655,23 +656,6 @@ test('the card inspector scrolls its body instead of clipping it', async () => {
   assert.match(inspector, /display: flex/)
   assert.match(inspector, /flex-direction: column/)
   assert.match(inspector, /bottom: 0/)
-})
-
-test('reclaims the side panel width so the map is not squeezed', async () => {
-  const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
-
-  // Hiding the panel with visibility leaves its layout box: dsh-codex squeezes
-  // #root with margin-right: var(--dsh-side-panels-width), so the map would sit
-  // in a narrower box beside an empty strip. Zeroing the variable reclaims it.
-  assert.match(source, /SIDE_PANELS_WIDTH_VAR = '--dsh-side-panels-width'/)
-  assert.match(source, /root\.style\.setProperty\(SIDE_PANELS_WIDTH_VAR, '0px'\)/)
-  // The previous width is captured so leaving the map restores the panel.
-  assert.match(source, /savedSidePanelsWidth = document\.documentElement\.style\.getPropertyValue\(SIDE_PANELS_WIDTH_VAR\)/)
-  assert.match(source, /root\.style\.setProperty\(SIDE_PANELS_WIDTH_VAR, savedSidePanelsWidth \?\? '0px'\)/)
-  // The capture is guarded to once: the MutationObserver re-asserts the hide on
-  // every DOM change, and saving again would record the already-zeroed value
-  // and collapse the panel permanently on exit.
-  assert.match(source, /if \(savedSidePanelsWidth === null\) \{/)
 })
 
 test('opens a prefilled follow-up draft from selected answer text', async () => {

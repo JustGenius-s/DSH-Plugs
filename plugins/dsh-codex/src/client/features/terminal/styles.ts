@@ -8,8 +8,12 @@ import { injectStyles } from '@just-genius/dsh-plugin-ui'
 import { XTERM_CSS } from './xterm-css'
 
 const BLOCK_CSS = `
+.dsh-codex-terminal-tab{display:flex;flex:1;min-width:0;min-height:0;height:100%;flex-direction:column;overflow:hidden}
+.dsh-codex-terminal-toolbar{display:flex;flex:none;align-items:center;justify-content:flex-end;min-height:32px;padding:2px 8px}
+.dsh-codex-terminal-tab>.dsh-warp-terminal{height:auto;flex:1;min-height:0}
 .dsh-warp-terminal{height:100%;display:flex;flex-direction:column;overflow:hidden;padding:8px 12px 12px;box-sizing:border-box;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
-.dsh-warp-terminal-scroll{position:relative;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;outline:none}
+.dsh-warp-terminal-scroll{position:relative;flex:1;min-height:0;overflow-y:hidden;overscroll-behavior:contain;outline:none}
+.dsh-warp-terminal-scroll.is-scrollable{overflow-y:auto}
 .dsh-warp-terminal-doc{position:relative;width:100%}
 /* The viewport is a sticky, viewport-height layer pinned to the visible top of
    the scroll area. The canvas and the per-block overlays live inside it in the
@@ -73,11 +77,11 @@ const BLOCK_CSS = `
 .dsh-warp-terminal-completion-meta{flex:none;display:flex;align-items:center;gap:8px;min-width:0}
 .dsh-warp-terminal-completion-desc{max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,#8b8b90);font-size:11px}
 .dsh-warp-terminal-completion-kind{flex:none;color:var(--dsw-alias-label-tertiary,#8b8b90);font-size:11px}
-/* Right-click selection menu: fixed overlay anchored at the cursor, rendered
-   via portal so it escapes the terminal's stacking/overflow context. */
-.dsh-warp-terminal-context-menu{position:fixed;z-index:200;min-width:150px;padding:4px;border:1px solid rgba(0,0,0,.12);border-radius:6px;background:var(--dsw-alias-bg-base,#ffffff);box-shadow:0 8px 24px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:1px}
-.dsh-warp-terminal-context-item{display:block;width:100%;padding:6px 10px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-primary,#1f2328);font:13px var(--dsw-font-family,Inter,sans-serif);text-align:left;cursor:pointer;white-space:nowrap}
-.dsh-warp-terminal-context-item:hover{background:rgba(65,118,230,.14)}
+/* Right-click selection menu: the shared DSH Menu (portaled, anchored at the
+   cursor, styled by the UI kit) so it matches the files and git-graph menus.
+   The terminal owns only the anchor — a zero-size fixed span the portal
+   measures its rect from, invisible to layout. */
+.dsh-warp-terminal-menu-anchor{position:fixed;width:0;height:0;pointer-events:none}
 
 /* Dark theme: restate the original One Dark / dark-surface values over the
    light defaults above. */
@@ -97,8 +101,6 @@ body[data-ds-dark-theme] .dsh-warp-terminal-iconbtn-kill:hover{background:rgba(2
 body[data-ds-dark-theme] .dsh-warp-terminal-chip{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.08)}
 body[data-ds-dark-theme] .dsh-warp-terminal-completion-menu{border-color:rgba(255,255,255,.14);background:#202024;box-shadow:0 8px 24px rgba(0,0,0,.32)}
 body[data-ds-dark-theme] .dsh-warp-terminal-completion-option:hover,body[data-ds-dark-theme] .dsh-warp-terminal-completion-option.is-selected{background:rgba(65,118,230,.28)}
-body[data-ds-dark-theme] .dsh-warp-terminal-context-menu{border-color:rgba(255,255,255,.14);background:#202024;box-shadow:0 8px 24px rgba(0,0,0,.32)}
-body[data-ds-dark-theme] .dsh-warp-terminal-context-item:hover{background:rgba(65,118,230,.3)}
 `
 
 /** Inject the plugin + xterm styles once per page load. */

@@ -43,6 +43,7 @@
     "build": "tsdown -c tsdown.config.ts && tsdown -c tsdown.client.config.ts",
     "watch": "tsdown -c tsdown.config.ts --watch & tsdown -c tsdown.client.config.ts --watch",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run --config ./vitest.config.ts",
     "clean": "rm -rf lib"
   },
   "dependencies": {

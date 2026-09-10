@@ -6,6 +6,7 @@ export function bindEnabledSlot(
   scope: SettingsScope<DshCodexConfig>,
   isEnabled: (config: DshCodexConfig) => boolean,
   register: () => () => void,
+  afterChange?: (enabled: boolean) => void,
 ): () => void {
   let disposeEntry: (() => void) | undefined
   let registered: boolean | undefined
@@ -16,8 +17,8 @@ export function bindEnabledSlot(
     disposeEntry?.()
     disposeEntry = undefined
     registered = enabled
-    if (!enabled) return
-    disposeEntry = register()
+    if (enabled) disposeEntry = register()
+    afterChange?.(enabled)
   }
 
   sync()

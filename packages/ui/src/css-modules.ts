@@ -6,6 +6,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { basename, dirname, resolve, sep } from 'node:path'
 import { transform } from 'lightningcss'
 
@@ -26,6 +27,38 @@ function sourceAssetPath(source: string, importer: string): string {
 /** The subset of the rolldown plugin context this plugin uses. */
 interface WatchContext {
   addWatchFile: (id: string) => void
+}
+
+/**
+ * Lightning CSS derives a CSS module's class names from the file PATH, not
+ * from its contents, so two builds of the same module emit the same names even
+ * when the rules differ. Inside one app that is fine; in this monorepo it is
+ * not: the shared UI kit is inlined into every plugin bundle, and the injected
+ * <style> tag is created once per page — so an older plugin version still
+ * installed in the profile would style the newer markup, and the newer bundle
+ * would not even inject its sheet.
+ *
+ * Appending a hash of the compiled CSS to the class prefix makes a stale sheet
+ * inert (its selectors no longer match), and the same revision versions the tag
+ * id, so every build injects its own sheet.
+ */
+export function scopedByContent(
+  css: string,
+  cssExports: Record<string, { name: string }> | undefined,
+): { css: string; classes: Record<string, string>; revision: string } {
+  const revision = createHash('sha256').update(css).digest('hex').slice(0, 6)
+  const entries = Object.entries(cssExports ?? {})
+  const classes: Record<string, string> = {}
+  for (const [local, entry] of entries) classes[local] = entry.name
+  // A composed export's name is a space-separated list, so only a plain one
+  // tells us the hash prefix; without it the tag revision still applies.
+  const sample = entries.find(([local, entry]) => entry.name.endsWith(local) && entry.name.length > local.length)
+  if (sample === undefined) return { css, classes, revision }
+  const [local, entry] = sample
+  const prefix = entry.name.slice(0, entry.name.length - local.length)
+  const scoped = prefix + revision + '_'
+  for (const [key, value] of entries) classes[key] = value.name.split(prefix).join(scoped)
+  return { css: css.split(prefix).join(scoped), classes, revision }
 }
 
 /**
@@ -52,11 +85,13 @@ export function dshCssModules(id: string) {
         cssModules: { pattern: '[hash]_[local]' },
         minify: true,
       })
-      const classMap: Record<string, string> = {}
-      for (const [local, exp] of Object.entries(cssExports ?? {})) classMap[local] = exp.name
-      const tagId = id + '/' + basename(fileId)
+      const { css, classes, revision } = scopedByContent(
+        code.toString(),
+        cssExports as Record<string, { name: string }> | undefined,
+      )
+      const tagId = id + '/' + basename(fileId) + '-' + revision
       return [
-        'const css = ' + JSON.stringify(code.toString()) + ';',
+        'const css = ' + JSON.stringify(css) + ';',
         'const tagId = ' + JSON.stringify(tagId) + ';',
         "if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(tagId) + ']') === null) {",
         "  const tag = document.createElement('style');",
@@ -65,7 +100,7 @@ export function dshCssModules(id: string) {
         '  tag.textContent = css;',
         '  document.head.appendChild(tag);',
         '}',
-        'export default ' + JSON.stringify(classMap) + ';',
+        'export default ' + JSON.stringify(classes) + ';',
       ].join('\n')
     },
   }

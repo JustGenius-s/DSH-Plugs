@@ -1,5 +1,10 @@
 import type { TerminalShell } from '../../../shared/config'
-import type { ClientMessage, ServerMessage } from '../../../shared/terminal-protocol'
+import {
+  TERMINAL_TERMINATE_PATH,
+  type ClientMessage,
+  type ServerMessage,
+  type TerminalTerminateRequest,
+} from '../../../shared/terminal-protocol'
 
 export type TerminalConnectionState = 'connecting' | 'ready' | 'reconnecting' | 'disconnected'
 
@@ -25,7 +30,7 @@ interface Gate {
 export class TerminalConnectionController {
   private socket: WebSocket | null = null
   private config: ConnectionConfig | null = null
-  private sessionToken = newSessionToken()
+  private sessionToken = ''
   private retryCount = 0
   private retryTimer = 0
   private exited = false
@@ -38,7 +43,10 @@ export class TerminalConnectionController {
   connect(config: ConnectionConfig): void {
     this.stopSocket()
     this.config = config
-    this.sessionToken = newSessionToken()
+    // A Sidebar body may unmount when another tab becomes active. Deriving the
+    // reconnect token from the official tab identity lets a later mount attach
+    // to the same PTY instead of spawning another shell.
+    this.sessionToken = terminalSessionToken(config.sessionId)
     this.retryCount = 0
     this.exited = false
     this.stopped = false
@@ -83,7 +91,6 @@ export class TerminalConnectionController {
 
   /** Start a fresh PTY after the previous shell exited. */
   restart(): void {
-    this.sessionToken = newSessionToken()
     this.retryNow()
   }
 
@@ -170,11 +177,41 @@ function buildWsUrl(cwd: string | undefined, shell: TerminalShell, sessionToken:
   return `${protocol}//${window.location.host}/dsh-codex/terminal/ws?${query.toString()}`
 }
 
-function newSessionToken(): string {
+const TERMINAL_RUNTIME_ID = newRuntimeId()
+
+function newRuntimeId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
   }
   return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`
+}
+
+function hash32(value: string, seed: number): string {
+  let hash = (0x811c9dc5 ^ seed) >>> 0
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193) >>> 0
+    hash = (hash + Math.imul(hash >>> 13, 0x5bd1e995)) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
+/** Stable for one browser runtime + official tab, and valid for the Host token grammar. */
+export function terminalSessionToken(identity: string, runtimeId = TERMINAL_RUNTIME_ID): string {
+  const value = `${runtimeId}:${identity}`
+  return `dsh_${hash32(value, 0)}${hash32(value, 1)}${hash32(value, 2)}${hash32(value, 3)}`
+}
+
+/** Terminate a PTY even when its Sidebar body is currently unmounted. */
+export async function terminateTerminalSession(identity: string): Promise<void> {
+  const request: TerminalTerminateRequest = {
+    token: terminalSessionToken(identity),
+  }
+  const response = await fetch(TERMINAL_TERMINATE_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  })
+  if (!response.ok) throw new Error(`terminal termination failed (${response.status})`)
 }
 
 function createGate(): Gate {

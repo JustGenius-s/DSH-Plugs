@@ -2,7 +2,7 @@
  * Side-chat composer: mirrors the DSH main composer's essentials.
  *
  * - textarea + send / stop (same `prompt` verb the main composer uses)
- * - image/file attachment through the conversation service's draft-image path
+ * - image/file attachment through the conversation service's draft API
  * - model select through `ctx.modelDirectories` (DSH 0.1.2's per-session
  *   directory; the old `connection.api.sessions.models` RPC was REMOVED in
  *   0.1.2 — see ./model-directory), including the model's reasoning effort
@@ -29,8 +29,12 @@ import type {
   PendingInteraction,
   RunningToolCall,
 } from '@just-genius/dsh-plugin-runtime/client'
-import type { IApiClient } from '@just-genius/dsh-plugin-runtime/client'
-import { draftPreviewsOf, imageFilesOf } from './connection'
+import {
+  draftPreviewsOf,
+  imageFilesOf,
+  sideChatPromptContent,
+  type SideChatConversationFace,
+} from './connection'
 import { debugPrompt } from './snapshot'
 import type { ModelCatalogModel, ModelReasoning, ModelSelection, SessionModels } from './types'
 import { modelLookupErrorMessage, modelMenuNotice } from './model-picker'
@@ -57,23 +61,6 @@ export interface SideChatComposerSession {
   projections?: PermissionProjectionFace
 }
 
-/** The attachment service face (subset of ctx.conversation). */
-export interface SideChatConversationFace {
-  createDraftImages(files: readonly File[]): readonly unknown[]
-  draftImages(ids: readonly unknown[]): readonly unknown[]
-  /**
-   * Serialize drafts to wire payloads. The main composer's own path: it
-   * validates MIME, encodes bare base64, and keeps the preview URL alive —
-   * which a hand-rolled FileReader cannot do.
-   */
-  serializeDraftImages(ids: readonly unknown[]): Promise<readonly {
-    mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
-    data: string
-    name?: string
-  }[]>
-  releaseDraftImage(id: unknown): void
-}
-
 export interface SideChatComposerProps {
   session: SideChatComposerSession
   running: boolean
@@ -86,7 +73,7 @@ export interface SideChatComposerProps {
    * DSH 0.1.2 route; see ./model-directory for why the old api face is gone.
    */
   modelDirectories?: ModelDirectoryResolverFace | undefined
-  /** The `ctx.conversation` face for draft-image attachment handling. */
+  /** The validated `ctx.conversation` face for draft attachment handling. */
   conversation?: SideChatConversationFace | undefined
   onError: (message: string) => void
   t: (key: string) => string
@@ -178,21 +165,14 @@ export function SideChatComposer({
   const submit = async (): Promise<void> => {
     const text = draft.trim()
     if ((text.length === 0 && draftIds.length === 0) || sending) return
+    const submittedDraft = draft
+    const submittedIds = draftIds
     setDraft('')
     setSending(true)
     try {
-      const content: unknown[] = []
-      if (text.length > 0) content.push({ type: 'text', text })
-      // Serialize through the conversation service, the same call the main
-      // composer makes. Hand-rolling a FileReader here sent a full
-      // `data:image/png;base64,…` URL where the wire expects BARE base64, so
-      // every attached image was rejected (or rendered as a broken box).
-      if (conversation !== undefined && draftIds.length > 0) {
-        const images = await conversation.serializeDraftImages(draftIds)
-        for (const image of images) {
-          content.push({ type: 'image', mediaType: image.mediaType, data: image.data })
-        }
-      }
+      // DSH 0.1.5 serializes every draft kind through one attachment result;
+      // it also expects attachments before the optional text block.
+      const content = await sideChatPromptContent(conversation, submittedIds, text)
       const result = await session.prompt(content, 'queue')
       // Record what the send actually returned to the host trace: whether the
       // RPC accepted the message is the first thing to rule in or out.
@@ -200,17 +180,24 @@ export function SideChatComposer({
       if (result != null && typeof result === 'object' && 'ok' in result
         && (result as { ok?: boolean }).ok === false) {
         const err = (result as { error?: { message?: string } }).error
-        onError(err?.message ?? '消息发送失败')
+        throw new Error(err?.message ?? '消息发送失败')
+      }
+
+      // Raw `session.prompt` does not settle the browser draft registry for
+      // us, so release only after Host admission succeeds. Any files added
+      // while this request was pending remain in the next draft.
+      if (conversation !== undefined && submittedIds.length > 0) {
+        for (const id of submittedIds) conversation.releaseDraftAttachment(id)
+        const consumed = new Set(submittedIds)
+        setDraftIds(current => current.filter(id => !consumed.has(id)))
       }
     } catch (cause) {
+      // Match the native composer's failure contract: keep attachments and
+      // restore the submitted text when the user has not started a new draft.
+      setDraft(current => current.length === 0 ? submittedDraft : current)
       onError(cause instanceof Error ? cause.message : '消息发送失败')
     } finally {
       setSending(false)
-      // Release consumed draft images.
-      if (conversation !== undefined && draftIds.length > 0) {
-        for (const id of draftIds) conversation.releaseDraftImage(id)
-        setDraftIds([])
-      }
     }
   }
 
@@ -248,16 +235,20 @@ export function SideChatComposer({
 
   const addFiles = (files: readonly File[]): void => {
     if (conversation === undefined) return
-    const created = conversation.createDraftImages(files)
-    if (created.length === 0) return
-    setDraftIds(current => [
-      ...current,
-      ...created.map(item => (item as { id?: unknown }).id).filter((id): id is string => typeof id === 'string'),
-    ])
+    try {
+      const created = conversation.createDrafts(session.sessionId, files)
+      if (created.length === 0) return
+      setDraftIds(current => [
+        ...current,
+        ...created.map(item => item.id).filter((id): id is string => typeof id === 'string'),
+      ])
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : '附件添加失败')
+    }
   }
 
   const removeDraft = (id: unknown): void => {
-    conversation?.releaseDraftImage(id)
+    conversation?.releaseDraftAttachment(id)
     setDraftIds(current => current.filter(item => item !== id))
   }
 
@@ -630,4 +621,3 @@ function effortChoices(reasoning: ModelReasoning | undefined): readonly EffortCh
   }
   return out
 }
-

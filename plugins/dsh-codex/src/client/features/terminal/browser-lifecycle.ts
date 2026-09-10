@@ -22,7 +22,10 @@ export function useTerminalTheme() {
   const theme = useMemo(() => {
     const base = dark ? DARK : LIGHT
     const styles = getComputedStyle(document.body)
-    const background = styles.getPropertyValue('--dsw-specific-sidebar-fill').trim()
+    // Match the official v0.1.5 right-Sidebar panel surface. The old custom
+    // shell used --dsw-specific-sidebar-fill, which leaves the canvas visibly
+    // lighter than the surrounding official tab body in dark mode.
+    const background = styles.getPropertyValue('--dsw-alias-bg-base').trim()
     const foreground = styles.getPropertyValue('--dsw-alias-label-primary').trim()
     return {
       ...base,

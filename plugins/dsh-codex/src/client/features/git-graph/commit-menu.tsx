@@ -43,12 +43,14 @@ export function openCommitMenu(
 export function CommitContextMenu(props: {
   menu: CommitMenuState | null
   cwd?: string
+  visible?: boolean
   t: (key: string) => string
   onClose: () => void
   onRan: () => void
   onNotice: (text: string, kind: 'ok' | 'error') => void
 }) {
   const { menu, cwd, t, onClose, onRan, onNotice } = props
+  const visible = props.visible !== false
   const [busy, setBusy] = useState(false)
   const [hardReset, setHardReset] = useState<GitGraphRow | null>(null)
   const [acknowledged, setAcknowledged] = useState(false)
@@ -105,7 +107,7 @@ export function CommitContextMenu(props: {
   return (
     <>
       <Menu
-        open={menu !== null}
+        open={visible && menu !== null}
         portal
         dense
         side="bottom"
@@ -117,7 +119,7 @@ export function CommitContextMenu(props: {
         onClose={onClose}
       />
       <RiskConfirmation
-        open={hardReset !== null}
+        open={visible && hardReset !== null}
         title={t('gitGraph.resetHard')}
         description={t('gitGraph.confirmHard')}
         acknowledgeLabel={t('gitGraph.confirmHardAck')}
@@ -135,7 +137,7 @@ export function CommitContextMenu(props: {
         }}
       />
       <Modal
-        open={branchRow !== null}
+        open={visible && branchRow !== null}
         onClose={closeBranch}
         title={t('gitGraph.createBranchTitle')}
         closeLabel={t('gitGraph.close')}

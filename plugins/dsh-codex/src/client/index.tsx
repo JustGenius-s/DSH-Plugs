@@ -1,12 +1,12 @@
 import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
-import { CLIENT_SERVICES, getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import { getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { createCodexFeatureManager } from './core/feature-manager'
-import { createFileLinksFeature } from './features/file-links'
+import { createConversationCollapseFeature } from './features/conversation-collapse'
 import { createFilesFeature } from './features/files'
 import { createFullSessionLoadFeature } from './features/full-session-load'
 import { createGitGraphFeature } from './features/git-graph'
+import { createNavigatorFeature } from './features/navigator'
 import { createSideChatFeature } from './features/side-chat'
-import { createSidePanelsFeature } from './features/side-panels'
 import { createStickyUserBubbleFeature } from './features/sticky-user-bubble'
 import { createTerminalFeature } from './features/terminal'
 import { createTerminalControllerStore } from './features/terminal/controller'
@@ -14,7 +14,11 @@ import { createQuickActionsContribution } from './features/quick-actions/contrib
 import { CodexSettingsSection } from './settings/CodexSettingsSection'
 import { installCodexSettingsIcon } from './settings/codex-settings-icon'
 import { en, zh, type CodexKey } from './locales'
-import { SETTINGS_NAMESPACE, type DshCodexConfig } from '../shared/config'
+import {
+  SETTINGS_NAMESPACE,
+  type DshCodexConfig,
+} from '../shared/config'
+import { CODEX_CLIENT_INJECT } from './inject'
 
 declare module '@just-genius/dsh-plugin-runtime/client' {
   interface PluginLocaleNamespaceMap {
@@ -24,24 +28,7 @@ declare module '@just-genius/dsh-plugin-runtime/client' {
 
 const NS = 'settings.codex'
 
-export const inject = [
-  CLIENT_SERVICES.slots,
-  CLIENT_SERVICES.locale,
-  CLIENT_SERVICES.connection,
-  CLIENT_SERVICES.remote,
-  // Chat file links resolve through `session/openWorkspacePath` since DSH 0.1.3.
-  CLIENT_SERVICES.remoteSession,
-  // Per-session model directory: DSH 0.1.2 removed the `connection.api`
-  // envelope RPCs (`sessions.models` / `selectModel`), so the side-chat model
-  // picker reads the catalog through this service instead.
-  CLIENT_SERVICES.modelDirectories,
-  // Durable image reads, the same way the main transcript loads them.
-  CLIENT_SERVICES.uiConversation,
-  CLIENT_SERVICES.sessions,
-  // Terminal selections and file review comments register `@` reference codecs here.
-  CLIENT_SERVICES.inputTriggers,
-  CLIENT_SERVICES.settingsScope,
-] as const
+export const inject = CODEX_CLIENT_INJECT
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-codex: dictionaries')
@@ -58,8 +45,8 @@ export function apply(ctx: ClientContext): void {
   }, CodexSettingsSection))
   ctx.effect(() => installCodexSettingsIcon(() => t('nav')), 'dsh-codex: settings icon')
 
-  // A single terminal-controller registry shared by the side-panels quick
-  // actions and the terminal feature. Both receive the SAME store — the
+  // A single terminal-controller registry shared by quick actions and the
+  // terminal feature. Both receive the SAME store — the
   // quick-action executor resolves a terminal it opened against it, and the
   // terminal panel registers each PTY into it — so ownership lives here and
   // dispose is single-sourced (never per-feature).
@@ -72,16 +59,14 @@ export function apply(ctx: ClientContext): void {
   )
 
   const features = createCodexFeatureManager([
+    createConversationCollapseFeature(ctx, scope, t),
+    createNavigatorFeature(ctx, scope),
     createFullSessionLoadFeature(ctx, scope),
     createStickyUserBubbleFeature(ctx, scope, t),
-    createSidePanelsFeature(ctx, scope, t, quickActions),
     createSideChatFeature(ctx, scope, t),
-    createTerminalFeature(ctx, scope, t, terminalControllers),
+    createTerminalFeature(ctx, scope, t, terminalControllers, quickActions),
     createGitGraphFeature(ctx, scope, t),
     createFilesFeature(ctx, scope, t),
-    // After side-panels/files: the patch reroutes chat file links into the
-    // panel those features provide.
-    createFileLinksFeature(ctx, scope),
   ])
   ctx.effect(() => {
     features.activate()

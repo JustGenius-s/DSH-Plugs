@@ -11,7 +11,10 @@ const PKG = '@just-genius/dsh-plugin-ui'
 // bundles. The second entry is the node-side css-modules helper itself.
 export default defineConfig([
   {
-    entry: ['src/index.tsx'],
+    entry: {
+      index: 'src/index.tsx',
+      'official-primitives': 'src/official-primitives.ts',
+    },
     format: 'esm',
     dts: true,
     outDir: 'lib',

@@ -5,6 +5,9 @@ const VERSION_EXCEPTIONS = new Map([
   // This legacy package has not published in the 0.1.1 line. New code should
   // use SettingsSchemaService from dsh-client-ui-settings instead.
   ['@deepseek-ai/dsh-client-schema-form', '0.1.0-rc.7'],
+  // DSH 0.1.5 currently seeds this content-primitives release. Plugins reach
+  // it only through packages/ui; direct official imports remain forbidden.
+  ['@deepseek-ai/dsh-client-ui-primitives', '0.1.0-rc.6'],
 ])
 const errors = []
 

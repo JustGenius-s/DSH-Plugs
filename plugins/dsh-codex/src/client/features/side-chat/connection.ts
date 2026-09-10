@@ -79,15 +79,25 @@ export function uiConversationOf(ctx: object): UiConversationFace | undefined {
  * when the namespace is not mounted — the caller falls back to the envelope.
  */
 export function remoteSessionApiOf(ctx: object): { session: { attachment: unknown } } | undefined {
-  let remote: { session?: unknown } | undefined
+  let session: unknown
   try {
     const getter = (ctx as { get?: unknown }).get
-    if (typeof getter === 'function') remote = (getter as (name: string) => unknown).call(ctx, 'remote') as { session?: unknown }
-    else remote = (ctx as { remote?: { session?: unknown } }).remote
+    if (typeof getter === 'function') {
+      const get = (getter as (name: string) => unknown).bind(ctx)
+      // Cordis owns the namespace as a dotted service. Reading it directly is
+      // both more precise and immune to a traceable `remote` carrier guarding
+      // `.session`; the carrier fallback keeps older/simple contexts working.
+      session = get('remote.session')
+      if (session === undefined) {
+        const remote = get('remote') as { session?: unknown } | undefined
+        session = remote?.session
+      }
+    } else {
+      session = (ctx as { remote?: { session?: unknown } }).remote?.session
+    }
   } catch {
-    remote = undefined
+    session = undefined
   }
-  const session = remote?.session
   if (session === null || typeof session !== 'object') return undefined
   if (typeof (session as { attachment?: unknown }).attachment !== 'function') return undefined
   return { session: session as { attachment: unknown } }
@@ -216,6 +226,81 @@ export async function readAttachmentData(
  * in.
  */
 
+/** Browser-owned draft attachment returned by DSH 0.1.5's conversation face. */
+export interface SideChatDraftAttachment {
+  readonly kind: 'image' | 'file'
+  readonly id: unknown
+  readonly file: File
+  readonly previewUrl?: string
+}
+
+/** Wire attachment accepted by `SessionFace.prompt`. */
+export type SideChatSubmitAttachment =
+  | {
+      readonly type: 'image'
+      readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+      readonly data: string
+      readonly name?: string
+    }
+  | {
+      readonly type: 'file'
+      readonly receiptId: string
+    }
+
+/**
+ * Structural subset of DSH 0.1.5's `ConversationController` used by Side Chat.
+ *
+ * Kept on the shared adapter boundary instead of importing the platform
+ * package from the plugin. This also avoids coupling to duplicated branded
+ * `SessionId` / `DraftAttachmentId` copies in a materialized DSH runtime.
+ */
+export interface SideChatConversationFace {
+  createDrafts(sessionId: string, files: readonly File[]): readonly SideChatDraftAttachment[]
+  resolveDraftAttachments(ids: readonly unknown[]): readonly SideChatDraftAttachment[]
+  serializeDraftAttachments(ids: readonly unknown[]): Promise<{
+    readonly attachments: readonly SideChatSubmitAttachment[]
+  }>
+  releaseDraftAttachment(id: unknown): void
+}
+
+const DRAFT_ATTACHMENT_METHODS = [
+  'createDrafts',
+  'resolveDraftAttachments',
+  'serializeDraftAttachments',
+  'releaseDraftAttachment',
+] as const
+
+/** Validate an unknown service before a component can call attachment verbs. */
+export function conversationAttachmentsOfService(
+  service: unknown,
+): SideChatConversationFace | undefined {
+  if (service === null || (typeof service !== 'object' && typeof service !== 'function')) {
+    return undefined
+  }
+  try {
+    for (const method of DRAFT_ATTACHMENT_METHODS) {
+      if (typeof (service as Record<string, unknown>)[method] !== 'function') return undefined
+    }
+  } catch {
+    return undefined
+  }
+  return service as SideChatConversationFace
+}
+
+/** Resolve and validate the draft-attachment service off a Cordis context. */
+export function conversationAttachmentsOf(ctx: object): SideChatConversationFace | undefined {
+  let service: unknown
+  try {
+    const getter = (ctx as { get?: unknown }).get
+    service = typeof getter === 'function'
+      ? (getter as (name: string) => unknown).call(ctx, 'conversation')
+      : (ctx as { conversation?: unknown }).conversation
+  } catch {
+    return undefined
+  }
+  return conversationAttachmentsOfService(service)
+}
+
 /** One draft attachment chip: what to render and which id to release. */
 export interface DraftPreview {
   key: string
@@ -228,34 +313,64 @@ export interface DraftPreview {
 /**
  * Resolve draft ids to the chips the composer renders.
  *
- * Read through `draftImages` because that is where the service keeps the
- * browser-owned preview URL; a chip built from the id alone can only ever be
- * a placeholder glyph.
+ * Read through `resolveDraftAttachments` because that is where the 0.1.5
+ * service keeps the browser-owned preview URL; a chip built from the id alone
+ * can only ever be a placeholder glyph.
  */
 export function draftPreviewsOf(
-  conversation: { draftImages(ids: readonly unknown[]): readonly unknown[] } | undefined,
+  conversation: Pick<SideChatConversationFace, 'resolveDraftAttachments'> | undefined,
   ids: readonly unknown[],
 ): DraftPreview[] {
-  if (conversation === undefined) {
-    return ids.map((id, index) => ({ key: String(id ?? index), id, name: '图片' }))
+  const fallback = (): DraftPreview[] => ids.map((id, index) => ({
+    key: String(id ?? index),
+    id,
+    name: '图片',
+  }))
+  if (ids.length === 0) return []
+  if (conversation === undefined) return fallback()
+
+  let descriptors: readonly SideChatDraftAttachment[]
+  try {
+    descriptors = conversation.resolveDraftAttachments(ids)
+  } catch {
+    // A runtime can replace a service while HMR is settling. A stale chip is
+    // still removable; taking down the entire Side Chat is not useful.
+    return fallback()
   }
-  const descriptors = conversation.draftImages(ids) as readonly {
-    id?: unknown
-    previewUrl?: string
-    file?: File
-  }[]
-  return descriptors.map((descriptor, index) => {
+
+  const descriptorById = new Map(descriptors.map(descriptor => [descriptor.id, descriptor]))
+  return ids.map((id, index) => {
+    const descriptor = descriptorById.get(id)
+    if (descriptor === undefined) return { key: String(id ?? index), id, name: '图片' }
     const name = descriptor.file?.name ?? '图片'
     const url = typeof descriptor.previewUrl === 'string' && descriptor.previewUrl !== ''
       ? descriptor.previewUrl
       : undefined
     return {
-      key: String(descriptor.id ?? ids[index] ?? index),
-      id: descriptor.id ?? ids[index],
+      key: String(descriptor.id ?? id ?? index),
+      id: descriptor.id ?? id,
       ...(url === undefined ? {} : { url }),
       name,
     }
   })
+}
+
+/** Build the ordered prompt payload using DSH's current attachment serializer. */
+export async function sideChatPromptContent(
+  conversation: Pick<SideChatConversationFace, 'serializeDraftAttachments'> | undefined,
+  ids: readonly unknown[],
+  text: string,
+): Promise<unknown[]> {
+  if (ids.length > 0 && conversation === undefined) {
+    throw new Error('附件服务不可用')
+  }
+  const attachments = ids.length === 0
+    ? []
+    : [...(await conversation!.serializeDraftAttachments(ids)).attachments]
+  return [
+    ...attachments,
+    ...(text.length === 0 ? [] : [{ type: 'text', text }]),
+  ]
 }
 
 /**

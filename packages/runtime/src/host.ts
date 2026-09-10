@@ -67,10 +67,10 @@ export { sessionEventsOf } from './session-events.ts'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
-export type { StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
+export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 export { SessionId } from '@deepseek-ai/dsh-session'
-export type { Session, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+export type { Session, SessionEvent, SessionHeader, UserMessage } from '@deepseek-ai/dsh-session'
 /**
  * Context handed to every `systemPrompt` provider at assembly time.
  *

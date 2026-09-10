@@ -11,5 +11,3 @@
         terminalShell: auto
         terminalScrollback: 5000
         terminalFontSize: 12
-        panelDefaultWidth: 360
-        panelRememberTabs: true

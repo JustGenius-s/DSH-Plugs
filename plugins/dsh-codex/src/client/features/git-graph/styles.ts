@@ -58,8 +58,7 @@ const GRAPH_CSS = `
 .dsh-git-graph-detail-row:hover .dsh-git-graph-detail-actions{visibility:visible}
 .dsh-git-graph-detail-action{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer}
 .dsh-git-graph-detail-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#e6e6e8)}
-.dsh-git-graph-detail-section-action{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer;visibility:hidden}
-.dsh-git-graph-detail-section:hover .dsh-git-graph-detail-section-action{visibility:visible}
+.dsh-git-graph-detail-section-action{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:none;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,#b0b0b5);cursor:pointer}
 .dsh-git-graph-detail-section-action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary,#e6e6e8)}
 .dsh-git-graph-detail-row{position:relative;display:flex;align-items:center;gap:6px;width:100%;min-height:28px;padding:0 4px;border:none;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .dsh-git-graph-detail-row:hover{background:var(--dsw-alias-interactive-bg-hover)}

@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-codex",
-  "description": "Codex-style navigation, side panels, and terminal integration shell for DeepSeek Harness",
+  "description": "Codex-style navigation plus Side Chat, Terminal, and Git extensions for the DeepSeek Harness sidebar",
   "version": "0.2.1",
   "publishConfig": {
     "access": "public"
@@ -17,10 +17,6 @@
       "types": "./lib/client.d.ts",
       "default": "./lib/client.js"
     },
-    "./side-panels": {
-      "types": "./lib/side-panels.d.ts",
-      "default": "./lib/side-panels.js"
-    },
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -35,7 +31,10 @@
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-input-trigger"
+        "@deepseek-ai/dsh-client-ui-input-trigger",
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
       ],
       "platform": "web"
     },
@@ -46,15 +45,15 @@
   "files": [
     "lib/index.js",
     "lib/client.js",
-    "lib/side-panels.js",
     "cordis.patch.yml",
     "lib/**/*.d.ts"
   ],
   "scripts": {
-    "build": "tsdown -c tsdown.config.ts && tsdown -c tsdown.client.config.ts",
+    "build": "tsdown -c tsdown.config.ts && tsdown -c tsdown.client.config.ts && pnpm check:client-modules",
     "watch": "tsdown -c tsdown.config.ts --watch & tsdown -c tsdown.client.config.ts --watch",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm -w exec vitest run --config ./vitest.config.ts",
+    "test": "pnpm exec vitest run --config ./vitest.config.ts",
+    "check:client-modules": "node ../../scripts/check-client-modules.mjs dsh-codex",
     "clean": "rm -rf lib"
   },
   "dependencies": {

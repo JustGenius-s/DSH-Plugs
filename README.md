@@ -8,7 +8,7 @@
 
 ### [@just-genius/dsh-codex](plugins/dsh-codex)
 
-The consolidated Codex shell: Codex-style message navigation, Cursor-style per-turn **Worked for** collapsing, a right-side `side.panel` host with a file tree / preview / diff view (VSCode Light+/Dark+ syntax themes), a Warp-style terminal panel backed by a real login-shell PTY, and a read-only git commit-graph panel. Optional: pin the newest question while scrolling, and drain a session's full history on open.
+Codex-style message navigation and Cursor-style per-turn **Worked for** collapsing, plus Side Chat, Terminal, and Git tab types for DSH's official right Sidebar. Files use DSH's built-in packages by default, with the retained custom preview available from Codex settings; the Warp-style terminal is backed by a real login-shell PTY. Optional: pin the newest question while scrolling, and drain a session's full history on open.
 
 ### [@just-genius/dsh-debug-mode](plugins/dsh-debug-mode)
 

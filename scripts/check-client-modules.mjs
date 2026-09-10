@@ -3,6 +3,7 @@ import { readFile, readdir } from 'node:fs/promises'
 const errors = []
 const platformSeeds = new Set(['react', 'react-dom'])
 const plugins = await readdir(new URL('../plugins/', import.meta.url), { withFileTypes: true })
+const requested = new Set(process.argv.slice(2))
 
 for (const entry of plugins) {
   if (!entry.isDirectory()) continue
@@ -15,6 +16,7 @@ for (const entry of plugins) {
   } catch {
     continue
   }
+  if (requested.size > 0 && !requested.has(entry.name) && !requested.has(manifest.name)) continue
 
   const injected = new Set((manifest.dsh?.client?.inject ?? []).map(packageNameOf))
   const required = new Set([...bundle.matchAll(/\brequire\("([^"]+)"\)/g)].map(match => match[1]))
@@ -27,10 +29,6 @@ for (const entry of plugins) {
     }
   }
 
-  if (required.has('@deepseek-ai/dsh-client-ui-primitives')
-    || required.has('@deepseek-ai/dsh-client-ui-primitives/client')) {
-    errors.push(`${manifest.name}: official primitives must be replaced by @just-genius/dsh-plugin-ui`)
-  }
 }
 
 if (errors.length > 0) {

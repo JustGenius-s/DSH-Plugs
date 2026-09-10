@@ -6,6 +6,7 @@ import { createUserMessage } from '@just-genius/dsh-plugin-runtime/host'
 import { defineTool } from '@just-genius/dsh-plugin-runtime/host'
 import { HOST_SERVICES, errorMessage, readJsonBody, sendJson as json } from '@just-genius/dsh-plugin-runtime/host'
 import { DEBUG_POLICY } from './policy.ts'
+import { sessionEvents } from './session-events.ts'
 import {
   appendLogFile,
   clearLogFile,
@@ -370,7 +371,7 @@ function setDebugMode(
   const state = ensureState(store, String(session.id))
   const target = state.wanted ?? state.active
   if (active === target) return 'noop'
-  if (hasOpenTurn(session.events)) {
+  if (hasOpenTurn(sessionEvents(session))) {
     state.wanted = active
     return state.active === active ? 'cancelled' : 'queued'
   }

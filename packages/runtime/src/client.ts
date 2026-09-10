@@ -46,8 +46,114 @@ import type {
   SettingsScopeBinder,
 } from '@deepseek-ai/dsh-client-ui-settings/client'
 
+/** Values accepted by the DSH right-Sidebar navigation contract. */
+export type SidebarRightNavigationParams = Readonly<Record<string, unknown>> | undefined
+
+/** Where a new right-Sidebar tab should land. */
+export interface SidebarRightPlacement {
+  paneId?: string
+  replaceTab?: string
+  revealIfOpened?: boolean
+}
+
+/** Options for opening a resource address in the right Sidebar. */
+export interface SidebarRightOpenResourceOptions extends SidebarRightPlacement {
+  kind?: string
+  params?: SidebarRightNavigationParams
+}
+
+/** Options for opening a page tab in the right Sidebar. */
+export interface SidebarRightOpenTabOptions extends SidebarRightPlacement {
+  params?: SidebarRightNavigationParams
+}
+
+/** One tab record exposed by the right-Sidebar controller. */
+export interface SidebarRightTabRecord {
+  id: string
+  kind: string
+  contentId: string
+  title: string
+}
+
+/** Public navigation and presentation face provided by DSH 0.1.5+. */
+export interface SidebarRightService {
+  openResource(address: string, options?: SidebarRightOpenResourceOptions): void
+  openTab(kind: string, options?: SidebarRightOpenTabOptions): void
+  close(tabId: string): void
+  active(): SidebarRightTabRecord | undefined
+  isExpanded(): boolean
+  toggleExpanded(): void
+  focus(tabId: string): void
+  split(paneId?: string): string | undefined
+  float(tabId: string, rect?: { x: number; y: number; width: number; height: number }): void
+  dock(paneId: string): void
+}
+
+/** A guide-page capsule contributed by a right-Sidebar tab type. */
+export interface SidebarRightGuideEntry {
+  order: number
+  title: () => string
+  /** Kept structural so plugins need not import the official primitives package. */
+  icon?: unknown
+}
+
+/** Static definition registered before a right-Sidebar tab body. */
+export interface SidebarRightTabDefinition {
+  id: string
+  kind: string
+  patterns?: readonly string[]
+  priority?: 'extension' | 'builtin' | 'fallback'
+  canOpen?: (address: string) => boolean
+  title: (address: string) => string
+  guide?: readonly SidebarRightGuideEntry[]
+}
+
+/** Tab-type registry provided by DSH's official right Sidebar. */
+export interface SidebarRightTabsService {
+  register(definition: SidebarRightTabDefinition): () => void
+}
+
+/** Navigation methods bound to the Session and pane containing one tab. */
+export interface SidebarRightTabActions {
+  openResource(
+    address: string,
+    options?: Omit<SidebarRightOpenResourceOptions, 'kind' | 'replaceTab'> & { replaceTab?: boolean },
+  ): void
+  openTab(
+    kind: string,
+    options?: Omit<SidebarRightOpenTabOptions, 'replaceTab'> & { replaceTab?: boolean },
+  ): void
+  close(): void
+}
+
+/** Live record read through the official slot-provided `useTabInfo` Hook. */
+export interface SidebarRightTabInfo {
+  sidebar: {
+    expanded: boolean
+    fullscreen: boolean
+  }
+  panel: { id: string }
+  tab: SidebarRightTabRecord & {
+    visible: boolean
+    navigation: {
+      address: string
+      params: SidebarRightNavigationParams
+      revision: number
+    }
+    signal: AbortSignal
+    actions: SidebarRightTabActions
+  }
+}
+
+export type UseSidebarRightTabInfo = () => SidebarRightTabInfo
+
 /** Plugin-owned client services bridged into the official Cordis Context. */
-export interface PluginClientContext {}
+export interface PluginClientContext {
+  /** DSH 0.1.5+ official right-Sidebar navigation face. */
+  sidebarRight: SidebarRightService
+  /** DSH 0.1.5+ official right-Sidebar tab registry. */
+  sidebarRightTabs: SidebarRightTabsService
+}
 
 /** Plugin-owned locale namespaces bridged into the official slot registry. */
 export interface PluginLocaleNamespaceMap {}
@@ -282,6 +388,8 @@ export function createSnapshotStore<T>(
 /** Canonical browser service names used by plugin inject declarations. */
 export const CLIENT_SERVICES = {
   connection: 'connection',
+  /** Scope-aware conversation controller, including draft attachments. */
+  conversation: 'conversation',
   /** @deprecated DSH 0.1.2+ moved the registry to `uiConversation.events`. */
   conversationEvents: 'conversationEvents',
   /** Conversation registries (`events` / `views`) since DSH 0.1.2. */
@@ -290,19 +398,18 @@ export const CLIENT_SERVICES = {
   locale: 'locale',
   modelDirectories: 'modelDirectories',
   remote: 'remote',
+  /** Session Typert namespace exposed below `ctx.remote`. */
+  remoteSession: 'remote.session',
   remoteCommands: 'remote.commands',
   remoteCredentials: 'remote.credentials',
   remoteLlm: 'remote.llm',
   remotePluginInventory: 'remote.pluginInventory',
   remoteSettings: 'remote.settings',
-  /**
-   * The `session` Remote namespace (`ctx.remote.session`). Since DSH 0.1.3 the
-   * chat view resolves file links through `session/openWorkspacePath` instead of
-   * the client-side `workspaces.openPath`, so a plugin patching the path opener
-   * must inject this namespace.
-   */
-  remoteSession: 'remote.session',
   sessions: 'sessions',
+  /** Official DSH 0.1.5+ right-Sidebar navigation service. */
+  sidebarRight: 'sidebarRight',
+  /** Official DSH 0.1.5+ right-Sidebar tab-type registry. */
+  sidebarRightTabs: 'sidebarRightTabs',
   slots: 'slots',
   settingsScope: 'settingsScope',
   settingsSchema: 'settingsSchema',

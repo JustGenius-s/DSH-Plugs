@@ -870,3 +870,57 @@ export const IconArchiveOutline20 = ({ size = 20, className }: IconProps) => (
     <path d="M12.7962 12.5661V11.0832H7.20548V12.5661L12.7962 12.5661Z" fill="currentColor" />
   </svg>
 )
+
+/** Colored folder used by right-Sidebar page tabs. */
+export const IconFolderColor16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flex: 'none' }}>
+    <path d="M1.5 4.1A1.6 1.6 0 0 1 3.1 2.5h2.35c.5 0 .97.24 1.27.64l.62.84c.1.13.25.2.41.2h5.15a1.6 1.6 0 0 1 1.6 1.6v5.72H1.5V4.1Z" fill="#C9913E" />
+    <path d="M1.5 6.15h13v5.25a2.1 2.1 0 0 1-2.1 2.1H3.6a2.1 2.1 0 0 1-2.1-2.1V6.15Z" fill="#E8B75E" />
+    <path d="M2.85 7.35h10.3v3.7c0 .65-.53 1.18-1.18 1.18H4.03c-.65 0-1.18-.53-1.18-1.18v-3.7Z" fill="#F2C977" />
+  </svg>
+)
+
+/** Colored terminal used by terminal page tabs. */
+export const IconTerminalColor16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flex: 'none' }}>
+    <rect x="1" y="2" width="14" height="12" rx="2.4" fill="#3977D6" />
+    <path d="M1 4.4h14" stroke="#76AAFF" strokeWidth="1.2" />
+    <circle cx="3" cy="3.2" r=".55" fill="#FF7A79" />
+    <circle cx="4.7" cy="3.2" r=".55" fill="#FFD166" />
+    <path d="m4 7 2 1.7-2 1.7" stroke="#FFF" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M7.7 10.4h3.6" stroke="#69E6A6" strokeWidth="1.3" strokeLinecap="round" />
+  </svg>
+)
+
+/** Colored working-tree icon used by Git changes tabs. */
+export const IconGitChangesColor16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flex: 'none' }}>
+    <path d="M3 1.5h6.2L12.8 5v8.25c0 .69-.56 1.25-1.25 1.25h-8.3C2.56 14.5 2 13.94 2 13.25V2.5c0-.55.45-1 1-1Z" fill="#8565DC" />
+    <path d="M9.2 1.5v2.55c0 .55.45 1 1 1h2.6L9.2 1.5Z" fill="#C2B2F3" />
+    <path d="M4.25 7.5h3.4M4.25 10h2.2" stroke="#FFF" strokeWidth="1.1" strokeLinecap="round" opacity=".9" />
+    <circle cx="11.6" cy="11.6" r="2.65" fill="#F59E42" stroke="#FFF" strokeWidth=".7" />
+    <path d="M10.4 11.6h2.4M11.6 10.4v2.4" stroke="#FFF" strokeWidth=".9" strokeLinecap="round" />
+  </svg>
+)
+
+/** Colored branch graph used by Git graph tabs. */
+export const IconGitGraphColor16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flex: 'none' }}>
+    <path d="M4 3.2v7.35c0 1.25 1.02 2.27 2.27 2.27h2.6M4.1 6.15h3.1c1.16 0 2.1-.94 2.1-2.1v-.7" stroke="#7067E8" strokeWidth="1.45" strokeLinecap="round" />
+    <circle cx="4" cy="2.65" r="1.65" fill="#4EA5F5" />
+    <circle cx="9.35" cy="2.65" r="1.65" fill="#F06EA9" />
+    <circle cx="10.55" cy="12.8" r="1.65" fill="#55C98A" />
+    <circle cx="4" cy="2.65" r=".55" fill="#FFF" />
+    <circle cx="9.35" cy="2.65" r=".55" fill="#FFF" />
+    <circle cx="10.55" cy="12.8" r=".55" fill="#FFF" />
+  </svg>
+)
+
+/** Colored bubbles used by Side Chat tabs. */
+export const IconSideChatColor16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flex: 'none' }}>
+    <path d="M1.25 3.65a2.4 2.4 0 0 1 2.4-2.4h5.2a2.4 2.4 0 0 1 2.4 2.4v2.7a2.4 2.4 0 0 1-2.4 2.4H5.1L2.35 10.4l.55-2.05a2.4 2.4 0 0 1-1.65-2.28V3.65Z" fill="#4D91ED" />
+    <path d="M6.75 9.2a2.2 2.2 0 0 0 2.2 2.2h2.15l2.45 1.45-.47-1.75a2.2 2.2 0 0 0 1.42-2.06V7.4a2.2 2.2 0 0 0-2.2-2.2h-.45v1.15a3 3 0 0 1-3 3h-2.1V9.2Z" fill="#AA68E8" />
+    <path d="m4.15 4.2.35.78.78.35-.78.35-.35.78-.35-.78-.78-.35.78-.35.35-.78Z" fill="#FFE27A" />
+  </svg>
+)

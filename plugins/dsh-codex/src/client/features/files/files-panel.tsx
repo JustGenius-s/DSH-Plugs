@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react'
 import {
   IconChevronDownOutline14,
   IconChevronRightOutline14,
@@ -12,28 +12,24 @@ import {
 import {
   type GitChangeStatus,
   type GitFileDiff,
-  type GitGraphDiffResponse,
   type GitGraphFileOk,
-  type GitGraphFileResponse,
-  type GitGraphTreeResponse,
   type GitTreeEntry,
 } from '../../../shared/git-graph'
-import type { PanelNavState } from '../side-panels/service'
+import type { FilesNavigationState } from './resource-address'
 import { fileIconSvg, folderIconSvg } from './file-icons'
 import { subscribeRepoWatch } from '../repo-watch'
 import {
   absolutePathOf,
-  fetchFilesHostInfo,
   relativePathOf,
   revealPath,
-  type FilesHostInfo,
 } from './files-actions'
 import { buildFilesMenu } from './files-menu'
 import { FileCodeView, FileDiffView, FileMarkdownView, type ViewLabels } from './file-views'
 import type { FileReviewComment } from './review-comment'
 import { isMarkdownFile } from './markdown'
 import { ensureFilesStyles } from './styles'
-import { fetchDiff, fetchFile, fetchTree, fetchTreeSearch } from './files-api'
+import { fetchDiff, fetchFile } from './files-api'
+import { createFilesTreeStore, type FilesTreeStore } from './tree-store'
 
 ensureFilesStyles()
 
@@ -48,14 +44,14 @@ const STATUS_LABEL: Record<GitChangeStatus, string> = {
 }
 
 export interface FilesPanelProps {
-  sessionId: string
   cwd?: string
-  instanceKey?: string
   t: (key: string) => string
   /** Navigation target this instance was opened with (mode/file/sha). */
-  navState?: PanelNavState
-  /** Open a NEW files instance (multi panel): switch form or navigate. */
-  onOpen: (state: PanelNavState) => void
+  navState?: FilesNavigationState
+  /** Durable state for the official Sidebar tab occurrence. */
+  treeStore?: FilesTreeStore
+  /** Navigate through the official Sidebar to another files tab or resource. */
+  onOpen: (state: FilesNavigationState) => void
   /**
    * When false, the tree hides gitignored paths (`ignored=0` on the host).
    * Defaults to true (VS Code Explorer default).
@@ -85,16 +81,16 @@ export interface FilesPanelProps {
 }
 
 /**
- * The `files` side panel: ONE panel, ONE form per instance.
+ * The rich Files body mounted into DSH's official right Sidebar.
  *
  * A `files` instance shows exactly one of:
  *  - tree — the working-tree directory browser
  *  - preview — one file's contents
  *  - diff — one file's change (working tree vs HEAD, or one commit)
  *
- * Because the panel is `multi`, switching form or opening a file opens a NEW
- * instance (a new tab), each driven by its own `navState` from the store. The
- * `onOpen` prop tells the feature wrapper to do that.
+ * The tree is a page tab. Preview and diff bodies are resource tabs whose
+ * navigation params select the form; `onOpen` delegates placement/reveal to
+ * the official Sidebar controller.
  */
 export function FilesPanel(props: FilesPanelProps) {
   const { cwd, t, navState } = props
@@ -116,6 +112,7 @@ export function FilesPanel(props: FilesPanelProps) {
           showIgnored={showIgnored}
           visible={visible}
           onAddToChat={props.onAddToChat}
+          store={props.treeStore}
         />
       ) : file === undefined ? (
         <div className="dsh-files-status">{t('files.noCwd')}</div>
@@ -124,7 +121,6 @@ export function FilesPanel(props: FilesPanelProps) {
           cwd={cwd}
           file={file}
           sha={sha}
-          t={t}
           render={(data, busy, error) => (
             error !== undefined ? (
               <div className="dsh-files-status is-error">{error}</div>
@@ -133,6 +129,7 @@ export function FilesPanel(props: FilesPanelProps) {
                 file={file}
                 data={data}
                 busy={busy}
+                visible={visible}
                 t={t}
                 highlightThemeLight={props.highlightThemeLight}
                 highlightThemeDark={props.highlightThemeDark}
@@ -146,7 +143,6 @@ export function FilesPanel(props: FilesPanelProps) {
           cwd={cwd}
           file={file}
           sha={sha}
-          t={t}
           render={(diff, busy, error) => (
             error !== undefined ? (
               <div className="dsh-files-status is-error">{error}</div>
@@ -194,24 +190,35 @@ interface FileContextMenuState {
 function FilesTree(props: {
   cwd: string
   t: (key: string) => string
-  onOpen: (state: PanelNavState) => void
+  onOpen: (state: FilesNavigationState) => void
   showIgnored: boolean
   visible: boolean
   onAddToChat?: (path: string, kind: 'file' | 'dir') => boolean
+  store?: FilesTreeStore
 }) {
   const { cwd, t, onOpen, showIgnored, visible, onAddToChat } = props
   const [contextMenu, setContextMenu] = useState<FileContextMenuState | null>(null)
-  /** Children keyed by parent dir path (`''` = workspace root). */
-  const [childrenByDir, setChildrenByDir] = useState<ReadonlyMap<string, readonly GitTreeEntry[]>>(
-    () => new Map(),
+  const localStoreRef = useRef<FilesTreeStore | null>(null)
+  if (props.store === undefined && localStoreRef.current === null) {
+    localStoreRef.current = createFilesTreeStore()
+  }
+  const store = props.store ?? localStoreRef.current
+  if (store === null) throw new Error('FilesTree requires a state store')
+  const snapshot = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getSnapshot,
   )
-  const [busy, setBusy] = useState(true)
-  const [error, setError] = useState<string | undefined>()
-  const [query, setQuery] = useState('')
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
-  const [matches, setMatches] = useState<readonly GitTreeEntry[] | null>(null)
-  const [searchBusy, setSearchBusy] = useState(false)
-  const [hostInfo, setHostInfo] = useState<FilesHostInfo | undefined>()
+  const {
+    childrenByDir,
+    busy,
+    error,
+    query,
+    expanded,
+    matches,
+    searchBusy,
+    hostInfo,
+  } = snapshot
   const [notice, setNotice] = useState<{ seq: number; text: string } | null>(null)
   const noticeSeq = useRef(0)
 
@@ -220,80 +227,13 @@ function FilesTree(props: {
     setNotice({ seq: noticeSeq.current, text })
   }, [])
 
-  // One probe per page: the platform decides whether the reveal row exists at
-  // all, and a right-click must not wait on a round trip to paint its menu.
   useEffect(() => {
-    let cancelled = false
-    void fetchFilesHostInfo().then((value) => {
-      if (!cancelled) setHostInfo(value)
-    })
-    return () => { cancelled = true }
-  }, [])
+    store.configure(cwd, showIgnored)
+  }, [cwd, showIgnored, store])
 
-  const expandedRef = useRef(expanded)
-  expandedRef.current = expanded
-  const childrenRef = useRef(childrenByDir)
-  childrenRef.current = childrenByDir
-  /** Coalesce expand + hover prefetch onto one in-flight promise per path. */
-  const loadingDirsRef = useRef(new Map<string, Promise<boolean>>())
-
-  const applyDir = useCallback((dir: string, entries: readonly GitTreeEntry[]): void => {
-    setChildrenByDir((current) => {
-      const next = new Map(current)
-      next.set(dir, entries)
-      // Keep the ref in sync inside the updater so callers that await loadDir
-      // (expand-after-fetch) see the cache before the next paint. Reading the
-      // ref right after applyDir used to miss and abort the expand.
-      childrenRef.current = next
-      return next
-    })
-  }, [])
-
-  const loadDir = useCallback(async (dir: string, opts?: { silent?: boolean }): Promise<boolean> => {
-    const silent = opts?.silent === true
-    if (!silent && dir === '') {
-      setBusy(true)
-      setError(undefined)
-    }
-    const inflight = loadingDirsRef.current.get(dir)
-    if (inflight !== undefined) return inflight
-
-    const promise = (async (): Promise<boolean> => {
-      const value = await fetchTree(cwd, dir, showIgnored)
-      if (!value.ok) {
-        if (dir === '') {
-          setBusy(false)
-          setError(value.message)
-        }
-        return false
-      }
-      applyDir(dir, value.entries)
-      if (dir === '') setBusy(false)
-      return true
-    })()
-    loadingDirsRef.current.set(dir, promise)
-    try {
-      return await promise
-    } finally {
-      loadingDirsRef.current.delete(dir)
-    }
-  }, [applyDir, cwd, showIgnored])
-
-  // Initial root load (and whenever the workspace or ignore visibility changes).
-  useEffect(() => {
-    let cancelled = false
-    setChildrenByDir(new Map())
-    setExpanded(new Set())
-    setMatches(null)
-    setQuery('')
-    setBusy(true)
-    setError(undefined)
-    loadingDirsRef.current.clear()
-    void loadDir('').then(() => {
-      if (cancelled) return
-    })
-    return () => { cancelled = true }
-  }, [cwd, loadDir])
+  useEffect(() => () => {
+    if (props.store === undefined) store.dispose()
+  }, [props.store, store])
 
   // Live refresh only while this pane is visible: shared watch SSE (one
   // EventSource per cwd) + focus/visibility as a backstop. Hidden retained
@@ -306,8 +246,7 @@ function FilesTree(props: {
 
     const refreshOpen = (): void => {
       if (cancelled) return
-      const dirs = ['', ...expandedRef.current]
-      void Promise.all(dirs.map((dir) => loadDir(dir, { silent: true })))
+      void store.refreshOpen()
     }
     const schedule = (): void => {
       clearTimeout(debounce)
@@ -330,75 +269,18 @@ function FilesTree(props: {
       window.removeEventListener('focus', onFocus)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [cwd, loadDir, visible])
+  }, [store, visible])
 
   /** Warm a collapsed folder so the next expand paints with children ready. */
   const prefetchDir = useCallback((dir: string): void => {
-    if (childrenRef.current.has(dir) || loadingDirsRef.current.has(dir)) return
-    void loadDir(dir, { silent: true })
-  }, [loadDir])
+    store.prefetch(dir)
+  }, [store])
 
   const toggle = useCallback((dir: string): void => {
-    if (expandedRef.current.has(dir)) {
-      setExpanded((current) => {
-        const next = new Set(current)
-        next.delete(dir)
-        return next
-      })
-      return
-    }
-    // Cached → open immediately. Otherwise fetch first, then open — never
-    // paint an empty / "…" child slot under the folder (VS Code has no flash
-    // because local resolve finishes before the next frame).
-    if (childrenRef.current.has(dir)) {
-      setExpanded((current) => {
-        const next = new Set(current)
-        next.add(dir)
-        return next
-      })
-      return
-    }
-    void loadDir(dir, { silent: true }).then((ok) => {
-      // applyDir already wrote childrenRef; only bail on fetch failure.
-      if (!ok || !childrenRef.current.has(dir)) return
-      setExpanded((current) => {
-        const next = new Set(current)
-        next.add(dir)
-        return next
-      })
-    })
-  }, [loadDir])
+    void store.toggle(dir)
+  }, [store])
 
   const needle = query.trim()
-  // Host-side search whenever the query is non-empty (debounced lightly).
-  useEffect(() => {
-    if (needle.length === 0) {
-      setMatches(null)
-      setSearchBusy(false)
-      return
-    }
-    let cancelled = false
-    setSearchBusy(true)
-    setMatches(null)
-    const timer = setTimeout(() => {
-      void fetchTreeSearch(cwd, needle, showIgnored)
-        .then((value) => {
-          if (cancelled) return
-          if (!value.ok) {
-            setMatches([])
-            return
-          }
-          setMatches(value.entries.filter((entry) => entry.kind === 'file'))
-        })
-        .finally(() => {
-          if (!cancelled) setSearchBusy(false)
-        })
-    }, 200)
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [cwd, needle, showIgnored])
 
   const rootEntries = childrenByDir.get('')
   const searchList = matches ?? []
@@ -453,10 +335,10 @@ function FilesTree(props: {
           icon={<IconSearchOutline16 />}
           placeholder={t('files.searchPlaceholder')}
           value={query}
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onChange={(event) => store.setQuery(event.currentTarget.value)}
         />
       </div>
-      <div className="dsh-files-tree-list">
+      <div className="dsh-files-tree-list" data-dsh-codex-retained-scroll="">
         {error !== undefined ? (
           <div className="dsh-files-status is-error">{error}</div>
         ) : needle.length > 0 ? (
@@ -502,7 +384,7 @@ function FilesTree(props: {
       </div>
       {menuItems.length > 0 ? (
         <Menu
-          open={contextMenu !== null}
+          open={visible && contextMenu !== null}
           portal
           dense
           side="bottom"
@@ -519,7 +401,7 @@ function FilesTree(props: {
         />
       ) : null}
       {/* Keyed so a repeated action re-triggers the 4s dismiss timer. */}
-      {notice !== null ? (
+      {visible && notice !== null ? (
         <Toast key={notice.seq} text={notice.text} onDone={() => setNotice(null)} />
       ) : null}
     </div>
@@ -551,7 +433,7 @@ function TreeLevel(props: {
   onToggle: (dir: string) => void
   /** Hover warm-up so expand usually paints with children already cached. */
   onPrefetch: (dir: string) => void
-  onOpen: (state: PanelNavState) => void
+  onOpen: (state: FilesNavigationState) => void
   onContextMenu?: (event: ReactMouseEvent, path: string, kind: 'file' | 'dir') => void
   /**
    * Ancestor folder was gitignored — paint every descendant faded even if a
@@ -633,7 +515,7 @@ function TreeLevel(props: {
 function FileRow(props: {
   entry: GitTreeEntry
   depth: number
-  onOpen: (state: PanelNavState) => void
+  onOpen: (state: FilesNavigationState) => void
   onContextMenu?: (event: ReactMouseEvent, path: string, kind: 'file' | 'dir') => void
   /** Show the parent directory after the name (search results are flat). */
   hint?: boolean
@@ -682,7 +564,6 @@ function FileLoader(props: {
   cwd: string
   file: string
   sha?: string
-  t: (key: string) => string
   render: (
     data: GitGraphFileOk | null,
     busy: boolean,
@@ -720,7 +601,6 @@ function DiffLoader(props: {
   cwd: string
   file: string
   sha?: string
-  t: (key: string) => string
   render: (
     diff: GitFileDiff | null,
     busy: boolean,
@@ -839,6 +719,7 @@ function FilesPreview(props: {
   file: string
   data: GitGraphFileOk | null
   busy: boolean
+  visible: boolean
   t: (key: string) => string
   highlightThemeLight?: string
   highlightThemeDark?: string
@@ -859,7 +740,7 @@ function FilesPreview(props: {
   }
   if (data.encoding === 'base64' && data.mime !== undefined) {
     return (
-      <div className="dsh-files-image">
+      <div className="dsh-files-image" data-dsh-codex-retained-scroll="">
         <img
           src={'data:' + data.mime + ';base64,' + data.content}
           alt={basename(props.file)}
@@ -872,6 +753,7 @@ function FilesPreview(props: {
       <FilesTextPreview
         file={props.file}
         content={data.content}
+        visible={props.visible}
         t={t}
         highlightThemeLight={props.highlightThemeLight}
         highlightThemeDark={props.highlightThemeDark}
@@ -891,6 +773,7 @@ type TextView = 'preview' | 'source'
 function FilesTextPreview(props: {
   file: string
   content: string
+  visible: boolean
   t: (key: string) => string
   highlightThemeLight?: string
   highlightThemeDark?: string
@@ -913,6 +796,7 @@ function FilesTextPreview(props: {
         content={content}
         lang={langHintOf(file)}
         labels={viewLabels(t)}
+        visible={props.visible}
         themeKey={themeKey}
         path={file}
         onAddComment={props.onAddComment}
@@ -932,6 +816,7 @@ function FilesTextPreview(props: {
           content={content}
           lang={langHintOf(file)}
           labels={viewLabels(t)}
+          visible={props.visible}
           themeKey={themeKey}
           path={file}
           onAddComment={props.onAddComment}

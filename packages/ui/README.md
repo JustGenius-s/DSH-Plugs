@@ -7,6 +7,7 @@ DSH-native UI kit: `--dsw-*` theme tokens plus React primitives. Used by plugins
 | Surface | Contents |
 | --- | --- |
 | `.` | Components + `installTheme` / `setThemePreference` |
+| `./official-primitives` | DSH-only facade for the platform's content renderers |
 | `./theme.css` | Concatenated token sheets for Vite/CSS `@import` |
 | `./css-modules` | Build helper (`dshCssModules`) for plugin tsdown configs |
 
@@ -51,4 +52,6 @@ Build this package first (`pnpm --filter @just-genius/dsh-plugin-ui build`) so `
 
 ## Peer deps
 
-`react` and `react-dom` `>=18.2.0`.
+`react` and `react-dom` `>=18.2.0`. The DSH-only
+`./official-primitives` entry additionally expects the platform-materialized
+`@deepseek-ai/dsh-client-ui-primitives` version declared in `package.json`.

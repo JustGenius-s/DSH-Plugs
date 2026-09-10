@@ -341,37 +341,15 @@ window.__ModuleLoader__.load({
     const TAB_ORDER_MAP = '1'
     const TAB_ORDER_OTHER = '0'
 
-    // Host chrome hidden while the map is the active session view: the codex
-    // message rail and the right-side terminal/files panels. They are portalled
-    // into <body> by that plugin, so they are addressed by its own class names.
-    const CHROME_HIDE_SELECTORS = ['.dsh-codex-nav-rail', '.dsh-side-panels', '.dsh-side-panels-launcher']
+    // Host chrome hidden while the map is the active session view: only the
+    // Codex message rail overlays this conversation view. DSH's official right
+    // Sidebar owns its own layout and remains independently usable.
+    const CHROME_HIDE_SELECTORS = ['.dsh-codex-nav-rail']
     const CHROME_HIDE_CLASS = 'dsh-synapse-chrome-hidden'
     // The map has its own composer inside the canvas, so DSH's dock is removed
     // outright: display:none (unlike the panels above) reclaims its space.
     const COMPOSER_HIDE_SELECTORS = ['[data-composer-seat]']
     const COMPOSER_HIDE_CLASS = 'dsh-synapse-composer-hidden'
-    // visibility (not display:none) keeps those panels laid out and measurable,
-    // so their own width/position state survives while the map is open.
-    // dsh-codex squeezes #root with `margin-right: var(--dsh-side-panels-width)`
-    // to make room for its right panel. Hiding the panel with visibility only
-    // hides its pixels — the margin stays, so the map is left in a narrower
-    // box with an empty strip beside it. Zeroing the variable while the map is
-    // open gives the canvas the full width, and the previous value is restored
-    // on exit so the panel comes back exactly as it was.
-    const SIDE_PANELS_WIDTH_VAR = '--dsh-side-panels-width'
-    let savedSidePanelsWidth = null
-    const setSidePanelsSqueeze = squeezed => {
-      const root = document.documentElement
-      if (squeezed === false) {
-        root.style.setProperty(SIDE_PANELS_WIDTH_VAR, '0px')
-        return
-      }
-      // Restoring: put back the value captured before the map took over. If
-      // dsh-codex changed the width meanwhile, its own effect re-runs and
-      // overwrites this anyway, so a stale restore self-heals.
-      root.style.setProperty(SIDE_PANELS_WIDTH_VAR, savedSidePanelsWidth ?? '0px')
-      savedSidePanelsWidth = null
-    }
     const setChromeHidden = hidden => {
       const toggle = (selectors, className) => {
         for (const selector of selectors) {
@@ -383,16 +361,6 @@ window.__ModuleLoader__.load({
       }
       toggle(CHROME_HIDE_SELECTORS, CHROME_HIDE_CLASS)
       toggle(COMPOSER_HIDE_SELECTORS, COMPOSER_HIDE_CLASS)
-      // Capture the current squeeze BEFORE zeroing it, so leaving the map gives
-      // the panel its width back. The capture happens once: a MutationObserver
-      // re-asserts the hide on every DOM change, and saving again there would
-      // record the already-zeroed value and collapse the panel for good.
-      if (hidden === true) {
-        if (savedSidePanelsWidth === null) {
-          savedSidePanelsWidth = document.documentElement.style.getPropertyValue(SIDE_PANELS_WIDTH_VAR)
-        }
-        setSidePanelsSqueeze(false)
-      } else setSidePanelsSqueeze(true)
     }
     // The Synapse iframe only exists while the map tab is active, so the
     // in-canvas sidebar is hidden unconditionally — there is no host state to

@@ -1254,7 +1254,6 @@ function conversationCards(threads) {
         processCount: storedTurn.processCount ?? 0,
       })
     })
-    const liveReply = state.liveReplies.get(thread.dshSessionId)
     const latestTurn = turns.at(-1)
     if (liveReply?.running && latestTurn !== undefined && (latestTurn.answer === null || latestTurn.answer.pending === true)) latestTurn.answer = { kind: 'assistant', text: liveReply.text, pending: true, at: new Date().toISOString() }
     if (turns.length === 0) {

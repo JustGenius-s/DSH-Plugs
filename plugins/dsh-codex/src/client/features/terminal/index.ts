@@ -1,48 +1,48 @@
-import { createElement, useSyncExternalStore } from 'react'
-import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
+import { createElement, useEffect, useSyncExternalStore } from 'react'
+import type {
+  ClientContext,
+  SettingsScope,
+  SidebarRightTabDefinition,
+} from '@just-genius/dsh-plugin-runtime/client'
+import { IconTerminalColor16 } from '@just-genius/dsh-plugin-ui'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
-import type {} from '../side-panels/contract'
-import type { PanelNavState } from '../side-panels/service'
+import { bindEnabledSlot } from '../../bind-enabled-slot'
+import {
+  registerSidebarTab,
+  sidebarTabTitle,
+  type SidebarTabProps,
+} from '../../sidebar-right'
+import {
+  createSidebarTabKeepAliveRegistry,
+  SidebarTabKeepAliveMount,
+} from '../../sidebar-tab-keep-alive'
+import type { QuickActionsContribution } from '../quick-actions/contribution'
 import { WarpTerminalView } from './warp-terminal-view'
 import type { TerminalControllerStore } from './controller'
-import { createTerminalReference, type TerminalReferenceApi } from './reference'
-import { bindEnabledSlot } from '../../bind-enabled-slot'
+import {
+  TERMINAL_TAB_ID,
+  TERMINAL_TAB_KIND,
+  terminalControllerId,
+  terminalCwd,
+} from './contract'
+import { createTerminalLifetimeRegistry } from './lifetime'
+import { createTerminalReference } from './reference'
 
-const PANEL_SLOT = 'side.panel'
 const NS = 'settings.codex'
 
-interface TerminalPanelProps {
-  sessionId: string
-  cwd?: string
-  instanceKey?: string
-  state?: PanelNavState
-  t: (key: string) => string
-}
-
-function createTerminalPanel(scope: SettingsScope<DshCodexConfig>, controllerStore: TerminalControllerStore, terminalReference: TerminalReferenceApi) {
-  return function TerminalPanel({ sessionId, cwd, instanceKey, state, t }: TerminalPanelProps) {
-    const subscribe = (listener: () => void) => scope.subscribe(listener)
-    const getSnapshot = () => scope.getSnapshot()
-    const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
-    const config = { ...DEFAULT_CONFIG, ...snapshot.value }
-    // Side-panel instances share the conversation session id. Include the
-    // instance key so each terminal tab has an explicit resource identity.
-    const terminalId = instanceKey === undefined ? sessionId : sessionId + ':' + instanceKey
-
-    return createElement(WarpTerminalView, {
-      sessionId: terminalId,
-      cwd: state?.cwd ?? cwd,
-      terminalShell: config.terminalShell,
-      terminalScrollback: config.terminalScrollback,
-      terminalFontSize: config.terminalFontSize,
-      controllerStore,
-      controllerId: terminalId,
-      t,
-      onAddToContext: (text: string): boolean =>
-        terminalReference.insert(sessionId, text, t('context.chipLabel')),
-    })
+export function terminalTabDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
+  return {
+    id: TERMINAL_TAB_ID,
+    kind: TERMINAL_TAB_KIND,
+    priority: 'extension',
+    title: () => t('view.warpTerminal'),
+    guide: [{
+      order: 20,
+      title: () => t('view.warpTerminal'),
+      icon: IconTerminalColor16,
+    }],
   }
 }
 
@@ -51,33 +51,99 @@ export function createTerminalFeature(
   scope: SettingsScope<DshCodexConfig>,
   t: (key: CodexKey) => string,
   controllerStore: TerminalControllerStore,
+  quickActions: QuickActionsContribution,
 ): CodexFeature {
   return {
     id: 'terminal',
-    requires: ['sidePanels'],
     activate() {
       const terminalReference = createTerminalReference(ctx)
-      const TerminalPanel = createTerminalPanel(scope, controllerStore, terminalReference)
-      const disposeDescriptor = ctx.sidePanels.describe('terminal', { icon: 'terminal', multi: true })
-      const disposeInjection = ctx.slots.inject(PANEL_SLOT, () => bindEnabledSlot(
+      const disposeTab = bindEnabledSlot(
         scope,
         config => config.terminalEnabled,
-        () => ctx.slots.register(
-          {
-            name: PANEL_SLOT,
-            id: 'terminal',
-            order: 20,
-            locale: NS as never,
-            label: () => t('view.warpTerminal'),
-          },
-          TerminalPanel as never,
-        ),
-      ))
+        () => {
+          const lifetimes = createTerminalLifetimeRegistry()
+          const retainedTabs = createSidebarTabKeepAliveRegistry()
+
+          const TerminalTab = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            const sessionCwd = props.useSessions(state => state.byId[props.sessionId]?.cwd)
+            const cwd = terminalCwd(tab.navigation.params, sessionCwd)
+            const settings = useSyncExternalStore(
+              listener => scope.subscribe(listener),
+              () => scope.getSnapshot(),
+              () => scope.getSnapshot(),
+            )
+            const config = { ...DEFAULT_CONFIG, ...settings.value }
+            const terminalId = terminalControllerId(props.sessionId, tab.id)
+
+            useEffect(() => {
+              lifetimes.watch(tab.signal, terminalId)
+            }, [tab.signal, terminalId])
+
+            return createElement(SidebarTabKeepAliveMount, {
+              registry: retainedTabs,
+              sessionId: props.sessionId,
+              tabId: tab.id,
+              signal: tab.signal,
+              visible: tab.visible,
+              render: visible => createElement(
+                'div',
+                { className: 'dsh-codex-terminal-tab' },
+                createElement(
+                  'div',
+                  { className: 'dsh-codex-terminal-toolbar' },
+                  quickActions.render({
+                    sessionId: props.sessionId,
+                    terminalId,
+                    cwd,
+                    visible,
+                  }),
+                ),
+                createElement(WarpTerminalView, {
+                  sessionId: terminalId,
+                  cwd,
+                  terminalShell: config.terminalShell,
+                  terminalScrollback: config.terminalScrollback,
+                  terminalFontSize: config.terminalFontSize,
+                  controllerStore,
+                  controllerId: terminalId,
+                  visible,
+                  t: props.t,
+                  onAddToContext: (text: string): boolean =>
+                    terminalReference.insert(props.sessionId, text, t('context.chipLabel')),
+                }),
+              ),
+            })
+          }
+
+          // Titles remain mounted for every tab in the strip, including
+          // inactive bodies, making this the durable signal-to-Host bridge.
+          const TerminalTitle = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            const terminalId = terminalControllerId(props.sessionId, tab.id)
+            useEffect(() => {
+              lifetimes.watch(tab.signal, terminalId)
+            }, [tab.signal, terminalId])
+            return sidebarTabTitle(IconTerminalColor16, props.t('view.warpTerminal'))
+          }
+
+          const disposeRegistration = registerSidebarTab(
+            ctx,
+            terminalTabDefinition(t),
+            TerminalTab,
+            { locale: NS, title: TerminalTitle },
+          )
+          return () => {
+            disposeRegistration()
+            retainedTabs.dispose()
+            lifetimes.dispose()
+          }
+        },
+      )
 
       return () => {
+        disposeTab()
         terminalReference.dispose()
-        disposeDescriptor()
-        disposeInjection()
       }
     },
   }
