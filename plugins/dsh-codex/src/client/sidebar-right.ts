@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { createElement, Fragment, type ComponentType, type ReactNode } from 'react'
+import type { IconProps } from '@just-genius/dsh-plugin-ui'
 import type {
   ClientContext,
   SessionId,
@@ -20,6 +21,14 @@ export interface SidebarTabProps {
 }
 
 type SidebarTabComponent = (props: SidebarTabProps) => ReactNode
+
+/** Match the official title contract: a 16px glyph followed by the tab label. */
+export function sidebarTabTitle(
+  Icon: ComponentType<IconProps>,
+  label: ReactNode,
+): ReactNode {
+  return createElement(Fragment, null, createElement(Icon, { size: 16 }), label)
+}
 
 /**
  * The repo still compiles against the shared pre-0.1.5 SlotMap. Keep the one

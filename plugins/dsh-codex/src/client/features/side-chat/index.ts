@@ -6,11 +6,16 @@ import type {
   SettingsScope,
 } from '@just-genius/dsh-plugin-runtime/client'
 import type { IApiClient } from '@just-genius/dsh-plugin-runtime/client'
+import { IconSideChatColor16 } from '@just-genius/dsh-plugin-ui'
 import type { DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
-import { registerSidebarTab, type SidebarTabProps } from '../../sidebar-right'
+import {
+  registerSidebarTab,
+  sidebarTabTitle,
+  type SidebarTabProps,
+} from '../../sidebar-right'
 import {
   createSidebarTabKeepAliveRegistry,
   sidebarTabOccurrenceKey,
@@ -106,7 +111,10 @@ export function createSideChatFeature(
             const { tab } = props.useTabInfo()
             const key = sidebarTabOccurrenceKey(props.sessionId, tab.id)
             const state = useSideChatTabState(tabStates.acquire(key, tab.signal))
-            return state.title ?? props.t('view.sideChat')
+            return sidebarTabTitle(
+              IconSideChatColor16,
+              state.title ?? props.t('view.sideChat'),
+            )
           }
 
           const disposeRegistration = registerSidebarTab(

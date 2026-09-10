@@ -5,12 +5,19 @@ import type {
   SidebarRightTabActions,
   SidebarRightTabDefinition,
 } from '@just-genius/dsh-plugin-runtime/client'
-import { IconBranchOutline16 } from '@just-genius/dsh-plugin-ui'
+import {
+  IconGitChangesColor16,
+  IconGitGraphColor16,
+} from '@just-genius/dsh-plugin-ui'
 import type { DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
-import { registerSidebarTab, type SidebarTabProps } from '../../sidebar-right'
+import {
+  registerSidebarTab,
+  sidebarTabTitle,
+  type SidebarTabProps,
+} from '../../sidebar-right'
 import {
   createSidebarTabKeepAliveRegistry,
   SidebarTabKeepAliveMount,
@@ -35,8 +42,7 @@ export function gitChangesTabDefinition(t: (key: CodexKey) => string): SidebarRi
     guide: [{
       order: 30,
       title: () => t('view.gitGraph'),
-      description: () => t('sidebar.gitDescription'),
-      icon: IconBranchOutline16,
+      icon: IconGitChangesColor16,
     }],
   }
 }
@@ -144,17 +150,27 @@ export function createGitGraphFeature(
             })
           }
 
+          const GitChangesTitle = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            return sidebarTabTitle(IconGitChangesColor16, tab.title)
+          }
+
+          const GitGraphTitle = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            return sidebarTabTitle(IconGitGraphColor16, tab.title)
+          }
+
           const disposeChanges = registerSidebarTab(
             ctx,
             gitChangesTabDefinition(t),
             GitChangesTab,
-            { locale: NS },
+            { locale: NS, title: GitChangesTitle },
           )
           const disposeGraph = registerSidebarTab(
             ctx,
             gitGraphTabDefinition(t),
             GitGraphTab,
-            { locale: NS },
+            { locale: NS, title: GitGraphTitle },
           )
           return () => {
             disposeGraph()

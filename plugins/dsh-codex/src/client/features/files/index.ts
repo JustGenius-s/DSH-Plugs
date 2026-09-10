@@ -1,4 +1,4 @@
-import { createElement, useSyncExternalStore } from 'react'
+import { createElement, Fragment, useSyncExternalStore } from 'react'
 import type {
   ClientContext,
   SessionId,
@@ -6,12 +6,18 @@ import type {
   SidebarRightService,
   SidebarRightTabDefinition,
 } from '@just-genius/dsh-plugin-runtime/client'
-import { IconFolderOpenOutline16 } from '@just-genius/dsh-plugin-ui'
+import {
+  IconFolderColor16,
+} from '@just-genius/dsh-plugin-ui'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
-import { registerSidebarTab, type SidebarTabProps } from '../../sidebar-right'
+import {
+  registerSidebarTab,
+  sidebarTabTitle,
+  type SidebarTabProps,
+} from '../../sidebar-right'
 import {
   createSidebarTabKeepAliveRegistry,
   sidebarTabOccurrenceKey,
@@ -21,6 +27,7 @@ import { insertFileReference } from './add-to-chat'
 import { createFileReviewCommentApi } from './review-comment'
 import { setHighlightThemes } from './highlight'
 import { FilesPanel, type FilesPanelProps } from './files-panel'
+import { FileTabIcon } from './file-tab-icon'
 import { createFilesTabStateRegistry } from './tree-store'
 import {
   FILE_ADDRESS_PATTERN,
@@ -48,8 +55,7 @@ export function filesTabDefinition(t: (key: CodexKey) => string): SidebarRightTa
     guide: [{
       order: 10,
       title: () => t('view.files'),
-      description: () => t('sidebar.filesDescription'),
-      icon: IconFolderOpenOutline16,
+      icon: IconFolderColor16,
     }],
   }
 }
@@ -207,17 +213,32 @@ export function createFilesFeature(
             })
           }
 
+          const FilesTitle = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            return sidebarTabTitle(IconFolderColor16, tab.title)
+          }
+
+          const FileViewerTitle = (props: SidebarTabProps) => {
+            const { tab } = props.useTabInfo()
+            return createElement(
+              Fragment,
+              null,
+              createElement(FileTabIcon, { name: tab.title }),
+              tab.title,
+            )
+          }
+
           const disposeFilesPage = registerSidebarTab(
             ctx,
             filesTabDefinition(t),
             FilesPageTab,
-            { locale: NS },
+            { locale: NS, title: FilesTitle },
           )
           const disposeViewer = registerSidebarTab(
             ctx,
             fileViewerDefinition(t),
             FileViewerTab,
-            { locale: NS },
+            { locale: NS, title: FileViewerTitle },
           )
 
           return () => {

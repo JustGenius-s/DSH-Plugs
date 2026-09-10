@@ -89,11 +89,10 @@ export interface SidebarRightService {
   dock(paneId: string): void
 }
 
-/** A guide-page entry contributed by a right-Sidebar tab type. */
+/** A guide-page capsule contributed by a right-Sidebar tab type. */
 export interface SidebarRightGuideEntry {
   order: number
   title: () => string
-  description: () => string
   /** Kept structural so plugins need not import the official primitives package. */
   icon?: unknown
 }

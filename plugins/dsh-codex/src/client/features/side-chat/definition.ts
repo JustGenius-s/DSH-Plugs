@@ -1,5 +1,5 @@
 import type { SidebarRightTabDefinition } from '@just-genius/dsh-plugin-runtime/client'
-import { IconNewChatOutline16 } from '@just-genius/dsh-plugin-ui'
+import { IconSideChatColor16 } from '@just-genius/dsh-plugin-ui'
 import type { CodexKey } from '../../locales'
 
 export const SIDE_CHAT_TAB_KIND = 'dsh-codex-side-chat'
@@ -15,8 +15,7 @@ export function sideChatTabDefinition(t: (key: CodexKey) => string): SidebarRigh
     guide: [{
       order: 40,
       title: () => t('view.sideChat'),
-      description: () => t('sidebar.sideChatDescription'),
-      icon: IconNewChatOutline16,
+      icon: IconSideChatColor16,
     }],
   }
 }

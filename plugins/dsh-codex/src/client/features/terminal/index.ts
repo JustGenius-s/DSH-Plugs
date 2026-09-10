@@ -4,12 +4,16 @@ import type {
   SettingsScope,
   SidebarRightTabDefinition,
 } from '@just-genius/dsh-plugin-runtime/client'
-import { IconApiOutline14 } from '@just-genius/dsh-plugin-ui'
+import { IconTerminalColor16 } from '@just-genius/dsh-plugin-ui'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
-import { registerSidebarTab, type SidebarTabProps } from '../../sidebar-right'
+import {
+  registerSidebarTab,
+  sidebarTabTitle,
+  type SidebarTabProps,
+} from '../../sidebar-right'
 import {
   createSidebarTabKeepAliveRegistry,
   SidebarTabKeepAliveMount,
@@ -37,8 +41,7 @@ export function terminalTabDefinition(t: (key: CodexKey) => string): SidebarRigh
     guide: [{
       order: 20,
       title: () => t('view.warpTerminal'),
-      description: () => t('sidebar.terminalDescription'),
-      icon: IconApiOutline14,
+      icon: IconTerminalColor16,
     }],
   }
 }
@@ -121,7 +124,7 @@ export function createTerminalFeature(
             useEffect(() => {
               lifetimes.watch(tab.signal, terminalId)
             }, [tab.signal, terminalId])
-            return props.t('view.warpTerminal')
+            return sidebarTabTitle(IconTerminalColor16, props.t('view.warpTerminal'))
           }
 
           const disposeRegistration = registerSidebarTab(
