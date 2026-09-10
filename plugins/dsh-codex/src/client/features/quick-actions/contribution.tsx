@@ -1,17 +1,15 @@
 import { createElement, type ReactNode } from 'react'
 import type { ClientContext, SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
-import type { DshCodexConfig, QuickAction } from '../../../shared/config'
+import type { DshCodexConfig } from '../../../shared/config'
 import type { TerminalControllerStore } from '../terminal/controller'
-import { TERMINAL_TAB_KIND, terminalControllerId } from '../terminal/contract'
 import { QuickActionsControls } from './controls'
+import {
+  executeQuickAction,
+  type QuickActionsTerminalContext,
+} from './executor'
 import { createQuickActionsStore } from './store'
 
-export interface QuickActionsTerminalContext {
-  sessionId: string
-  terminalId: string
-  cwd?: string
-  visible?: boolean
-}
+export type { QuickActionsTerminalContext } from './executor'
 
 export interface QuickActionsContribution {
   render(context: QuickActionsTerminalContext): ReactNode
@@ -26,42 +24,10 @@ export function createQuickActionsContribution(
 ): QuickActionsContribution {
   const quickActions = createQuickActionsStore(scope)
 
-  const execute = async (
-    action: QuickAction,
-    initial: QuickActionsTerminalContext,
-  ): Promise<void> => {
-    let activeTerminal = initial
-
-    for (const step of action.steps) {
-      const command = step.command.trim()
-      if (command === '') throw new Error('quick action requires a non-empty command')
-
-      if (step.target === 'new') {
-        const cwd = activeTerminal.cwd?.trim() ?? ''
-        if (cwd === '') throw new Error('quick action new-target requires a cwd')
-        ctx.sidebarRight.openTab(TERMINAL_TAB_KIND, {
-          revealIfOpened: false,
-          params: { cwd },
-        })
-        const tab = ctx.sidebarRight.active()
-        if (tab === undefined || tab.kind !== TERMINAL_TAB_KIND) {
-          throw new Error('quick action failed to open a terminal')
-        }
-        activeTerminal = {
-          sessionId: initial.sessionId,
-          terminalId: terminalControllerId(initial.sessionId, tab.id),
-          cwd,
-        }
-      }
-
-      await (await controllers.waitFor(activeTerminal.terminalId)).run(command)
-    }
-  }
-
   return {
     render: context => createElement(QuickActionsControls, {
       store: quickActions,
-      execute: action => execute(action, context),
+      execute: action => executeQuickAction(ctx.sidebarRight, controllers, action, context),
       visible: context.visible,
       t,
     }),
