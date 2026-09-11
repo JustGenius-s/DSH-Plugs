@@ -6,3 +6,6 @@ dist/
 *.tsbuildinfo
 *.log
 .DS_Store
+
+# Debug scratch left in the repo root by the Cursor-proxy / notify bridge probes
+.tmp-*
