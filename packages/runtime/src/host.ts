@@ -48,11 +48,12 @@ export type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
 export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
+export { fallbackSessionTitle } from '@deepseek-ai/dsh-session-title'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
 export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 export { SessionId } from '@deepseek-ai/dsh-session'
-export type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
+export type { Session, SessionEvent, SessionHeader, UserMessage } from '@deepseek-ai/dsh-session'
 /**
  * Context handed to every `systemPrompt` provider at assembly time.
  *

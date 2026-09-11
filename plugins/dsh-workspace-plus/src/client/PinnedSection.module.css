@@ -1,0 +1,140 @@
+:global([role='tree'][data-workspace-plus-pin-layout]) {
+  display: flex;
+  flex-direction: column;
+}
+
+:global([role='tree'][data-workspace-plus-pin-layout] > *) {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+:global([data-workspace-plus-pin-layout] > [data-workspace-plus-pinned-group]) {
+  order: var(--workspace-plus-pin-order);
+}
+
+.heading {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+
+.divider {
+  height: 1px;
+  margin: 8px 4px;
+  background: var(--dsw-alias-border-l4);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin-block: 2px;
+  padding: 0 6px 0 8px;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.row:hover,
+.row[aria-selected='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.open {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.workspace,
+.title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  letter-spacing: 0;
+}
+
+.workspace {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.title {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.actions {
+  display: flex;
+  flex: 0 0 44px;
+  gap: 2px;
+  opacity: 0;
+}
+
+.row:hover .actions,
+.row:focus-within .actions {
+  opacity: 1;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.action:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.action:focus-visible,
+.open:focus-visible {
+  outline: 1px solid var(--dsw-alias-label-secondary);
+  outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}
