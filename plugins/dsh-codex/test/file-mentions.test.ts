@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
-  adoptsMentionClick,
   isPlainMentionGesture,
   mentionPathFromFacts,
+  mentionSidebarAddress,
 } from '../src/client/features/file-mentions/model'
 
 /**
- * The mention rules are the whole feature's decision surface: which click is
- * ours, and which file it names. Rendering is never exercised (AGENTS.md
- * forbids UI tests), so the element facts and the gesture are fed in by hand
- * here exactly as `conversation-dom.ts` reads them off a real click.
+ * The mention rules are the feature's whole decision surface: which click is
+ * ours, and where it lands. Nothing renders here (AGENTS.md forbids UI and DOM
+ * assertions) — the element facts and the gesture are fed in by hand exactly as
+ * `host-adapters/conversation-dom.ts` reads them off a real click.
  */
 
 /** The shape DSH's markdown sheet emits for one resolved mention. */
@@ -31,8 +31,8 @@ describe('mentionPathFromFacts', () => {
   it('keeps the absolute path the host put in the title', () => {
     expect(mentionPathFromFacts({
       ...MENTION_CHIP,
-      title: '/Users/someone/proj/repo/EFFORT-FIX-PLAN.md',
-    })).toBe('/Users/someone/proj/repo/EFFORT-FIX-PLAN.md')
+      title: '/Users/someone/proj/dsh-tencent/EFFORT-FIX-PLAN.md',
+    })).toBe('/Users/someone/proj/dsh-tencent/EFFORT-FIX-PLAN.md')
   })
 
   it('trims whitespace the attribute may carry', () => {
@@ -40,8 +40,8 @@ describe('mentionPathFromFacts', () => {
   })
 
   it('ignores a button that is not inside the inline-code wrapper', () => {
-    // Every other button in the transcript — delivery cards, tool rows, the
-    // action strip — is a button whose parent is not <code>.
+    // Delivery cards, tool rows, and the action strip are all buttons whose
+    // parent is not a <code>, so none of them may be claimed.
     expect(mentionPathFromFacts({ ...MENTION_CHIP, parentTag: 'DIV' })).toBeUndefined()
     expect(mentionPathFromFacts({ ...MENTION_CHIP, parentTag: '' })).toBeUndefined()
   })
@@ -81,16 +81,40 @@ describe('isPlainMentionGesture', () => {
   })
 })
 
-describe('adoptsMentionClick', () => {
-  it('adopts a plain click on a mention chip', () => {
-    expect(adoptsMentionClick({ path: 'docs/plan.md', plain: true })).toBe(true)
+describe('mentionSidebarAddress', () => {
+  const session = { sessionId: 'session-1', cwd: '/work/repo', plain: true } as const
+
+  it('resolves a relative chip path to the Session address the chat view uses', () => {
+    expect(mentionSidebarAddress({ ...session, path: 'docs/plan.md' }))
+      .toBe('dsh-resource://file/session/session-1/docs/plan.md')
   })
 
-  it('declines a plain click that is not on a mention chip', () => {
-    expect(adoptsMentionClick({ path: undefined, plain: true })).toBe(false)
+  it('keeps an absolute path inside the workspace as a Session address', () => {
+    // The reported case: a file the assistant delivered with an absolute path.
+    // Only a Session address is claimable by the official text preview.
+    expect(mentionSidebarAddress({
+      ...session,
+      cwd: '/Users/someone/proj/dsh-tencent',
+      path: '/Users/someone/proj/dsh-tencent/EFFORT-FIX-PLAN.md',
+    })).toBe('dsh-resource://file/session/session-1/EFFORT-FIX-PLAN.md')
+  })
+
+  it('declines a path outside the workspace so the host keeps the click', () => {
+    // It would become an `absolute` address, which the preview declines;
+    // suppressing the click there would swallow it into a dead chip.
+    expect(mentionSidebarAddress({ ...session, path: '/elsewhere/notes.md' })).toBeUndefined()
+  })
+
+  it('declines when the click is not on a mention chip', () => {
+    expect(mentionSidebarAddress({ ...session, path: undefined })).toBeUndefined()
   })
 
   it('declines a modified click even on a mention chip', () => {
-    expect(adoptsMentionClick({ path: 'docs/plan.md', plain: false })).toBe(false)
+    expect(mentionSidebarAddress({ ...session, path: 'docs/plan.md', plain: false })).toBeUndefined()
+  })
+
+  it('declines when there is no Session to resolve a relative path against', () => {
+    expect(mentionSidebarAddress({ ...session, path: 'docs/plan.md', sessionId: undefined }))
+      .toBeUndefined()
   })
 })

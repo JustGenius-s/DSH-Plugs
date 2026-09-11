@@ -2,7 +2,11 @@ import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import type { CodexFeature } from '../../core/feature-manager'
 import { startFileMentionSidebarOpen } from './controller'
 
-export { adoptsMentionClick, isPlainMentionGesture, mentionPathFromFacts } from './model'
+export {
+  isPlainMentionGesture,
+  mentionPathFromFacts,
+  mentionSidebarAddress,
+} from './model'
 export type { MentionChipFacts, MentionClickGesture } from './model'
 
 /**
