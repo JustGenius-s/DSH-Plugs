@@ -10,6 +10,32 @@ const CONVERSATION_SCROLL = '[data-conversation-scroll]'
 const CHAT_FLOW = '[data-chat-flow]'
 const CHAT_ANCHOR = '[data-chat-anchor-key]'
 
+/**
+ * The element facts a closing-prose file mention exposes to a click.
+ *
+ * DSH's markdown sheet renders a resolved mention as
+ * `<code><button title="<full path>">token</button></code>`: the button owns the
+ * click and carries the path, and the `<code>` it sits in is what tells a
+ * mention apart from a plain code span. Both are probed here so the menu of
+ * host DOM shapes stays in this module.
+ *
+ * @param target - the clicked node, before any nearest-ancestor search.
+ * @returns the facts the mention rules consume; empty tags when there is no button.
+ */
+export function mentionChipFacts(target: EventTarget | null): {
+  buttonTag: string
+  parentTag: string
+  title: string
+} {
+  const button = target instanceof Element ? target.closest('button') : null
+  if (button === null) return { buttonTag: '', parentTag: '', title: '' }
+  return {
+    buttonTag: button.tagName,
+    parentTag: button.parentElement?.tagName ?? '',
+    title: button.getAttribute('title') ?? '',
+  }
+}
+
 export function conversationScroll(root: ParentNode = document): HTMLElement | null {
   return root.querySelector<HTMLElement>(CONVERSATION_SCROLL)
 }

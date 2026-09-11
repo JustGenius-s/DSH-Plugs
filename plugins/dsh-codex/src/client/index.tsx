@@ -1,6 +1,7 @@
 import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import { getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { createCodexFeatureManager } from './core/feature-manager'
+import { createFileMentionsFeature } from './features/file-mentions'
 import { createFilesFeature } from './features/files'
 import { createLongMessageCollapseFeature } from './features/long-message-collapse'
 import { createFullSessionLoadFeature } from './features/full-session-load'
@@ -65,6 +66,7 @@ export function apply(ctx: ClientContext): void {
     createTerminalFeature(ctx, scope, t, terminalControllers, quickActions),
     createGitGraphFeature(ctx, scope, t),
     createFilesFeature(ctx, scope, t),
+    createFileMentionsFeature(ctx),
   ])
   ctx.effect(() => {
     features.activate()
