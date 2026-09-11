@@ -24,8 +24,12 @@ import type { TerminalControllerStore } from './controller'
 import {
   TERMINAL_TAB_ID,
   TERMINAL_TAB_KIND,
+  TERMINAL_RESOURCE_PATTERN,
+  isTerminalResourceAddress,
   terminalControllerId,
   terminalCwd,
+  terminalResourceAddressForTab,
+  terminalResourceControllerId,
 } from './contract'
 import { createTerminalLifetimeRegistry } from './lifetime'
 import { createTerminalReference } from './reference'
@@ -36,7 +40,9 @@ export function terminalTabDefinition(t: (key: CodexKey) => string): SidebarRigh
   return {
     id: TERMINAL_TAB_ID,
     kind: TERMINAL_TAB_KIND,
+    patterns: [TERMINAL_RESOURCE_PATTERN],
     priority: 'extension',
+    canOpen: isTerminalResourceAddress,
     title: () => t('view.warpTerminal'),
     guide: [{
       order: 20,
@@ -66,6 +72,11 @@ export function createTerminalFeature(
 
           const TerminalTab = (props: SidebarTabProps) => {
             const { tab } = props.useTabInfo()
+            const resourceAddress = terminalResourceAddressForTab(
+              tab.navigation.address,
+              tab.id,
+            )
+            const isResource = resourceAddress === tab.navigation.address
             const sessionCwd = props.useSessions(state => state.byId[props.sessionId]?.cwd)
             const cwd = terminalCwd(tab.navigation.params, sessionCwd)
             const settings = useSyncExternalStore(
@@ -74,11 +85,38 @@ export function createTerminalFeature(
               () => scope.getSnapshot(),
             )
             const config = { ...DEFAULT_CONFIG, ...settings.value }
+            // The controller registry is keyed by resource address, not tab id:
+            // `openResource` resolves navigation asynchronously, so whoever
+            // opened this terminal cannot read the tab id it will get. The
+            // address is minted by the opener and reported back here, so both
+            // sides agree on one key without reading post-navigation state.
+            // The PTY identity (below) stays tab-based: it owns the Host
+            // session token and the tab-close lifetime.
             const terminalId = terminalControllerId(props.sessionId, tab.id)
+            const controllerId = isResource
+              ? terminalResourceControllerId(props.sessionId, resourceAddress)
+              : terminalId
 
             useEffect(() => {
-              lifetimes.watch(tab.signal, terminalId)
-            }, [tab.signal, terminalId])
+              if (isResource) {
+                lifetimes.watch(tab.signal, terminalId)
+                return
+              }
+              tab.actions.openResource(resourceAddress, {
+                replaceTab: true,
+                revealIfOpened: false,
+                params: tab.navigation.params,
+              })
+            }, [
+              isResource,
+              resourceAddress,
+              tab.actions,
+              tab.navigation.params,
+              tab.signal,
+              terminalId,
+            ])
+
+            if (!isResource) return null
 
             return createElement(SidebarTabKeepAliveMount, {
               registry: retainedTabs,
@@ -94,7 +132,7 @@ export function createTerminalFeature(
                   { className: 'dsh-codex-terminal-toolbar' },
                   quickActions.render({
                     sessionId: props.sessionId,
-                    terminalId,
+                    terminalId: controllerId,
                     cwd,
                     visible,
                   }),
@@ -106,7 +144,7 @@ export function createTerminalFeature(
                   terminalScrollback: config.terminalScrollback,
                   terminalFontSize: config.terminalFontSize,
                   controllerStore,
-                  controllerId: terminalId,
+                  controllerId,
                   visible,
                   t: props.t,
                   onAddToContext: (text: string): boolean =>
@@ -121,9 +159,10 @@ export function createTerminalFeature(
           const TerminalTitle = (props: SidebarTabProps) => {
             const { tab } = props.useTabInfo()
             const terminalId = terminalControllerId(props.sessionId, tab.id)
+            const isResource = isTerminalResourceAddress(tab.navigation.address)
             useEffect(() => {
-              lifetimes.watch(tab.signal, terminalId)
-            }, [tab.signal, terminalId])
+              if (isResource) lifetimes.watch(tab.signal, terminalId)
+            }, [isResource, tab.signal, terminalId])
             return sidebarTabTitle(IconTerminalColor16, props.t('view.warpTerminal'))
           }
 

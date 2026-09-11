@@ -1,0 +1,9 @@
+{
+  "tapd": {
+    "type": "http",
+    "url": "https://example.invalid/mcp/tapd",
+    "headers": {
+      "Authorization": "Basic ${API_USER}:${API_PASSWORD}"
+    }
+  }
+}

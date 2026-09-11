@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { IconSearchOutline16, Input } from '@just-genius/dsh-plugin-ui'
 import { SettingsSection, StatusText } from '@just-genius/dsh-plugin-ui'
+import { AgentPacksSection, type AgentPacksSectionInjected } from './AgentPacksSection.tsx'
 import { InstalledSection, type InstalledSectionInjected } from './InstalledSection.tsx'
 import { MarketplaceSection, type MarketplaceSectionInjected } from './MarketplaceSection.tsx'
 import { UpdatesSection, type UpdatesSectionInjected } from './UpdatesSection.tsx'
@@ -11,6 +12,7 @@ export type PluginsTabInjected =
   & InstalledSectionInjected
   & UpdatesSectionInjected
   & MarketplaceSectionInjected
+  & AgentPacksSectionInjected
 
 type Translate = (key: PluginsKey) => string
 
@@ -21,18 +23,21 @@ export function PluginsTab(props: PluginsTabInjected & { t: Translate }) {
   const [installedRefresh, setInstalledRefresh] = useState(0)
   const [updatesRefresh, setUpdatesRefresh] = useState(0)
   const [marketRefresh, setMarketRefresh] = useState(0)
+  const [agentRefresh, setAgentRefresh] = useState(0)
 
   const onInstalled = useCallback(() => {
     setInstalledOpen(true)
     setInstalledRefresh((value) => value + 1)
     setUpdatesRefresh((value) => value + 1)
     setMarketRefresh((value) => value + 1)
+    setAgentRefresh((value) => value + 1)
   }, [])
 
   const onUpdated = useCallback(() => {
     setInstalledRefresh((value) => value + 1)
     setUpdatesRefresh((value) => value + 1)
     setMarketRefresh((value) => value + 1)
+    setAgentRefresh((value) => value + 1)
   }, [])
 
   return (
@@ -72,6 +77,20 @@ export function PluginsTab(props: PluginsTabInjected & { t: Translate }) {
           query={query}
           refreshKey={marketRefresh}
           onInstalled={onInstalled}
+          t={t}
+        />
+        <AgentPacksSection
+          loadAgentCatalog={injected.loadAgentCatalog}
+          loadAgentInstalled={injected.loadAgentInstalled}
+          installAgentPack={injected.installAgentPack}
+          runAgentAction={injected.runAgentAction}
+          configureAgentPack={injected.configureAgentPack}
+          setAgentAuth={injected.setAgentAuth}
+          startAgentOAuth={injected.startAgentOAuth}
+          pollAgentOAuth={injected.pollAgentOAuth}
+          getLocale={injected.getLocale}
+          query={query}
+          refreshKey={agentRefresh}
           t={t}
         />
       </div>

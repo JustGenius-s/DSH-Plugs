@@ -1,8 +1,8 @@
 /**
  * Side-chat transcript: renders the session's Chat presentation nodes with
  * the same primitives the main conversation uses (DisclosureRow Think/tool
- * rows, MarkdownText, MessageText, TerminalBlock). Side chats stay compact:
- * no details panel, no turn-tail actions, no queue chrome.
+ * rows, MarkdownText, projectUserText, TerminalBlock). Side chats stay
+ * compact: no details panel, no turn-tail actions, no queue chrome.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -50,12 +50,11 @@ import {
   CodeBlock,
   DiffBlock,
   JsonBlock,
-  MessageText,
   OfficialMarkdownText,
+  OfficialUserText,
   ReadBlock,
   SearchBlock,
   TerminalBlock,
-  type MarkdownCodeLabels,
 } from '@just-genius/dsh-plugin-ui/official-primitives'
 import {
   chatRowsOf,
@@ -75,11 +74,17 @@ import {
   type ToolVariant,
 } from './tool-presentation'
 import type { SideChatContextState } from '../../../shared/side-chat'
+import {
+  DIFF_LABELS,
+  MARKDOWN_LABELS,
+  jsonTruncatedLabel,
+  READ_LABELS,
+  SEARCH_LABELS,
+  TERMINAL_LABELS,
+} from './primitive-labels'
 
 /** Distance from the bottom (px) that still counts as "following". */
 const PIN_THRESHOLD = 48
-
-const CODE_LABELS: MarkdownCodeLabels = { copyLabel: '复制', copiedLabel: '已复制' }
 
 /** Characters of a tool result kept inline before it is cut with a marker. */
 const RESULT_PREVIEW_CHARS = 4000
@@ -287,7 +292,7 @@ function AssistantMarkdown({
             key={i}
             text={block.text}
             streaming={streaming}
-            codeLabels={CODE_LABELS}
+            labels={MARKDOWN_LABELS}
           />,
         )
         break
@@ -302,7 +307,13 @@ function AssistantMarkdown({
         break
       default:
         rendered.push(
-          <JsonBlock key={i} label="未知块" payload={block} defaultOpen={false} />,
+          <JsonBlock
+            key={i}
+            label="未知块"
+            payload={block}
+            defaultOpen={false}
+            truncatedLabel={jsonTruncatedLabel}
+          />,
         )
     }
   }
@@ -399,7 +410,7 @@ function ToolCard({ block }: { block: ToolCallBlock }) {
               output={output.length > 0 ? output : undefined}
               running={!settled}
               maxLines={Infinity}
-              labels={{ copy: '复制', copied: '已复制', running: '运行中', done: '完成', failed: '失败' }}
+              labels={TERMINAL_LABELS}
             />
           </div>
         ) : null}
@@ -441,6 +452,7 @@ function ToolResultViewBody({ view }: { view: ToolResultView }): ReactNode {
             totalLines={view.totalLines ?? lines.length}
             {...(view.lang === undefined ? {} : { lang: view.lang })}
             maxLines={SIDE_PANEL_MAX_LINES}
+            labels={READ_LABELS}
           />
         </div>
       )
@@ -460,6 +472,7 @@ function ToolResultViewBody({ view }: { view: ToolResultView }): ReactNode {
               total={total}
               truncated={truncated}
               maxLines={SIDE_PANEL_MAX_LINES}
+              labels={SEARCH_LABELS}
             />
           </div>
         )
@@ -477,6 +490,7 @@ function ToolResultViewBody({ view }: { view: ToolResultView }): ReactNode {
             total={total}
             truncated={truncated}
             maxLines={SIDE_PANEL_MAX_LINES}
+            labels={SEARCH_LABELS}
           />
         </div>
       )
@@ -493,6 +507,7 @@ function ToolResultViewBody({ view }: { view: ToolResultView }): ReactNode {
               newText: diff.newText ?? '',
             }))}
             maxLines={SIDE_PANEL_MAX_LINES}
+            labels={DIFF_LABELS}
           />
         </div>
       )
@@ -686,6 +701,13 @@ function UserBubble({
   const text = textOfContent(content)
   const hasImages = content.some(isImageBlock)
   if (text.length === 0 && !hasImages) return null
+  // `projectUserText` returns ReactNode, not a component: 0.1.5 replaced the
+  // old `MessageText` element with this projection, and calling it as JSX is
+  // what made every user bubble render as `undefined` (React #130).
+  // No session mentions are decorated: a side chat has no recall of its own,
+  // so passing labels here would highlight bare `@name` words the user typed
+  // as plain prose.
+  const projected = text.length > 0 ? OfficialUserText(text, []) : null
   return (
     <div className="dsh-codex-sidechat-user">
       <div
@@ -693,7 +715,7 @@ function UserBubble({
           ? 'dsh-codex-sidechat-user-bubble is-pending'
           : 'dsh-codex-sidechat-user-bubble'}
       >
-        {text.length > 0 && <MessageText text={text} />}
+        {projected}
         {hasImages && sessionId !== undefined && (
           <MessageImages
             blocks={content}
@@ -824,7 +846,12 @@ function ChatNodeView({
       return null
     default:
       return (
-        <JsonBlock label={node.kind} payload={node.data} defaultOpen={false} />
+        <JsonBlock
+          label={node.kind}
+          payload={node.data}
+          defaultOpen={false}
+          truncatedLabel={jsonTruncatedLabel}
+        />
       )
   }
 }

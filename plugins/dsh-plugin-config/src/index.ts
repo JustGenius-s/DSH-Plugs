@@ -15,14 +15,31 @@ import {
   UPDATE_PATH,
   type ActionRequest,
 } from './types.ts'
+import { AgentPackRuntime } from './agent/runtime.ts'
+import { registerAgentRoutes } from './agent/routes.ts'
 
 export const name = 'dsh-plugin-config'
 
-export const inject = [HOST_SERVICES.webServer, HOST_SERVICES.loader] as const
+export const inject = [
+  HOST_SERVICES.webServer,
+  HOST_SERVICES.loader,
+  HOST_SERVICES.tools,
+  HOST_SERVICES.systemPrompt,
+  HOST_SERVICES.credentials,
+] as const
 
 export function apply(ctx: Context) {
   const profile = createPluginProfileManager(ctx)
   ctx.provide('pluginProfile', profile)
+
+  const agentRuntime = new AgentPackRuntime(ctx)
+  registerAgentRoutes(ctx, agentRuntime)
+  void agentRuntime.bootstrap().catch((error) => {
+    ctx.logger?.warn?.(`[dsh-plugin-config] agent pack bootstrap failed: ${error}`)
+  })
+  ctx.effect(() => () => {
+    void agentRuntime.disposeAll()
+  }, 'dsh-plugin-config: agent runtime dispose')
 
   ctx.effect(
     () => ctx.webServer.register({

@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-codex",
-  "description": "Codex-style navigation plus Side Chat, Terminal, and Git extensions for the DeepSeek Harness sidebar",
+  "description": "Side Chat, Terminal, and Git extensions for the DeepSeek Harness sidebar",
   "version": "0.2.1",
   "publishConfig": {
     "access": "public"

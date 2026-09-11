@@ -1,0 +1,11 @@
+{
+  "name": "supabase",
+  "version": "0.1.0",
+  "description": "Connect Cursor-style Supabase MCP tools and Postgres best-practice skills to the DSH agent.",
+  "displayName": {
+    "en": "Supabase",
+    "zh": "Supabase"
+  },
+  "keywords": ["supabase", "postgres", "database", "mcp", "oauth"],
+  "auth": "oauth"
+}

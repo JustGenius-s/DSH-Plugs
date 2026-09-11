@@ -14,7 +14,6 @@ const KNOWN_FOLDERS: Record<string, string> = {
   '@just-genius/dsh-model-custom-ex': 'dsh-model-custom-ex',
   '@just-genius/dsh-plugin-config': 'dsh-plugin-config',
   '@just-genius/dsh-sync': 'dsh-sync',
-  '@just-genius/dsh-wechat-chat': 'dsh-wechat-chat',
   '@just-genius/dsh-whale-girl': 'dsh-whale-girl',
   '@just-genius/dsh-session-navigator': 'session-navigator',
 }

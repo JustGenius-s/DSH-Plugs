@@ -30,7 +30,7 @@ DSH-Plugs/
 ├── docs/                    # 调研文档（非包）
 ├── package.json             # 根 workspace：脚本与共享工具链
 ├── packages/                # workspace 共享层（runtime、ui）
-├── plugins/                 # workspace 插件（12 个一级目录）
+├── plugins/                 # workspace 插件（11 个一级目录）
 ├── pnpm-lock.yaml           # lockfile（不解析传递树）
 ├── pnpm-workspace.yaml      # 成员 glob
 ├── public/                  # 静态截图（非包）
@@ -67,7 +67,7 @@ packages:
 
 | 路径 | 是否 workspace 包 |
 | --- | --- |
-| `plugins/*`（12 个一级目录） | 是 |
+| `plugins/*`（11 个一级目录） | 是 |
 | `packages/*`（`runtime`、`ui`） | 是 |
 | `apps/` | **否**（空目录，无 `package.json`） |
 | `public/` | **否** |
@@ -131,7 +131,7 @@ packages:
 | --- | --- |
 | `plugins/dsh-codex` | 无覆盖 |
 | `dsh-desktop-update`、`dsh-multi-repo` | `types: ["node"]` |
-| `dsh-model-custom-ex`、`dsh-wechat-chat` | `allowImportingTsExtensions: true` |
+| `dsh-model-custom-ex` | `allowImportingTsExtensions: true` |
 | `dsh-debug-mode`、`dsh-memory`、`dsh-plugin-config`、`dsh-sync`、`dsh-whale-girl`、`packages/runtime`、`packages/ui` | `allowImportingTsExtensions` + `types: ["node"]` |
 | `dsh-flow` | 上两项 + 再写 `jsx: "react-jsx"` |
 
@@ -139,7 +139,7 @@ packages:
 
 ## 2. 源码区二级树
 
-### 2.1 `plugins/`（12 个一级目录，一行一个）
+### 2.1 `plugins/`（11 个一级目录，一行一个）
 
 ```
 plugins/
@@ -153,11 +153,10 @@ plugins/
 ├── dsh-plugin-config/
 ├── dsh-synapse/          # 例外：根目录 JS
 ├── dsh-sync/
-├── dsh-wechat-chat/
 └── dsh-whale-girl/
 ```
 
-标准 TS 插件（除 synapse 外 11 个）一级可见项：`package.json`、`tsconfig.json`、`tsdown.config.ts`、`tsdown.client.config.ts`、`cordis.patch.yml`、`src/`、`README.md`。构建后另有被 gitignore 的 `lib/`。
+标准 TS 插件（除 synapse 外 10 个）一级可见项：`package.json`、`tsconfig.json`、`tsdown.config.ts`、`tsdown.client.config.ts`、`cordis.patch.yml`、`src/`、`README.md`。构建后另有被 gitignore 的 `lib/`。
 
 标准插件 `src/` 二级（以 `dsh-memory` 为典型）：
 
@@ -226,7 +225,7 @@ Client 三项（缺一须标明）：① `package.json` 有 `dsh.client`；② b
 
 | 目录 | npm name | version | 类型 | 有 client | host 入口 | browser 入口 | build | typecheck | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `dsh-codex` | `@just-genius/dsh-codex` | `0.2.1` | plugin | 是：① `dsh.client.platform=web` + inject；② `src/client/index.tsx` → `lib/client.js` + `exports["./client"]`；③ `cordis.patch.yml` | `main`/`exports["."]` → `lib/index.js`（`src/index.ts`） | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另 export `./side-panels`；host tsdown 双 entry |
+| `dsh-codex` | `@just-genius/dsh-codex` | `0.2.1` | plugin | 是：① `dsh.client.platform=web` + inject；② `src/client/index.tsx` → `lib/client.js` + `exports["./client"]`；③ `cordis.patch.yml` | `main`/`exports["."]` → `lib/index.js`（`src/index.ts`） | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
 | `dsh-debug-mode` | `@just-genius/dsh-debug-mode` | `0.1.0` | plugin | 是（同上三项，入口 `src/client/index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-desktop-update` | `@just-genius/dsh-desktop-update` | `0.2.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-flow` | `@just-genius/dsh-flow` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
@@ -236,10 +235,9 @@ Client 三项（缺一须标明）：① `package.json` 有 `dsh.client`；② b
 | `dsh-plugin-config` | `@just-genius/dsh-plugin-config` | `0.1.0` | plugin | 是；browser 源为 `src/client/index.ts` | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 入口扩展名变体 |
 | `dsh-synapse` | `dsh-synapse` | `0.4.1` | plugin | 是：① `dsh.client`（`platform=web`，`immediately=false`）；② **根** `client.js` + `exports["./client"]`；③ `cordis.patch.yml`。**无** `lib/client.js` | **根** `index.js`（`main`） | **根** `client.js` | `node --check` 三文件 | **无** | **例外**：无 scope、无 `src/`、无 runtime、无 typecheck/watch/clean、无 tsdown |
 | `dsh-sync` | `@just-genius/dsh-sync` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
-| `dsh-wechat-chat` | `@just-genius/dsh-wechat-chat` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-whale-girl` | `@just-genius/dsh-whale-girl` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 三 tsdown + 拷 overlay.html | `tsc --noEmit` | 另有 `tsdown.overlay.config.ts`、`assets/`、`lib/overlay.js` |
 
-标准插件 `files` 一般为：`lib/index.js`、`lib/client.js`、`cordis.patch.yml`、`lib/**/*.d.ts`。codex 另含 `lib/side-panels.js`；whale-girl 另含 `lib/overlay.js`、`lib/overlay.html`、`assets`、`LICENSE`。
+标准插件 `files` 一般为：`lib/index.js`、`lib/client.js`、`cordis.patch.yml`、`lib/**/*.d.ts`。whale-girl 另含 `lib/overlay.js`、`lib/overlay.html`、`assets`、`LICENSE`。
 
 ### 3.3 README 有、磁盘无（幽灵包）
 
@@ -276,10 +274,9 @@ README「Plugins」列出 13 个名字（含两个幽灵）；未点名 synapse�
 | `dsh-plugin-config` | 设置 → 插件：已装清单、npm 更新、awesome-dsh-plugin 市场 |
 | `dsh-synapse` | 可视化、非线性会话工作区 |
 | `dsh-sync` | GitHub Device Flow + secret Gist 同步设置与 web 插件列表 |
-| `dsh-wechat-chat` | 微信风格聊天气泡与会话列表 |
 | `dsh-whale-girl` | 桌面宠物：浏览器页内伴侣，DSH-Desktop 则为 OS overlay |
 
-### 4.1 `dsh.*` 与脚本（标准 11 包共性）
+### 4.1 `dsh.*` 与脚本（标准 10 包共性）
 
 - `dsh.client.platform`: `"web"`
 - `dsh.client.inject`: 官方 client 包名列表（各包不同；均为 `@deepseek-ai/*` 字符串，**不是** npm 依赖）
@@ -335,14 +332,14 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 | `./css-modules` | `lib/css-modules.js`（tsdown 的 `dshCssModules` 助手） |
 | `./package.json` | `package.json` |
 
-**插件侧常见位置**：11 个标准插件均把 ui 放在 **`devDependencies`**（`workspace:*`），不是 `dependencies`。与 README「插件构建期打包」一致。其中 10 个的 `tsdown.client.config.ts` `alwaysBundle` 含 `@just-genius/dsh-plugin-ui`；**`dsh-wechat-chat` 例外**：client 配置只 `alwaysBundle` runtime，源码不 import ui 组件，仅在 tsdown 配置里 `import { dshCssModules } from '@just-genius/dsh-plugin-ui/css-modules'`。
+**插件侧常见位置**：10 个标准插件均把 ui 放在 **`devDependencies`**（`workspace:*`），不是 `dependencies`。与 README「插件构建期打包」一致，且其 `tsdown.client.config.ts` 的 `alwaysBundle` 均含 `@just-genius/dsh-plugin-ui`。
 
 ### 5.3 插件 → runtime / ui
 
 | 依赖 | 插件 |
 | --- | --- |
-| runtime `workspace:*`（`dependencies`） | 除 synapse 外全部 11 个 |
-| ui `workspace:*`（`devDependencies`） | 同上 11 个 |
+| runtime `workspace:*`（`dependencies`） | 除 synapse 外全部 10 个 |
+| ui `workspace:*`（`devDependencies`） | 同上 10 个 |
 | **两者都没有** | **仅 `dsh-synapse`** |
 
 额外 npm 依赖（非共享层）：codex（shiki / xterm / markdown-it 等）、flow（`reactflow`）、sync 与 whale-girl（`zod`）。标准插件普遍 `peerDependencies`：`react` / `react-dom` `^18.2.0`（model-custom-ex、plugin-config 只 peer `react`）。
@@ -372,7 +369,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 
 | 包 | `build` | `watch` | `typecheck` | `clean` |
 | --- | --- | --- | --- | --- |
-| 11 个标准插件 | 有 | 有 | 有 | 有 |
+| 10 个标准插件 | 有 | 有 | 有 | 有 |
 | `dsh-synapse` | 有（`node --check`，非 tsdown） | **无** | **无** | **无** |
 | `packages/runtime` | 有 | **无** | 有 | 有 |
 | `packages/ui` | 有 | **无** | 有 | 有 |
@@ -426,7 +423,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 3. 否则必须是平台种子 `react` / `react-dom`，或 `dsh.client.inject` 里声明的包名（`packageNameOf`：scoped 取前两段）。
 4. 若 `require` 了 `@deepseek-ai/dsh-client-ui-primitives` 或其 `/client` 子路径 → 报「official primitives must be replaced by `@just-genius/dsh-plugin-ui`」。
 
-当前磁盘上 11 个标准包均已有 `lib/client.js`。其中 10 个的 `require` 仅为 `react` / `react-dom` / `react/jsx-runtime`。**`dsh-multi-repo`** 额外有 `require("@just-genius/dsh-plugin-runtime/client")`：共享包泄漏。其 `tsdown.client.config.ts` 只 `alwaysBundle` 了 ui，没有 runtime。
+当前磁盘上 10 个标准包均已有 `lib/client.js`。其中 9 个的 `require` 仅为 `react` / `react-dom` / `react/jsx-runtime`。**`dsh-multi-repo`** 额外有 `require("@just-genius/dsh-plugin-runtime/client")`：共享包泄漏。其 `tsdown.client.config.ts` 只 `alwaysBundle` 了 ui，没有 runtime。
 
 `dsh-multi-repo` 的 inject 含 `@deepseek-ai/dsh-client-ui-primitives`，但当前 `lib/client.js` **没有** `require` 该 specifier，故不会触发「必须用 ui 替换」那条。synapse 源码会 `require` primitives，但被本脚本跳过。
 
@@ -445,7 +442,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 
 | 变体 | 包 | 事实 |
 | --- | --- | --- |
-| 额外 host entry / export | `dsh-codex` | host tsdown entry 含 `side-panels: src/side-panels.ts`；`exports["./side-panels"]` → `lib/side-panels.js` |
+| `test/` | `dsh-codex` | `test/*.test.ts` + `"test": "pnpm exec vitest run --config ./vitest.config.ts"` |
 | 额外 overlay 配置 | `dsh-whale-girl` | `tsdown.overlay.config.ts`：`src/client/overlay.ts` → IIFE `lib/overlay.js`；build 还 `cp src/overlay.html` |
 | `test/` | `dsh-flow` | `test/*.test.ts` + `"test": "pnpm -w exec vitest run --config ./vitest.config.ts"` |
 | `test/`（JS 例外包） | `dsh-synapse` | `test/*.test.js` + `"test": "node --test test/*.test.js"` |
@@ -453,7 +450,6 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 | 纯 JS 根入口 | `dsh-synapse` | 无 tsdown；`index.js` / `client.js` / `app.js` |
 | client 入口 `.ts` 而非 `.tsx` | `dsh-model-custom-ex`、`dsh-plugin-config` | `tsdown.client` entry 为 `src/client/index.ts` |
 | 未 alwaysBundle runtime | `dsh-multi-repo` | client 配置仅 bundle ui；当前 `lib/client.js` 泄漏 runtime require |
-| 未 alwaysBundle ui | `dsh-wechat-chat` | client 配置只 bundle runtime；ui 仅作 tsdown 的 `dshCssModules` 构建插件 |
 | host `platform: 'neutral'` | `dsh-codex`、`dsh-desktop-update`、`dsh-model-custom-ex` | 其余标准插件 host 为 `'node'` |
 | 包内 scripts | `dsh-codex` | `scripts/test-watch.mjs`、`scripts/probe-commit.ts` |
 | 共享包单配置 | runtime / ui | 各自一份 `tsdown.config.ts`（ui 为双 entry 数组：组件库 + css-modules） |
@@ -529,13 +525,11 @@ plugins/<folder>/
 ### 8.4 合法变体（必须单独成行）
 
 1. **额外 tsdown**：`dsh-whale-girl` 的 overlay 配置。
-2. **额外 export**：`dsh-codex` 的 `./side-panels`。
-3. **`test/`**：`dsh-flow`、`dsh-synapse`。
-4. **`assets/`**：`dsh-whale-girl`。
-5. **纯 JS 根入口**：`dsh-synapse`（无 `src/`、无 `@just-genius` scope、无 runtime、无 typecheck）。
+2. **`test/`**：`dsh-codex`、`dsh-flow`、`dsh-synapse`。
+3. **`assets/`**：`dsh-whale-girl`。
+4. **纯 JS 根入口**：`dsh-synapse`（无 `src/`、无 `@just-genius` scope、无 runtime、无 typecheck）。
 6. **client 入口 `.ts`**：`dsh-model-custom-ex`、`dsh-plugin-config`。
 7. **包内辅助 scripts**：`dsh-codex/scripts/`（`test-watch.mjs`、`probe-commit.ts`；后者直 `require` 官方包，依赖合约会失败）。
-8. **未 alwaysBundle ui**：`dsh-wechat-chat`。
 9. **host platform `neutral`**：`dsh-codex`、`dsh-desktop-update`、`dsh-model-custom-ex`。
 
 ### 8.5 新建插件最低对齐清单

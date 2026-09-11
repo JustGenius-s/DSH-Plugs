@@ -25,7 +25,7 @@ import type {
 } from './connection'
 import { SideChatComposer } from './composer'
 import { SideChatTranscript } from './transcript'
-import { describeError, type ErrorDetail } from '../side-panels/error-boundary'
+import { describeError, type ErrorDetail } from '../../error-boundary'
 import type { SideChatContextState } from '../../../shared/side-chat'
 
 /** Minimal observable the panel subscribes to (structural subset). */

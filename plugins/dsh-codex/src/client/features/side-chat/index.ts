@@ -21,7 +21,7 @@ import {
   sidebarTabOccurrenceKey,
   SidebarTabKeepAliveMount,
 } from '../../sidebar-tab-keep-alive'
-import { SidePanelErrorBoundary } from '../side-panels/error-boundary'
+import { SidePanelErrorBoundary } from '../../error-boundary'
 import {
   connectionApiOf,
   conversationAttachmentsOf,

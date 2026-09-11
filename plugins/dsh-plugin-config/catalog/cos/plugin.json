@@ -1,0 +1,24 @@
+{
+  "name": "cos",
+  "version": "0.1.0",
+  "description": "Tencent Cloud Object Storage (COS) agent pack — coming soon.",
+  "displayName": { "en": "Tencent COS", "zh": "腾讯云 COS" },
+  "keywords": ["tencent", "cos", "storage"],
+  "auth": "headers",
+  "headerSecrets": ["SecretId", "SecretKey"],
+  "comingSoon": true,
+  "variables": {
+    "BUCKET": {
+      "type": "string",
+      "label": { "zh": "存储桶", "en": "Bucket" },
+      "description": "COS bucket name",
+      "required": true
+    },
+    "REGION": {
+      "type": "string",
+      "label": { "zh": "地域", "en": "Region" },
+      "description": "COS region",
+      "required": true
+    }
+  }
+}

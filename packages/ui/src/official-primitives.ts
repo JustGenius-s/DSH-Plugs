@@ -6,9 +6,15 @@ export {
   DiffBlock,
   JsonBlock,
   MarkdownText as OfficialMarkdownText,
-  MessageText,
+  projectUserText as OfficialUserText,
   ReadBlock,
   SearchBlock,
   TerminalBlock,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-export type { MarkdownCodeLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+export type {
+  DiffBlockLabels,
+  MarkdownLabels,
+  ReadBlockLabels,
+  SearchBlockLabels,
+  TerminalBlockLabels,
+} from '@deepseek-ai/dsh-client-ui-primitives'

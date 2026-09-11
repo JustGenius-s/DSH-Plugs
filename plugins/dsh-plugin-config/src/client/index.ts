@@ -18,6 +18,20 @@ import { PluginsTab, type PluginsTabInjected } from './PluginsTab.tsx'
 import { en, zh, type PluginsKey } from './locales.ts'
 import type { InventoryEntry } from './match.ts'
 import { requestJson, postJson } from '@just-genius/dsh-plugin-runtime/client'
+import {
+  AGENT_ACTION_PATH,
+  AGENT_AUTH_PATH,
+  AGENT_CATALOG_PATH,
+  AGENT_CONFIGURE_PATH,
+  AGENT_INSTALL_PATH,
+  AGENT_INSTALLED_PATH,
+  AGENT_OAUTH_START_PATH,
+  AGENT_OAUTH_STATUS_PATH,
+  type AgentOAuthStartResult,
+  type AgentOAuthStatusResult,
+  type AgentOpResult,
+} from '../agent/types.ts'
+import type { AgentCatalogEntry, AgentInstalledEntry } from './AgentPacksSection.tsx'
 
 declare module '@just-genius/dsh-plugin-runtime/client' {
   interface PluginLocaleNamespaceMap {
@@ -111,6 +125,85 @@ export function apply(ctx: ClientContext): void {
     }
   }
 
+  const loadAgentCatalog = async (): Promise<AgentCatalogEntry[]> => {
+    const value = await requestJson<{ ok: boolean; plugins?: AgentCatalogEntry[]; error?: string }>(AGENT_CATALOG_PATH)
+    if (!value.ok || !Array.isArray(value.plugins)) {
+      throw new Error(value.error ?? 'agent catalog failed')
+    }
+    return value.plugins
+  }
+
+  const loadAgentInstalled = async (): Promise<AgentInstalledEntry[]> => {
+    const value = await requestJson<{ ok: boolean; plugins?: AgentInstalledEntry[]; error?: string }>(AGENT_INSTALLED_PATH)
+    if (!value.ok || !Array.isArray(value.plugins)) {
+      throw new Error(value.error ?? 'agent installed failed')
+    }
+    return value.plugins
+  }
+
+  const installAgentPack = async (pluginId: string): Promise<AgentOpResult> => {
+    try {
+      return await postJson<AgentOpResult>(AGENT_INSTALL_PATH, { pluginId })
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const runAgentAction = async (
+    action: 'enable' | 'disable' | 'uninstall',
+    pluginId: string,
+  ): Promise<AgentOpResult> => {
+    try {
+      return await postJson<AgentOpResult>(AGENT_ACTION_PATH, { action, pluginId })
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const configureAgentPack = async (
+    pluginId: string,
+    variables: Record<string, string | boolean | number>,
+  ): Promise<AgentOpResult> => {
+    try {
+      return await postJson<AgentOpResult>(AGENT_CONFIGURE_PATH, { pluginId, variables })
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const setAgentAuth = async (payload: {
+    pluginId: string
+    token?: string
+    secrets?: Record<string, string>
+    logout?: boolean
+  }): Promise<AgentOpResult> => {
+    try {
+      return await postJson<AgentOpResult>(AGENT_AUTH_PATH, payload)
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const startAgentOAuth = async (pluginId: string): Promise<AgentOAuthStartResult> => {
+    try {
+      return await postJson<AgentOAuthStartResult>(AGENT_OAUTH_START_PATH, { pluginId })
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  const pollAgentOAuth = async (pluginId: string): Promise<AgentOAuthStatusResult> => {
+    try {
+      return await postJson<AgentOAuthStatusResult>(AGENT_OAUTH_STATUS_PATH, { pluginId })
+    } catch (error) {
+      return {
+        ok: false,
+        status: 'error',
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
   const injected = (): PluginsTabInjected => ({
     loadInventory,
     runAction,
@@ -119,6 +212,14 @@ export function apply(ctx: ClientContext): void {
     loadCatalog,
     listInstalled,
     installPlugin,
+    loadAgentCatalog,
+    loadAgentInstalled,
+    installAgentPack,
+    runAgentAction,
+    configureAgentPack,
+    setAgentAuth,
+    startAgentOAuth,
+    pollAgentOAuth,
     getLocale: () => ctx.locale.getLocale().active,
   })
 

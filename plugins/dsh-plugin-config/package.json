@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-plugin-config",
-  "description": "Settings → Plugins: installed inventory, npm updates, and the awesome-dsh-plugin marketplace in one tab",
+  "description": "Settings \u2192 Plugins: installed inventory, npm updates, and the awesome-dsh-plugin marketplace in one tab",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public"
@@ -34,17 +34,20 @@
     }
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
+    "catalog/**",
     "cordis.patch.yml",
-    "lib/**/*.d.ts"
+    "lib/**/*.d.ts",
+    "lib/client.js",
+    "lib/index.js"
   ],
   "dependencies": {
-    "@just-genius/dsh-plugin-runtime": "workspace:*"
+    "@just-genius/dsh-plugin-runtime": "workspace:*",
+    "@just-genius/dsh-agent-plugin": "workspace:*"
   },
   "scripts": {
     "build": "tsdown -c tsdown.config.ts && tsdown -c tsdown.client.config.ts",
     "watch": "tsdown -c tsdown.config.ts --watch & tsdown -c tsdown.client.config.ts --watch",
+    "test": "pnpm -w exec vitest run --config plugins/dsh-plugin-config/vitest.config.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf lib"
   },

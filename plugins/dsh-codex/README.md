@@ -1,11 +1,9 @@
 # @just-genius/dsh-codex
 
-Codex-style additions for DSH: message navigation, turn collapsing, Side Chat, Terminal, and Git mounted into DSH's official right Sidebar — all configurable from one Codex settings section. Files use DSH's built-in implementation by default.
+Codex-style additions for DSH: Side Chat, Terminal, and Git mounted into DSH's official right Sidebar — all configurable from one Codex settings section. Files use DSH's built-in implementation by default.
 
 ## Features
 
-- **Navigator** — a vertical tick rail on the transcript, one tick per user message, with active highlight and smooth jump.
-- **Worked-for collapsing** — completed turns that ran tools collapse into a Cursor-style **Worked for** row; the closing assistant message stays visible as the conclusion.
 - **Official Sidebar extensions** — Side Chat, Terminal, Changes, and Graph register through `ctx.sidebarRightTabs`; DSH owns Files, file previews, the tab strip, splits, floating panes, fullscreen mode, resizing, and collapse/expand controls.
 - **Files** — the workspace tree stays with DSH. `dsh-resource://file/**` uses DSH's viewer by default; the retained Codex preview can be enabled from Codex settings for comparison.
 - **Retained custom tabs** — DSH's disposable active-body seat only hosts a mount point. Side Chat, Terminal, Changes, Graph, and the optional custom Files bodies keep their actual React roots and DOM across tab switches, pane moves, dock/float changes, and Session switches; their official `tab.signal` is the sole tab-close lifetime.

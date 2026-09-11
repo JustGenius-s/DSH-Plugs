@@ -1,6 +1,10 @@
 # @just-genius/dsh-plugin-config
 
-**Settings → 插件管理** as one tab: manage what is installed, then browse and install from [awesome-dsh-plugin](https://awesome-dsh-plugin.com/).
+**Settings → 插件管理** as one tab for **two plugin kinds**:
+
+1. **Cordis plugins** — npm packages from awesome-dsh-plugin / profile (`dsh plugin add`). Install/enable/disable/uninstall writes the web profile; usually needs a DSH restart.
+2. **Agent capability packs** — data packs (manifest + hosted MCP + skills) from the builtin catalog under `catalog/`. Install only copies files to `~/.dsh/agent-plugins/installed/<name>/` and updates `~/.dsh/agent-plugins/state.json`. **Enable** connects remote MCP and registers tools/skills into the live agent; **disable** detaches runtime but keeps credentials; **uninstall** detaches, deletes the install dir, clears state, and removes that pack's credentials.
+
 
 ## Features
 
@@ -13,7 +17,9 @@
 
 | Source | Role |
 | --- | --- |
-| `src/index.ts` | Host: inventory / action / catalog / install routes |
+| `src/index.ts` | Host: Cordis inventory/action/catalog/install + Agent pack routes |
+| `src/agent/*` | Agent pack activator (MCP mount / auth / uninstall cleanup) |
+| `catalog/*` | Builtin Agent pack catalog (Supabase, CloudBase, …) |
 | `src/inventory.ts`, `src/classify.ts`, `src/actions.ts`, `src/profile.ts` | Installed inventory + profile mutations |
 | `src/market/*` | Awesome catalog fetch, install validation |
 | `src/client/PluginsTab.tsx` | Single tab UI (search + installed + market) |

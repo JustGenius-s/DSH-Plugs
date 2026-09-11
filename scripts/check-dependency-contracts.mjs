@@ -5,9 +5,12 @@ const VERSION_EXCEPTIONS = new Map([
   // This legacy package has not published in the 0.1.1 line. New code should
   // use SettingsSchemaService from dsh-client-ui-settings instead.
   ['@deepseek-ai/dsh-client-schema-form', '0.1.0-rc.7'],
-  // DSH 0.1.5 currently seeds this content-primitives release. Plugins reach
-  // it only through packages/ui; direct official imports remain forbidden.
-  ['@deepseek-ai/dsh-client-ui-primitives', '0.1.0-rc.6'],
+  // The version DSH actually seeds at runtime. It MUST track the seed, not a
+  // convenient older tag: pinning 0.1.0-rc.6 while 0.1.5-rc.1 is seeded let
+  // `MessageText` (deleted in 0.1.5) and the new required `labels` props pass
+  // a clean typecheck and then throw React #130 in the browser. Plugins reach
+  // this package only through packages/ui; direct imports remain forbidden.
+  ['@deepseek-ai/dsh-client-ui-primitives', '0.1.5-rc.1'],
 ])
 const errors = []
 
