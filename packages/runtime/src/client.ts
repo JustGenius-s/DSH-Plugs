@@ -34,7 +34,9 @@ import type {
   ConversationNodeDefinition,
   ISessions,
   IWorkspaces,
+  SessionId,
   SnapshotStore,
+  WorkspaceId,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   SessionEvent as CoreSessionEvent,
@@ -163,6 +165,16 @@ export interface PluginSlotMap {}
 
 /** Plugin-owned conversation node payloads bridged into the chat renderer. */
 export interface PluginChatNodeDataMap {}
+
+/** DSH 0.1.2 split directory/navigation commands out of `workspaces`. */
+export interface UiWorkspaceFace {
+  openWorkspace?: (workspaceId: WorkspaceId) => Promise<void>
+  openSession?: (sessionId: SessionId) => void
+  forkSession?: (sessionId: SessionId) => Promise<void>
+  startSession?: (workspaceId?: WorkspaceId) => void
+  archiveSession?: (sessionId: SessionId) => Promise<void>
+  pickDirectory: () => Promise<string | null>
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context extends PluginClientContext {}
@@ -386,6 +398,7 @@ export const CLIENT_SERVICES = {
   slots: 'slots',
   settingsScope: 'settingsScope',
   settingsSchema: 'settingsSchema',
+  uiWorkspace: 'uiWorkspace',
   workspaces: 'workspaces',
 } as const
 
@@ -423,6 +436,13 @@ export function getSessions(ctx: ClientContext): ISessions {
 
 export function getWorkspaces(ctx: ClientContext): IWorkspaces {
   return ctx.workspaces
+}
+
+/** Resolve the Workspace UI service introduced by the 0.1.2 service split. */
+export function getUiWorkspace(ctx: ClientContext): UiWorkspaceFace {
+  const service = ctx.get(CLIENT_SERVICES.uiWorkspace) as UiWorkspaceFace | undefined
+  if (service === undefined) throw new Error('uiWorkspace service is unavailable')
+  return service
 }
 
 export function getSettingsScope(ctx: ClientContext): SettingsScopeBinder {

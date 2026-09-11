@@ -14,12 +14,14 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-title'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-workspace'
 
 // Preserve service declaration merging in the public host declaration file.
 export type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -33,12 +35,14 @@ export type {} from '@deepseek-ai/dsh-host-webserver'
 export type {} from '@deepseek-ai/dsh-jobs'
 export type {} from '@deepseek-ai/dsh-llm'
 export type {} from '@deepseek-ai/dsh-session'
+export type {} from '@deepseek-ai/dsh-session-persistence'
 export type {} from '@deepseek-ai/dsh-session-title'
 export type {} from '@deepseek-ai/dsh-settings'
 export type {} from '@deepseek-ai/dsh-storage-domain'
 export type {} from '@deepseek-ai/dsh-subprocess'
 export type {} from '@deepseek-ai/dsh-system-prompt'
 export type {} from '@deepseek-ai/dsh-tools'
+export type {} from '@deepseek-ai/dsh-workspace'
 
 export { symbols } from '@deepseek-ai/cordis'
 export type { Context } from '@deepseek-ai/cordis'
@@ -48,11 +52,12 @@ export type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
 export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
+export { fallbackSessionTitle } from '@deepseek-ai/dsh-session-title'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
 export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 export { SessionId } from '@deepseek-ai/dsh-session'
-export type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
+export type { Session, SessionEvent, SessionHeader, UserMessage } from '@deepseek-ai/dsh-session'
 /**
  * Context handed to every `systemPrompt` provider at assembly time.
  *
@@ -84,12 +89,14 @@ export const HOST_SERVICES = {
   pluginProfile: 'pluginProfile',
   sessionTitle: 'sessionTitle',
   sessions: 'sessions',
+  sessionPersistence: 'sessionPersistence',
   settings: 'settings',
   storageDomain: 'storageDomain',
   subprocess: 'subprocess',
   systemPrompt: 'systemPrompt',
   tools: 'tools',
   webServer: 'webServer',
+  workspaceRegistry: 'workspaceRegistry',
 } as const
 
 export class HttpInputError extends Error {
