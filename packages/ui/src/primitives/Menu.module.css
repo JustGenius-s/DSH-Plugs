@@ -23,6 +23,12 @@
   border-radius: 8px;
   background: var(--dsw-specific-sidebar-fill);
   box-shadow: var(--dsw-shadow-lv3);
+  /* Portaled menus land on document.body, so a list opened near the window's
+     top edge sits inside the shell's drag band; without this the menu items
+     would start a window move instead of reporting a click. See
+     Modal.module.css for the occluding-rect contract. */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
   /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens. The
      declaration sits on the card rather than on `.scrollable .viewport`
      because the elevation is a property of this surface, and the custom

@@ -12,6 +12,10 @@ const CSS = `
   box-sizing:border-box;
   padding:8px 0 10px;
   background:var(--dsw-alias-bg-base);
+  /* Body portal parked over the conversation; the shell's top drag band runs
+     under it, so the pin must occlude that band where it overlaps. */
+  -webkit-app-region:no-drag;
+  app-region:no-drag;
 }
 .dsh-codex-sticky-bubble{
   pointer-events:auto;
@@ -156,6 +160,8 @@ const CSS = `
   padding:32px;
   background:color-mix(in srgb, #000 72%, transparent);
   cursor:zoom-out;
+  -webkit-app-region:no-drag;
+  app-region:no-drag;
 }
 .dsh-codex-sticky-preview img{
   max-width:min(92vw, 1200px);
