@@ -64,13 +64,6 @@ export async function copyText(text: string): Promise<boolean> {
   return await writeClipboard(text)
 }
 
-/** Deep link used by "copy link" and "open in new window". */
-export function deepLink(sessionId: string): string {
-  const url = new URL(window.location.href)
-  url.searchParams.set('session', sessionId)
-  return url.toString()
-}
-
 export async function renameWorkspace(ctx: ClientCtx, id: string, title: string): Promise<void> {
   await workspacesOf(ctx).rename(asWorkspaceId(id), title)
 }

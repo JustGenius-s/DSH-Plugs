@@ -54,6 +54,12 @@ test('the destructive delete actions are not offered at all', () => {
   )
 })
 
+test('copy-link, copy-title, and open-window session actions are not offered', () => {
+  assert.equal(features.FEATURE_KEYS.includes('sessionCopyLink'), false)
+  assert.equal(features.FEATURE_KEYS.includes('sessionCopyTitle'), false)
+  assert.equal(features.FEATURE_KEYS.includes('sessionOpenWindow'), false)
+})
+
 test('a corrupt stored blob falls back to all-on instead of all-off', () => {
   installStorage({ 'dsh-workspace-plus:v1': '{not json' })
   return import(`../src/client/features.ts?corrupt=${Math.random()}`).then((m) => {

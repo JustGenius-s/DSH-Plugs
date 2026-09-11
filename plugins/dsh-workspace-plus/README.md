@@ -33,9 +33,6 @@ Chat / 会话行（双击或右键）：
 - 标记未读 / 已读
 - 归档会话
 - 分叉会话
-- 复制会话链接
-- 复制会话标题
-- 在新窗口中打开
 - 打开所在目录
 
 当前 DSH 兼容层还会补齐冷会话缺失的标题投影：优先恢复日志中的正式标题，
@@ -80,6 +77,5 @@ dsh plugin --profile web add ./plugins/dsh-workspace-plus
 - 置顶由宿主写入 `~/.dsh/workspace-plus/pins.json`（遵循 `DSH_HOME`），不依赖浏览器端口；会话置顶是快捷副本，不改写 DSH 原有排序。
 - localStorage（`dsh-workspace-plus:v1`，数据格式 v2）保留置顶缓存、菜单开关与未读状态。首次连接且宿主尚无置顶文件时自动导入当前浏览器的旧置顶；已有宿主数据（包括明确取消全部置顶后的空列表）优先，旧缓存不会复活已取消的置顶。
 - 置顶按单条操作保存，启动恢复期间的操作会排队重放，暂时失败会重试；仅在宿主确认写入后提示成功。旧桌面端其他端口下的缓存需要先恢复到宿主，不能由新端口直接读取。
-- 新窗口打开依赖 `?session=<id>` 深链。
 - 插件 HTTP 路由复用 DSH Connection 的 Host/Origin 与浏览器 Cookie 认证。
 - 从 `dsh-multi-repo` 升级：首次加载会把 `~/.dsh/multi-repo/projects.json` 复制成新存储，旧文件保留不动。

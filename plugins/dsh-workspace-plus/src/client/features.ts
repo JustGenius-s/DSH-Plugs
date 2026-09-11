@@ -23,9 +23,6 @@ export type FeatureKey =
   | 'sessionUnread'
   | 'sessionArchive'
   | 'sessionFork'
-  | 'sessionCopyLink'
-  | 'sessionCopyTitle'
-  | 'sessionOpenWindow'
   | 'sessionOpenFolder'
 
 export const FEATURE_KEYS: readonly FeatureKey[] = [
@@ -42,9 +39,6 @@ export const FEATURE_KEYS: readonly FeatureKey[] = [
   'sessionUnread',
   'sessionArchive',
   'sessionFork',
-  'sessionCopyLink',
-  'sessionCopyTitle',
-  'sessionOpenWindow',
   'sessionOpenFolder',
 ]
 
@@ -66,9 +60,6 @@ export const SESSION_KEYS: readonly FeatureKey[] = [
   'sessionUnread',
   'sessionArchive',
   'sessionFork',
-  'sessionCopyLink',
-  'sessionCopyTitle',
-  'sessionOpenWindow',
   'sessionOpenFolder',
 ]
 
@@ -88,9 +79,6 @@ const DEFAULT_FEATURES: FeatureMap = {
   sessionUnread: true,
   sessionArchive: true,
   sessionFork: true,
-  sessionCopyLink: true,
-  sessionCopyTitle: true,
-  sessionOpenWindow: true,
   sessionOpenFolder: true,
 }
 

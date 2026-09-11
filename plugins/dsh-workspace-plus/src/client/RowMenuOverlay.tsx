@@ -4,7 +4,6 @@ import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import {
   archiveSession,
   copyText,
-  deepLink,
   findSession,
   findWorkspace,
   forkSession,
@@ -291,15 +290,6 @@ function sessionEntries(
   if (on(flags, 'sessionFork')) {
     entries.push({ id: 'fork', label: t('menu.fork') })
   }
-  if (on(flags, 'sessionCopyLink')) {
-    entries.push({ id: 'copyLink', label: t('menu.copyLink') })
-  }
-  if (on(flags, 'sessionCopyTitle')) {
-    entries.push({ id: 'copyTitle', label: t('menu.copyTitle') })
-  }
-  if (on(flags, 'sessionOpenWindow')) {
-    entries.push({ id: 'openWindow', label: t('menu.openWindow') })
-  }
   if (on(flags, 'sessionOpenFolder')) {
     entries.push({
       id: 'openFolder',
@@ -427,18 +417,6 @@ async function dispatch(
     }
     case 'fork': {
       await forkSession(ctx, row.id)
-      return
-    }
-    case 'copyLink': {
-      flash((await copyText(deepLink(row.id))) ? 'toast.linkCopied' : 'toast.copyFailed')
-      return
-    }
-    case 'copyTitle': {
-      flash((await copyText(sessionTitle)) ? 'toast.titleCopied' : 'toast.copyFailed')
-      return
-    }
-    case 'openWindow': {
-      window.open(deepLink(row.id), '_blank')
       return
     }
     case 'openFolder': {

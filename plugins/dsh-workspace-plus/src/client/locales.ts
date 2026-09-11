@@ -45,9 +45,6 @@ export type WorkspacePlusKey =
   | 'settings.sessionUnread'
   | 'settings.sessionArchive'
   | 'settings.sessionFork'
-  | 'settings.sessionCopyLink'
-  | 'settings.sessionCopyTitle'
-  | 'settings.sessionOpenWindow'
   | 'settings.sessionOpenFolder'
   // ── Workspace row menu ──
   | 'menu.pin'
@@ -63,9 +60,6 @@ export type WorkspacePlusKey =
   | 'menu.markRead'
   | 'menu.archive'
   | 'menu.fork'
-  | 'menu.copyLink'
-  | 'menu.copyTitle'
-  | 'menu.openWindow'
   | 'menu.openFolder'
   | 'menu.renameSession'
   // ── Feedback ──
@@ -74,8 +68,6 @@ export type WorkspacePlusKey =
   | 'toast.markedUnread'
   | 'toast.markedRead'
   | 'toast.pathCopied'
-  | 'toast.linkCopied'
-  | 'toast.titleCopied'
   | 'toast.copyFailed'
   | 'toast.removed'
   | 'toast.archived'
@@ -127,9 +119,6 @@ export const zh: Record<WorkspacePlusKey, string> = {
   'settings.sessionUnread': '标记未读 / 已读',
   'settings.sessionArchive': '归档会话',
   'settings.sessionFork': '分叉会话',
-  'settings.sessionCopyLink': '复制链接',
-  'settings.sessionCopyTitle': '复制标题',
-  'settings.sessionOpenWindow': '在新窗口中打开',
   'settings.sessionOpenFolder': '打开所在目录',
 
   'menu.pin': '置顶',
@@ -144,9 +133,6 @@ export const zh: Record<WorkspacePlusKey, string> = {
   'menu.markRead': '标记为已读',
   'menu.archive': '归档会话',
   'menu.fork': '分叉会话',
-  'menu.copyLink': '复制会话链接',
-  'menu.copyTitle': '复制会话标题',
-  'menu.openWindow': '在新窗口中打开',
   'menu.openFolder': '打开所在目录',
   'menu.renameSession': '重命名会话',
 
@@ -155,8 +141,6 @@ export const zh: Record<WorkspacePlusKey, string> = {
   'toast.markedUnread': '已标记为未读',
   'toast.markedRead': '已标记为已读',
   'toast.pathCopied': '路径已复制',
-  'toast.linkCopied': '链接已复制',
-  'toast.titleCopied': '标题已复制',
   'toast.copyFailed': '复制失败',
   'toast.removed': '已从列表中移除',
   'toast.archived': '已归档',
@@ -209,9 +193,6 @@ export const en: Record<WorkspacePlusKey, string> = {
   'settings.sessionUnread': 'Mark unread / read',
   'settings.sessionArchive': 'Archive session',
   'settings.sessionFork': 'Fork session',
-  'settings.sessionCopyLink': 'Copy link',
-  'settings.sessionCopyTitle': 'Copy title',
-  'settings.sessionOpenWindow': 'Open in new window',
   'settings.sessionOpenFolder': 'Open containing folder',
 
   'menu.pin': 'Pin',
@@ -226,9 +207,6 @@ export const en: Record<WorkspacePlusKey, string> = {
   'menu.markRead': 'Mark as read',
   'menu.archive': 'Archive session',
   'menu.fork': 'Fork session',
-  'menu.copyLink': 'Copy session link',
-  'menu.copyTitle': 'Copy session title',
-  'menu.openWindow': 'Open in new window',
   'menu.openFolder': 'Open containing folder',
   'menu.renameSession': 'Rename session',
 
@@ -237,8 +215,6 @@ export const en: Record<WorkspacePlusKey, string> = {
   'toast.markedUnread': 'Marked as unread',
   'toast.markedRead': 'Marked as read',
   'toast.pathCopied': 'Path copied',
-  'toast.linkCopied': 'Link copied',
-  'toast.titleCopied': 'Title copied',
   'toast.copyFailed': 'Copy failed',
   'toast.removed': 'Removed from list',
   'toast.archived': 'Archived',
