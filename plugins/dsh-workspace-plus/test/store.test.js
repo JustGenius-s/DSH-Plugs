@@ -10,7 +10,7 @@
 
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -50,6 +50,12 @@ function writeLegacy(content) {
   const dir = join(home, 'multi-repo')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'projects.json'), content)
+}
+
+function fixture(name) {
+  const path = join(home, 'fixtures', name)
+  mkdirSync(path, { recursive: true })
+  return realpathSync(path)
 }
 
 test('the legacy multi-repo store is copied forward on first load', () => {
@@ -99,54 +105,101 @@ test('a new-store file using the legacy `projects` key still loads', () => {
 })
 
 test('binding the same primary twice replaces rather than duplicates', () => {
+  const primary = fixture('primary')
+  const b = fixture('b')
+  const c = fixture('c')
   const first = store.bindBinding({
-    root: '/tmp/primary',
-    repos: [{ name: 'a', path: '/tmp/primary' }, { name: 'b', path: '/tmp/b' }],
+    root: primary,
+    repos: [{ name: 'a', path: primary }, { name: 'b', path: b }],
   })
   store.bindBinding({
-    root: '/tmp/primary',
-    repos: [{ name: 'a', path: '/tmp/primary' }, { name: 'c', path: '/tmp/c' }],
+    root: primary,
+    repos: [{ name: 'a', path: primary }, { name: 'c', path: c }],
   })
 
   const all = store.listBindings()
   assert.equal(all.length, 1, 'one binding per primary')
-  assert.equal(first.root, '/tmp/primary')
+  assert.equal(first.root, primary)
 })
 
 test('deleting a binding removes it even when matched by primary path', () => {
+  const primary = fixture('primary')
+  const b = fixture('b')
   store.bindBinding({
-    root: '/tmp/primary',
-    repos: [{ name: 'a', path: '/tmp/primary' }, { name: 'b', path: '/tmp/b' }],
+    root: primary,
+    repos: [{ name: 'a', path: primary }, { name: 'b', path: b }],
   })
-  assert.equal(store.deleteBinding('/tmp/primary'), true)
+  assert.equal(store.deleteBinding(primary), true)
   assert.deepEqual(store.listBindings(), [])
-  assert.equal(store.deleteBinding('/tmp/primary'), false, 'a second delete reports miss')
+  assert.equal(store.deleteBinding(primary), false, 'a second delete reports miss')
 })
 
 test('a session cwd inside any bound folder resolves to that binding', () => {
+  const primary = fixture('primary')
+  const b = fixture('b')
   store.bindBinding({
-    root: '/tmp/primary',
-    repos: [{ name: 'a', path: '/tmp/primary' }, { name: 'b', path: '/tmp/b' }],
+    root: primary,
+    repos: [{ name: 'a', path: primary }, { name: 'b', path: b }],
   })
-  assert.equal(store.findBindingForCwd('/tmp/primary')?.root, '/tmp/primary')
-  assert.equal(store.findBindingForCwd('/tmp/b')?.root, '/tmp/primary')
+  assert.equal(store.findBindingForCwd(primary)?.root, primary)
+  assert.equal(store.findBindingForCwd(b)?.root, primary)
   assert.equal(store.findBindingForCwd('/tmp/unrelated'), null)
 })
 
 test('bindings are listed newest first', async () => {
-  store.bindBinding({ root: '/tmp/one', repos: [{ name: 'one', path: '/tmp/one' }] })
+  const one = fixture('one')
+  const two = fixture('two')
+  store.bindBinding({ root: one, repos: [{ name: 'one', path: one }] })
   // A distinct mtime: `updatedAt` is the only ordering input.
   const later = await import(`../src/store.ts?later=${Math.random()}`)
-  later.bindBinding({ root: '/tmp/two', repos: [{ name: 'two', path: '/tmp/two' }] })
+  later.bindBinding({ root: two, repos: [{ name: 'two', path: two }] })
 
   const roots = later.listBindings().map((b) => b.root)
-  assert.deepEqual(roots, ['/tmp/two', '/tmp/one'])
+  assert.deepEqual(roots, [two, one])
 })
 
 test('the store file is written atomically, never left as .tmp', () => {
-  store.bindBinding({ root: '/tmp/primary', repos: [{ name: 'a', path: '/tmp/primary' }] })
+  const primary = fixture('primary')
+  store.bindBinding({ root: primary, repos: [{ name: 'a', path: primary }] })
   const dir = join(home, 'workspace-plus')
   const leftovers = readFileSync(join(dir, 'bindings.json'), 'utf8')
   assert.match(leftovers, /"bindings"/)
   assert.equal(existsSync(join(dir, 'bindings.json.tmp')), false)
+})
+
+test('changing the primary replaces the previous binding identity', () => {
+  const first = fixture('first')
+  const second = fixture('second')
+  store.bindBinding({
+    root: first,
+    repos: [{ name: 'first', path: first }, { name: 'second', path: second }],
+  })
+  store.bindBinding({
+    root: second,
+    previousRoot: first,
+    primaryPath: second,
+    repos: [{ name: 'first', path: first }, { name: 'second', path: second }],
+  })
+  assert.deepEqual(store.listBindings().map((binding) => binding.root), [second])
+})
+
+test('new bindings reject relative and missing folders', () => {
+  assert.throws(() => store.bindBinding({
+    root: 'relative',
+    repos: [{ name: 'relative', path: 'relative' }],
+  }), /invalid absolute path/)
+  assert.throws(() => store.bindBinding({
+    root: join(home, 'missing'),
+    repos: [{ name: 'missing', path: join(home, 'missing') }],
+  }), /not a directory/)
+})
+
+test('the selected primary must be one of the validated folders', () => {
+  const listed = fixture('listed')
+  const other = fixture('other')
+  assert.throws(() => store.bindBinding({
+    root: other,
+    primaryPath: other,
+    repos: [{ name: 'listed', path: listed }],
+  }), /primary folder must be listed/)
 })

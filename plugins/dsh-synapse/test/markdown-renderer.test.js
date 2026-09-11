@@ -51,10 +51,19 @@ test('falls back to a table when pipe rows omit the delimiter', async () => {
   const attached = renderMarkdown('说明如下\n来源 | 工作区\n--- | ---\n会话地图 | DSH-Plugs')
   assert.match(attached, /<p>说明如下<\/p>/)
   assert.match(attached, /<th>来源<\/th>/)
-  // A list item is structural: it must not be absorbed as a table row.
+  // A list item is structural: it ends the paragraph above it. The table that
+  // follows belongs to the ITEM (it is not indented past the marker, so it is
+  // a sibling block of the item's own body, rendered inside it).
   const beforeList = renderMarkdown('- 项目\n| A | B |\n| --- | --- |\n| 1 | 2 |')
-  assert.match(beforeList, /<li>项目<\/li>/)
+  assert.match(beforeList, /<li>/)
+  assert.match(beforeList, /项目/)
   assert.match(beforeList, /md-table-wrap/)
+  // An indented table is the item's own content, not a sibling of the list.
+  const indented = renderMarkdown('- 项目\n\n  | A | B |\n  | --- | --- |\n  | 1 | 2 |')
+  assert.match(indented, /<li>.*md-table-wrap.*<\/li>/s)
+  // A table at column 0 after a finished list stays a top-level block.
+  const afterList = renderMarkdown('- 项目\n\n| A | B |\n| --- | --- |\n| 1 | 2 |')
+  assert.match(afterList, /<\/ul><div class="md-table-wrap">/)
 })
 
 test('sidebar tables scroll instead of wrapping every character', async () => {
@@ -118,4 +127,108 @@ test('note body keeps the reply and records the map source', async () => {
   assert.match(body, /会话：会话地图/)
   assert.match(body, /轮次：第 1 轮/)
   assert.match(body, /会话 ID：sess-1/)
+})
+
+/** Extract the markdown helpers so they can be unit-tested directly. */
+async function loadMarkdownHelpers() {
+  const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
+  const start = source.indexOf('const escapeHtml')
+  const end = source.indexOf('function canvasConnectors')
+  const context = { globalThis: {} }
+  vm.createContext(context)
+  vm.runInContext(`${source.slice(start, end)};globalThis.renderMarkdown = renderMarkdown;globalThis.inlineMarkdown = inlineMarkdown;globalThis.safeLinkUrl = safeLinkUrl`, context)
+  return context.globalThis
+}
+
+test('renders blockquotes, including the blocks nested inside them', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  // A blank quote line starts a new paragraph; without one the lines are a
+  // single lazy continuation, which is what CommonMark specifies.
+  const result = renderMarkdown('> 注意这一点\n>\n> 还有这一点')
+  assert.match(result, /<blockquote><p>注意这一点<\/p><p>还有这一点<\/p><\/blockquote>/)
+  const lazy = renderMarkdown('> 注意这一点\n> 还有这一点')
+  assert.match(lazy, /<blockquote><p>注意这一点\n还有这一点<\/p><\/blockquote>/)
+
+  // A quote is a document in miniature: headings, lists and code inside it are
+  // parsed rather than flattened into one line of text.
+  const nested = renderMarkdown('> ## 小结\n>\n> - 第一项\n> - 第二项')
+  assert.match(nested, /<blockquote><h2 id="md-h-1">小结<\/h2>/)
+  assert.match(nested, /<li><p>第一项<\/p><\/li>/)
+  // Nested quotes keep their own level.
+  const deep = renderMarkdown('> 外层\n>\n> > 内层')
+  assert.match(deep, /<blockquote><p>外层<\/p><blockquote><p>内层<\/p><\/blockquote><\/blockquote>/)
+})
+
+test('renders a thematic break instead of eating the line', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  assert.match(renderMarkdown('上面\n\n---\n\n下面'), /<hr>/)
+  assert.match(renderMarkdown('上面\n\n***\n\n下面'), /<hr>/)
+  // A list marker is not a rule, and a heading underline is not one either.
+  assert.doesNotMatch(renderMarkdown('- 项目'), /<hr>/)
+  assert.doesNotMatch(renderMarkdown('标题\n---'), /<hr>/)
+})
+
+test('keeps a list item body, including its nested list and code block', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  // An item is not one line: its indented continuation belongs to it. Without
+  // this a rendered answer collapses into one dense wall of text.
+  const result = renderMarkdown('- 项目\n  这是同一项的说明\n- 另一项')
+  assert.match(result, /<li><p>项目\n这是同一项的说明<\/p><\/li>/)
+  assert.match(result, /<li><p>另一项<\/p><\/li>/)
+
+  const nested = renderMarkdown('- 项目\n  - 子项\n- 另一项')
+  assert.match(nested, /<ul><li><p>项目<\/p><ul><li><p>子项<\/p><\/li><\/ul><\/li><li><p>另一项<\/p><\/li><\/ul>/)
+
+  // Two blank lines end the list, so a following paragraph is not absorbed.
+  const separated = renderMarkdown('- 项目\n\n\n之后的话')
+  assert.match(separated, /<\/ul><p>之后的话<\/p>/)
+})
+
+test('a numbered list keeps its start and ordered items stay ordered', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  assert.match(renderMarkdown('1. 第一\n2. 第二'), /<ol><li><p>第一<\/p><\/li><li><p>第二<\/p><\/li><\/ol>/)
+  assert.match(renderMarkdown('3. 第三\n4. 第四'), /<ol start="3">/)
+})
+
+test('a code fence keeps its language and drops the info string from the code', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  const result = renderMarkdown('```js\nconst a = 1\n```')
+
+  assert.match(result, /<pre data-lang="js">/)
+  assert.match(result, /<code>const a = 1<\/code>/)
+  // The info string is metadata, not the first line of the sample.
+  assert.doesNotMatch(result, /<code>js\n/)
+  // An unnamed fence has no label.
+  assert.doesNotMatch(renderMarkdown('```\nplain\n```'), /data-lang/)
+  // A `#` inside a fence is code, not a heading.
+  assert.doesNotMatch(renderMarkdown('```\n# not a heading\n```'), /<h1/)
+  assert.match(renderMarkdown('```\n# not a heading\n```'), /<code># not a heading<\/code>/)
+})
+
+test('a link is only rendered for a safe scheme', async () => {
+  const { renderMarkdown, safeLinkUrl } = await loadMarkdownHelpers()
+  assert.match(renderMarkdown('[站点](https://example.com)'), /<a href="https:\/\/example\.com" target="_blank" rel="noreferrer noopener">站点<\/a>/)
+  assert.match(renderMarkdown('[邮件](mailto:a@b.com)'), /<a href="mailto:a@b\.com"/)
+  assert.match(renderMarkdown('[章节](#md-h-1)'), /<a href="#md-h-1"/)
+  // A javascript: target must never become clickable in a rendered answer.
+  assert.doesNotMatch(renderMarkdown('[点我](javascript:alert(1))'), /<a /)
+  assert.doesNotMatch(renderMarkdown('[点我](JaVaScRiPt:alert(1))'), /<a /)
+  assert.doesNotMatch(renderMarkdown('[点我](data:text/html,<script>)'), /<a /)
+  assert.equal(safeLinkUrl('javascript:alert(1)'), null)
+  assert.equal(safeLinkUrl(' data:text/html,x'), null)
+  assert.equal(safeLinkUrl('https://example.com'), 'https://example.com')
+})
+
+test('preserves the author line breaks instead of collapsing them', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  // A soft break is a newline, not a <br>: the CSS's pre-wrap renders it, and
+  // the text stays copy-pasteable as the author wrote it.
+  const result = renderMarkdown('第一行\n第二行')
+  assert.match(result, /<p>第一行\n第二行<\/p>/)
+  assert.doesNotMatch(result, /<br>/)
+})
+
+test('a heading keeps its closing hashes out of the text', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  assert.match(renderMarkdown('## 标题 ##'), /<h2 id="md-h-1">标题<\/h2>/)
 })

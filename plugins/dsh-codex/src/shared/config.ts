@@ -19,6 +19,8 @@ export interface QuickAction {
 export type StickyUserBubbleMode = 'running' | 'always'
 
 export interface DshCodexConfig {
+  /** Clamp a single oversized chat message behind an expand control. */
+  longMessageCollapseEnabled: boolean
   /** Pin the newest user message to the top of the conversation while scrolling. */
   stickyUserBubbleEnabled: boolean
   stickyUserBubbleMode: StickyUserBubbleMode
@@ -55,6 +57,7 @@ export const FULL_SESSION_LOAD_LIMIT_MAX = 200
 export const FULL_SESSION_LOAD_LIMIT_PRESETS = [10, 15, 25, 50] as const
 
 export const DEFAULT_CONFIG: DshCodexConfig = {
+  longMessageCollapseEnabled: true,
   stickyUserBubbleEnabled: false,
   stickyUserBubbleMode: 'running',
   fullSessionLoadEnabled: false,

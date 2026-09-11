@@ -7,6 +7,15 @@ export const PROJECT_PATH = '/dsh-workspace-plus/binding'
 /** HTTP path: reveal a path in the OS file manager (Explorer / Finder / xdg-open). */
 export const OPEN_PATH = '/dsh-workspace-plus/open-in-explorer'
 
+/** HTTP path: recover durable or derived titles for visible session rows. */
+export const SESSION_TITLES_PATH = '/dsh-workspace-plus/session-titles'
+
+/** HTTP path: durable pins, independent of the desktop web host's port. */
+export const PINS_PATH = '/dsh-workspace-plus/pins'
+
+/** Settings namespace the Plugins → 插件配置 tab dispatches by `settings.plugin.item` key. */
+export const SETTINGS_NS = 'workspace-plus'
+
 // Branded ids, re-exported through the shared runtime boundary so both halves
 // share one source of truth for the platform's identity types.
 import type { SessionId, WorkspaceId } from '@just-genius/dsh-plugin-runtime/client'
@@ -43,6 +52,23 @@ export interface BindingListPayload {
   bindings: WorkspaceBinding[]
 }
 
+export interface SessionTitleLookup {
+  id: string
+  cwd?: string
+  updatedAt: number
+  listedBlank: boolean
+}
+
+export interface SessionTitleFact extends SessionTitleLookup {
+  blank: boolean
+  title?: string
+  source?: 'event' | 'fallback'
+}
+
+export interface SessionTitlePayload {
+  sessions: SessionTitleFact[]
+}
+
 /**
  * Minimal shape of an official workspace row.
  *
@@ -70,7 +96,14 @@ export interface MemoryHttpErr {
 export type HttpResult<T> = MemoryHttpOk<T> | MemoryHttpErr
 
 export type ProjectAction =
-  | { action: 'bind'; root: string; repos: RepoFolder[]; title?: string; primaryPath?: string }
+  | {
+    action: 'bind'
+    root: string
+    repos: RepoFolder[]
+    title?: string
+    primaryPath?: string
+    previousRoot?: string
+  }
   | { action: 'delete'; root: string }
 
 export function isUnder(child: string, parent: string): boolean {
@@ -86,7 +119,7 @@ export function samePath(a: string, b: string): boolean {
 }
 
 export function normalizeCompare(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  return path.replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
 export function normalizePrimaryPath(repos: RepoFolder[], primaryPath?: string): string {

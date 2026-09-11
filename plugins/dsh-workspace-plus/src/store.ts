@@ -8,7 +8,7 @@ import {
   type RepoFolder,
   type WorkspaceBinding,
 } from './shared.ts'
-import { markExternal, tryRealpath } from './scan.ts'
+import { adoptFolder, InvalidFolderError, markExternal, tryRealpath } from './scan.ts'
 
 interface StoreFile {
   version: 1
@@ -172,19 +172,24 @@ export function bindBinding(input: {
   repos: RepoFolder[]
   title?: string
   primaryPath?: string
+  previousRoot?: string
 }): WorkspaceBinding {
   const repos = input.repos
     .filter((repo) => typeof repo.path === 'string' && repo.path.trim() !== '')
     .map((repo) => {
-      const path = tryRealpath(repo.path)
+      const adopted = adoptFolder(repo.path)
       return {
-        name: repo.name.trim() || folderName(path),
-        path,
+        name: repo.name.trim() || adopted.name,
+        path: adopted.path,
         kind: 'folder' as const,
       } satisfies RepoFolder
     })
   if (repos.length === 0) throw new Error('at least one folder is required')
-  const primaryPath = normalizePrimaryPath(repos, input.primaryPath ?? input.root)
+  const requestedPrimary = tryRealpath(input.primaryPath ?? input.root)
+  if (!repos.some((repo) => samePath(repo.path, requestedPrimary))) {
+    throw new InvalidFolderError('primary folder must be listed')
+  }
+  const primaryPath = normalizePrimaryPath(repos, requestedPrimary)
   const root = tryRealpath(primaryPath)
   const binding: WorkspaceBinding = {
     root,
@@ -194,9 +199,13 @@ export function bindBinding(input: {
     updatedAt: Date.now(),
   }
   const file = load()
+  const previousRoot = input.previousRoot === undefined ? undefined : tryRealpath(input.previousRoot)
   file.bindings = file.bindings.filter((item) => {
     const existing = tryRealpath(item.root)
-    return existing !== root && tryRealpath(item.primaryPath) !== root
+    const existingPrimary = tryRealpath(item.primaryPath)
+    return existing !== root
+      && existingPrimary !== root
+      && (previousRoot === undefined || (existing !== previousRoot && existingPrimary !== previousRoot))
   })
   file.bindings.unshift(binding)
   save(file)

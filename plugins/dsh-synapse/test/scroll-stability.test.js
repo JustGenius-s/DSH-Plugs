@@ -8,7 +8,7 @@ async function loadHelpers() {
   const end = source.indexOf('async function refreshSummaries')
   assert.ok(start !== -1 && end > start, 'fingerprint helpers must sit before refreshSummaries')
   const exports = {}
-  new Function('exports', `${source.slice(start, end)}\nexports.workspacesFingerprint = workspacesFingerprint\nexports.threadsLayoutFingerprint = threadsLayoutFingerprint\nexports.nextLiveCardAnswer = nextLiveCardAnswer`)(exports)
+  new Function('exports', `${source.slice(start, end)}\nexports.workspacesFingerprint = workspacesFingerprint\nexports.threadsLayoutFingerprint = threadsLayoutFingerprint\nexports.nextLiveCardAnswer = nextLiveCardAnswer\nexports.nextLiveReply = nextLiveReply\nexports.projectedReplyHasSettled = projectedReplyHasSettled`)(exports)
   return exports
 }
 
@@ -52,4 +52,13 @@ test('nextLiveCardAnswer keeps existing card content instead of flashing a pendi
     nextLiveCardAnswer({ hasContent: true, hasPending: true, liveText: 'hello', nextText: 'hello world' }),
     { action: 'replace', text: 'hello world' },
   )
+})
+
+test('a completed reply keeps the last streamed text until its projected answer arrives', async () => {
+  const { nextLiveReply, projectedReplyHasSettled } = await loadHelpers()
+
+  assert.deepEqual(nextLiveReply({ running: true, text: '最终回答' }, false, ''), { running: false, text: '最终回答' })
+  assert.equal(projectedReplyHasSettled({ turns: [{ question: '问题', answer: null, error: null }] }, '问题'), false)
+  assert.equal(projectedReplyHasSettled({ turns: [{ question: '问题', answer: '中间回答', error: null }] }), false)
+  assert.equal(projectedReplyHasSettled({ turns: [{ question: '问题', answer: '最终回答', status: 'done', error: null }] }), true)
 })

@@ -2,6 +2,7 @@ import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
 import { getSettingsScope } from '@just-genius/dsh-plugin-runtime/client'
 import { createCodexFeatureManager } from './core/feature-manager'
 import { createFilesFeature } from './features/files'
+import { createLongMessageCollapseFeature } from './features/long-message-collapse'
 import { createFullSessionLoadFeature } from './features/full-session-load'
 import { createGitGraphFeature } from './features/git-graph'
 import { createSideChatFeature } from './features/side-chat'
@@ -57,6 +58,7 @@ export function apply(ctx: ClientContext): void {
   )
 
   const features = createCodexFeatureManager([
+    createLongMessageCollapseFeature(ctx, scope, t),
     createFullSessionLoadFeature(ctx, scope),
     createStickyUserBubbleFeature(ctx, scope, t),
     createSideChatFeature(ctx, scope, t),

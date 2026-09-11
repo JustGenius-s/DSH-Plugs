@@ -5,11 +5,13 @@ import vm from 'node:vm'
 
 async function loadMessagesFromEvents() {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
+  const helperStart = source.indexOf('function isInjectedCardText')
+  const helperEnd = source.indexOf('function firstUserQuestion')
   const start = source.indexOf('function messagesFromEvents')
   const end = source.indexOf('async function loadThreadHistory')
   const context = { globalThis: {} }
   vm.createContext(context)
-  vm.runInContext(`${source.slice(start, end)};globalThis.messagesFromEvents = messagesFromEvents`, context)
+  vm.runInContext(`${source.slice(helperStart, helperEnd)}\n${source.slice(start, end)};globalThis.messagesFromEvents = messagesFromEvents`, context)
   return context.globalThis.messagesFromEvents
 }
 

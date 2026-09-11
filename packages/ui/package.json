@@ -17,6 +17,11 @@
       "types": "./lib/css-modules.d.ts",
       "import": "./lib/css-modules.js"
     },
+    "./client-bundle-deps": {
+      "types": "./client-bundle-deps.ts",
+      "import": "./client-bundle-deps.mjs",
+      "default": "./client-bundle-deps.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [

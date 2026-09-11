@@ -1,9 +1,13 @@
 import { injectStyles } from '@just-genius/dsh-plugin-ui'
+import { STICKY_USER_BUBBLE_Z_INDEX } from './model'
+
+// The pin is a body portal. Official fullscreen sidebar is z-index 40
+// (`data-sidebar-right-panel=fullscreen`); stay under that overlay.
 
 const CSS = `
 .dsh-codex-sticky-pin{
   position:fixed;
-  z-index:45;
+  z-index:${STICKY_USER_BUBBLE_Z_INDEX};
   pointer-events:none;
   box-sizing:border-box;
   padding:8px 0 10px;

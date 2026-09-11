@@ -35,6 +35,7 @@ test('fork backfill skips persisted subagent children', async () => {
   const scan = source.slice(source.indexOf('async function backfillForks'), source.indexOf('async function readSessionEvents'))
   assert.match(scan, /!isSubagentSession\(header\)/)
   assert.match(scan, /dropProjectedSessions\(leftoverSubagents\)/)
+  assert.match(scan, /persistenceListEntries/)
 })
 
 test('forkSeqBoundary prefers the persisted seedLength', () => {
@@ -281,4 +282,80 @@ test('an unrelated blank session is still pruned', async () => {
   const graph = await store.get(workspace.id)
   assert.equal(graph.threads.length, 1)
   assert.equal(graph.threads[0].dshSessionId, 'used')
+})
+
+/** Write a v5 state directly and reload it, so the load-time migrations run. */
+async function reloadV5(workspaces) {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-anchor-'))
+  const dataFile = join(directory, 'state.json')
+  const { writeFile } = await import('node:fs/promises')
+  await writeFile(dataFile, JSON.stringify({ version: 5, hiddenSessionIds: [], workspaces }))
+  const store = new WorkspaceStore(dataFile)
+  const [workspace] = await store.list()
+  return store.get(workspace.id)
+}
+
+const turn = (seq, answerSeq, question = '问题') => ({ seq, at: '2026-01-01T00:00:00.000Z', question, answer: '回答', answerSeq, error: null, processCount: 0, processIds: [] })
+
+test('a branch with no anchor gets one derived from what it inherited', async () => {
+  const graph = await reloadV5([{ id: 'w', title: 'w', threads: [
+    { id: 'p', parentId: null, dshSessionId: 'sess-p', title: 'p', turns: [turn(9, 681), turn(688, 1329)] },
+    // The child continues the parent's numbering, so it copied both turns.
+    { id: 'c', parentId: 'p', sourceParentSessionId: 'sess-p', dshSessionId: 'sess-c', title: 'c', sourceSeedLength: null, turns: [turn(2000, 2100)] },
+  ] }])
+  const child = graph.threads.find(thread => thread.id === 'c')
+  assert.equal(child.anchorCardId, 'p:turn:688', 'the branch point is the last turn it inherited')
+  assert.equal(child.sourceAnchorSeq, 1329)
+})
+
+test('a branch whose child re-counts from its own origin is not given a false anchor', async () => {
+  const graph = await reloadV5([{ id: 'w', title: 'w', threads: [
+    { id: 'p', parentId: null, dshSessionId: 'sess-p', title: 'p', turns: [turn(9, 681), turn(688, 1329)] },
+    // seq 7 is below the parent's first turn, so these numbers are unrelated.
+    // Inventing an anchor here would point at a turn the branch never saw.
+    { id: 'c', parentId: 'p', sourceParentSessionId: 'sess-p', dshSessionId: 'sess-c', title: 'c', sourceSeedLength: 0, turns: [turn(7, 739)] },
+  ] }])
+  const child = graph.threads.find(thread => thread.id === 'c')
+  assert.equal(child.anchorCardId, undefined)
+})
+
+test('an existing branch anchor is never overwritten', async () => {
+  const graph = await reloadV5([{ id: 'w', title: 'w', threads: [
+    { id: 'p', parentId: null, dshSessionId: 'sess-p', title: 'p', turns: [turn(9, 681), turn(688, 1329)] },
+    { id: 'c', parentId: 'p', sourceParentSessionId: 'sess-p', dshSessionId: 'sess-c', title: 'c', sourceSeedLength: null, anchorCardId: 'p:turn:9', turns: [turn(2000, 2100)] },
+  ] }])
+  const child = graph.threads.find(thread => thread.id === 'c')
+  assert.equal(child.anchorCardId, 'p:turn:9', 'the recorded branch point wins')
+})
+
+test('a branch with no parent or no turns is left alone', async () => {
+  const graph = await reloadV5([{ id: 'w', title: 'w', threads: [
+    { id: 'c', parentId: 'missing-parent', sourceParentSessionId: 'sess-p', dshSessionId: 'sess-c', title: 'c', turns: [turn(9, 681)] },
+    { id: 'empty', parentId: 'c', sourceParentSessionId: 'sess-c', dshSessionId: 'sess-e', title: 'e', turns: [] },
+  ] }])
+  assert.equal(graph.threads.find(thread => thread.id === 'c').anchorCardId, undefined)
+  assert.equal(graph.threads.find(thread => thread.id === 'empty').anchorCardId, undefined)
+})
+
+test('creating a branch persists the anchor the browser supplies', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-branchpost-'))
+  const store = new WorkspaceStore(join(directory, 'state.json'))
+  await store.create('w')
+  const [workspace] = await store.list()
+  const parent = await store.createThread(workspace.id, { title: 'p', dshSessionId: 'sess-p' })
+  const child = await store.branch(parent.id, { title: 'c', dshSessionId: 'sess-c', anchorCardId: 'p:turn:42', sourceAnchorSeq: 99 })
+  assert.equal(child.anchorCardId, 'p:turn:42')
+  assert.equal(child.sourceAnchorSeq, 99)
+  assert.equal(child.sourceParentSessionId, 'sess-p')
+})
+
+test('a branch created without an anchor has none', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-branchplain-'))
+  const store = new WorkspaceStore(join(directory, 'state.json'))
+  await store.create('w')
+  const [workspace] = await store.list()
+  const parent = await store.createThread(workspace.id, { title: 'p' })
+  const child = await store.branch(parent.id, { title: 'c', dshSessionId: 'sess-c' })
+  assert.equal(child.anchorCardId, undefined)
+  assert.equal(child.sourceAnchorSeq, undefined)
 })

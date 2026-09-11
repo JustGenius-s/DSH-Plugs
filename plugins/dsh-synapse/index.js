@@ -3,11 +3,13 @@ import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 
 export const name = 'synapse'
-// `sessionPersistence` is resolved lazily via `ctx.get`: it is only needed to
-// read the full detail of a card whose DSH session is no longer live (archived
-// or not yet restored). Listing it as a hard dependency would stop the plugin
-// from loading on a profile that does not mount it, so it stays optional.
-export const inject = ['webServer', 'sessions']
+// Cold-session detail and fork backfill read through sessionPersistence.
+// Cordis only exposes a service on the plugin context after it is injected;
+// `ctx.get` without this entry returns undefined and turn-detail 404s.
+export const inject = [
+  'webServer', 'sessions', 'sessionPersistence', 'connection',
+  'sessionQuery', 'agents', 'agentDefaultModel', 'agentPresets', 'workspaceRegistry',
+]
 
 const MAX_BODY_BYTES = 32 * 1024
 const MAX_TITLE_LENGTH = 120
@@ -98,6 +100,12 @@ export class WorkspaceStore {
         const existing = workspace.threads.find(item => item.dshSessionId === sessionId)
         if (existing !== undefined) {
           existing.parentId ??= parent.id
+          if (typeof parent.dshSessionId === 'string' && parent.dshSessionId !== '') existing.sourceParentSessionId ??= parent.dshSessionId
+          // The browser knows the exact turn the user branched from; DSH's own
+          // seedLength is a coarser cut (and absent on old forks), so prefer
+          // the anchor whenever the browser supplies one.
+          if (typeof input?.anchorCardId === 'string' && input.anchorCardId !== '') existing.anchorCardId = input.anchorCardId
+          if (Number.isSafeInteger(input?.sourceAnchorSeq)) existing.sourceAnchorSeq = input.sourceAnchorSeq
           if (typeof input?.title === 'string' && input.title.trim() !== '') existing.title = requiredText(input.title, MAX_TITLE_LENGTH, 'title')
           if (typeof input?.dshSessionTitle === 'string') existing.dshSessionTitle = input.dshSessionTitle.slice(0, MAX_TITLE_LENGTH)
           existing.updatedAt = now
@@ -116,6 +124,13 @@ export class WorkspaceStore {
         now,
         order: workspace.threads.length,
       })
+      // Persist the branch point on the server. localStorage anchors die with
+      // the browser profile, and a lost anchor drops the branch to the canvas
+      // origin where it overlaps the parent chain instead of sitting beside
+      // the turn it left.
+      if (typeof input?.anchorCardId === 'string' && input.anchorCardId !== '') thread.anchorCardId = input.anchorCardId
+      if (Number.isSafeInteger(input?.sourceAnchorSeq)) thread.sourceAnchorSeq = input.sourceAnchorSeq
+      if (typeof parent.dshSessionId === 'string' && parent.dshSessionId !== '') thread.sourceParentSessionId = parent.dshSessionId
       workspace.threads.push(thread)
       workspace.updatedAt = now
       return structuredClone(thread)
@@ -186,6 +201,71 @@ export class WorkspaceStore {
       workspace.updatedAt = thread.updatedAt
       return structuredClone(thread)
     })
+  }
+
+  /**
+   * Rename one conversation card, or restore its automatic title.
+   *
+   * The custom title lives beside the projected question on the turn: card
+   * projection rewrites `question` from the DSH log but never touches
+   * `title`, so a rename survives every later sync. An empty title deletes
+   * the field and the card falls back to the auto-derived question.
+   *
+   * `cardKey` is the card's stable address: its DSH sequence number, or
+   * `i<index>` for a turn without one (a manual note).
+   */
+  async updateCardTitle(threadId, cardKey, title) {
+    if (typeof title !== 'string') throw new InputError('title 必须是文本')
+    const text = title.trim()
+    if (text.length > MAX_TITLE_LENGTH) throw new InputError('title 超过长度限制')
+    return this.mutate(() => {
+      const { workspace, thread } = this.locateThread(threadId)
+      const turns = thread.turns ?? []
+      const turn = /^\d+$/.test(cardKey)
+        ? turns.find(item => item?.seq === Number(cardKey))
+        : /^i\d+$/.test(cardKey) ? turns[Number(cardKey.slice(1))] : undefined
+      if (turn === undefined || turn === null || typeof turn !== 'object') throw new NotFoundError('卡片不存在')
+      if (text === '') delete turn.title
+      else turn.title = text
+      thread.updatedAt = new Date().toISOString()
+      workspace.updatedAt = thread.updatedAt
+      return structuredClone(thread)
+    })
+  }
+
+  /** Visibility is canvas metadata, never a session archive or log mutation. */
+  async updateCardVisibility(cards, hidden) {
+    if (typeof hidden !== 'boolean') throw new InputError('hidden 必须是布尔值')
+    if (!Array.isArray(cards) || cards.length === 0 || cards.length > 100) throw new InputError('每次请选择 1 到 100 张卡片')
+    return this.mutate(() => {
+      // Resolve and validate the whole batch before changing any turn.
+      const targets = cards.map(card => {
+        if (typeof card?.threadId !== 'string' || typeof card.cardKey !== 'string') throw new InputError('卡片地址无效')
+        const located = this.locateThread(card.threadId)
+        const turn = visibilityTurn(located.thread, card)
+        if (turn === undefined) throw new NotFoundError('卡片不存在，请刷新后重试')
+        if (hidden && (['creating', 'queued', 'running', 'needs-input'].includes(turn.status) || isPlaceholderTurn(turn))) {
+          throw new InputError('请等待这轮对话结束后再隐藏')
+        }
+        return { ...located, turn, card }
+      })
+      const changedWorkspaces = new Set()
+      const now = new Date().toISOString()
+      for (const { workspace, thread, turn } of targets) {
+        if ((turn.hidden === true) === hidden) continue
+        if (hidden) turn.hidden = true
+        else delete turn.hidden
+        thread.updatedAt = now
+        changedWorkspaces.add(workspace)
+      }
+      for (const workspace of changedWorkspaces) {
+        workspace.updatedAt = now
+        workspace.revision = (workspace.revision ?? 0) + 1
+      }
+      return { updates: targets.map(({ card, turn }) => ({
+        ...card, seq: turn.seq, messageId: turn.messageId, cardId: turn.cardId ?? card.cardId, hidden,
+      })) }
+    }, { rollbackOnFailure: true })
   }
 
   async removeThread(threadId) {
@@ -267,12 +347,44 @@ export class WorkspaceStore {
       const events = typeof session.snapshotEvents === 'function'
         ? session.snapshotEvents()
         : session.events
+      if (shouldRebaseProjection(thread, events, replayFrom) && this.rebaseProjection(workspace, thread, events, replayFrom)) {
+        return structuredClone(thread)
+      }
       for (const event of events ?? []) {
         if (event.seq >= replayFrom) this.projectEventInto(workspace, thread, event)
       }
       repairTurnQuestions(thread, events ?? [], replayFrom)
       return structuredClone(thread)
     }, { deferred: true })
+  }
+
+  rebaseProjection(workspace, thread, events, replayFrom) {
+    const previous = thread.turns
+    const nextWorkspace = { ...workspace }
+    const rebuilt = { ...thread, turns: [], processIds: [], pendingProcess: [], lastEventSeq: undefined, activeTurnNumber: undefined }
+    for (const event of events) {
+      if (event.seq >= replayFrom) this.projectEventInto(nextWorkspace, rebuilt, event)
+    }
+    if (rebuilt.turns.length < previous.length || !previous.every((turn, index) => turn.question === rebuilt.turns[index].question)) return false
+    const aliases = new Map()
+    for (let index = 0; index < previous.length; index++) {
+      const old = previous[index]
+      const next = rebuilt.turns[index]
+      if (old.title !== undefined) next.title = old.title
+      if (old.hidden === true) next.hidden = true
+      next.cardId = old.cardId ?? `${thread.id}:turn:${old.seq ?? `i${index}`}`
+      for (const [from, to] of [[old.seq, next.seq], [old.answerSeq, next.answerSeq], [old.endSeq, next.endSeq]]) {
+        if (Number.isSafeInteger(from) && Number.isSafeInteger(to)) aliases.set(from, to)
+      }
+    }
+    Object.assign(thread, rebuilt)
+    workspace.revision = nextWorkspace.revision
+    workspace.updatedAt = nextWorkspace.updatedAt
+    for (const child of workspace.threads) {
+      if (child.parentId !== thread.id && child.sourceParentSessionId !== thread.dshSessionId) continue
+      if (aliases.has(child.sourceAnchorSeq)) child.sourceAnchorSeq = aliases.get(child.sourceAnchorSeq)
+    }
+    return true
   }
 
   /** Project one committed DSH session event. Repeated sequence numbers are ignored. */
@@ -313,13 +425,19 @@ export class WorkspaceStore {
     }
   }
 
-  async mutate(action, { deferred = false } = {}) {
+  async mutate(action, { deferred = false, rollbackOnFailure = false } = {}) {
     await this.ready
     const task = this.serial.then(async () => {
-      const result = action()
-      if (deferred) this.markDirty()
-      else await this.save()
-      return result
+      const previous = rollbackOnFailure ? structuredClone(this.state) : undefined
+      try {
+        const result = action()
+        if (deferred) this.markDirty()
+        else await this.save()
+        return result
+      } catch (error) {
+        if (previous !== undefined) this.state = previous
+        throw error
+      }
     })
     this.serial = task.catch(() => undefined)
     return task
@@ -505,6 +623,33 @@ export class WorkspaceStore {
    * re-read when the user opens the detail view.
    */
   projectEventInto(workspace, thread, event) {
+    const projectedThrough = thread.lastEventSeq ?? Math.max(-1, ...thread.turns.flatMap(turn => [turn.seq, turn.answerSeq, turn.endSeq].filter(Number.isSafeInteger)))
+    if (Number.isSafeInteger(event.seq) && event.seq <= projectedThrough) return
+    if (Number.isSafeInteger(event.seq) && event.seq > (thread.lastEventSeq ?? -1)) {
+      thread.lastEventSeq = event.seq
+      workspace.revision = (workspace.revision ?? 0) + 1
+    }
+    if (event.type === 'turn/start') {
+      thread.activeTurnNumber = event.data?.turn
+      return
+    }
+    if (event.type === 'turn/end') {
+      const number = event.data?.turn
+      const turn = [...thread.turns].reverse().find(item => number === undefined || item.turnNumber === number)
+        ?? (thread.activeTurnNumber === undefined ? thread.turns.at(-1) : undefined)
+      if (turn !== undefined) {
+        const reason = event.data?.reason
+        const cancelled = ['cancelled', 'canceled', 'aborted', 'interrupted'].includes(reason?.kind)
+        turn.status = reason?.kind === 'error' ? 'failed' : cancelled ? 'cancelled' : 'done'
+        turn.endSeq = event.seq
+        if (reason?.kind === 'error') turn.error = cardText(errorText(reason.error) ?? '本轮执行失败', CARD_ANSWER_LENGTH)
+        if (cancelled) turn.error = '本轮已取消'
+        turn.at = new Date(event.time).toISOString()
+        thread.updatedAt = turn.at
+        workspace.updatedAt = turn.at
+      }
+      return
+    }
     if (event.type === 'session/title' && typeof event.data?.title === 'string') {
       const title = usableSessionTitle(event.data.title)
       if (title !== null) {
@@ -537,11 +682,19 @@ export class WorkspaceStore {
         last.seq = event.seq
         last.at = at
         last.question = question
+        last.human = true
+        last.status = 'running'
+        last.turnNumber = thread.activeTurnNumber
+        last.messageId = event.data?.id
       } else {
         thread.turns.push({
           seq: event.seq,
+          messageId: event.data?.id,
+          turnNumber: thread.activeTurnNumber,
+          status: 'running',
           at,
           question,
+          human: true,
           answer: null,
           answerSeq: null,
           error: null,
@@ -558,9 +711,7 @@ export class WorkspaceStore {
       turn.processCount += process.length
       turn.processIds.push(...process.map(entry => entry.callId))
       if (projection.kind === 'error') turn.error = cardText(projection.text, CARD_ANSWER_LENGTH)
-      // A turn's final assistant reply is the card's answer. Replace so a
-      // later step (or a retry after an error) supersedes the earlier one.
-      else {
+      else if (projection.kind === 'assistant') {
         turn.answer = cardText(projection.text, CARD_ANSWER_LENGTH)
         turn.answerSeq = event.seq
         turn.error = null
@@ -650,12 +801,35 @@ export class WorkspaceStore {
   }
 
   summary(workspace) {
-    return { id: workspace.id, kind: workspace.kind ?? 'manual', cwd: workspace.cwd ?? null, title: workspace.title, createdAt: workspace.createdAt, updatedAt: workspace.updatedAt, threadCount: workspace.threads.length }
+    return { id: workspace.id, kind: workspace.kind ?? 'manual', cwd: workspace.cwd ?? null, title: workspace.title, createdAt: workspace.createdAt, updatedAt: workspace.updatedAt, revision: workspace.revision ?? 0, threadCount: workspace.threads.length }
   }
 }
 
 class InputError extends Error {}
 class NotFoundError extends Error {}
+
+function visibilityTurn(thread, target) {
+  const turns = thread.turns ?? []
+  if (typeof target.messageId === 'string' && target.messageId !== '') {
+    return turns.find(turn => turn.messageId === target.messageId)
+  }
+  if (typeof target.cardId === 'string' && target.cardId !== '') {
+    return turns.find(turn => turn.cardId === target.cardId)
+      ?? turns.find((turn, index) => turn.cardId === undefined && `${thread.id}:turn:${turn.seq ?? `i${index}`}` === target.cardId)
+  }
+  return /^\d+$/.test(target.cardKey) ? turns.find(turn => turn.seq === Number(target.cardKey))
+    : /^i\d+$/.test(target.cardKey) ? turns[Number(target.cardKey.slice(1))] : undefined
+}
+
+export function shouldRebaseProjection(thread, events, replayFrom = 0) {
+  if (!Array.isArray(events) || events[0]?.seq !== 0 || !thread.turns?.length) return false
+  const users = events.filter(event => event.seq >= replayFrom && isHumanUserEvent(event))
+  if (users.length < thread.turns.length) return false
+  // A full, unchanged question prefix is evidence of a sequence-space
+  // migration. Never rebuild from a partial window or discard old turns.
+  if (!thread.turns.every((turn, index) => turn.question === cardText(userMessageText(users[index]).trim(), CARD_QUESTION_LENGTH))) return false
+  return thread.turns.some((turn, index) => turn.seq !== users[index].seq)
+}
 
 function normalizeState(value) {
   let migrated = false
@@ -720,7 +894,97 @@ function normalizeState(value) {
   // canvas shows only real user questions.
   if (state.version === 5 && rewriteSessionLabelQuestions(state.workspaces)) migrated = true
   if (state.version === 5 && dropInjectedTurns(state.workspaces)) migrated = true
+  // Forks recorded before the server kept a branch point lose it whenever the
+  // browser's localStorage anchor is gone. Derive a durable anchor from the
+  // child's own first turn: it is the first card after the inherited prefix,
+  // so the parent turn is the last one that ends at or before it.
+  if (state.version === 5 && backfillBranchAnchors(state.workspaces)) migrated = true
   return { state, migrated }
+}
+
+/**
+ * Give every branch a durable anchor card when it does not have one yet.
+ *
+ * A fork created before the server persisted `anchorCardId` (or one whose
+ * browser anchor was lost) can still be placed: the child's first own turn
+ * starts right after the inherited prefix, so the branch point is the last
+ * parent turn that finishes at or before that turn begins.
+ *
+ * Never invents an anchor for a branch with no parent, no parent turns, or no
+ * child turn to compare against — such a branch stays unanchored and the
+ * canvas falls back to a plain lane instead of a guessed position.
+ * @param workspaces - mutable normalized workspaces.
+ * @returns whether any thread gained an anchor.
+ */
+function backfillBranchAnchors(workspaces) {
+  let changed = false
+  for (const workspace of workspaces) {
+    const threads = workspace.threads ?? []
+    const byId = new Map(threads.map(thread => [thread.id, thread]))
+    for (const thread of threads) {
+      if (thread.parentId === null || typeof thread.parentId !== 'string') continue
+      if (typeof thread.anchorCardId === 'string' && thread.anchorCardId !== '') continue
+      const parent = byId.get(thread.parentId)
+      if (parent === undefined) continue
+      const parentTurns = Array.isArray(parent.turns) ? parent.turns : []
+      const childTurns = Array.isArray(thread.turns) ? thread.turns : []
+      if (parentTurns.length === 0 || childTurns.length === 0) continue
+      // The branch was cut at the end of a turn, so the anchor is the latest
+      // parent turn the child inherited. Two signals, in order of trust, and
+      // they resolve the same way the canvas does so a reload never moves a
+      // branch that the live view already placed.
+      const seed = Number.isSafeInteger(thread.sourceSeedLength) && thread.sourceSeedLength >= 0 ? thread.sourceSeedLength : undefined
+      const parentEnds = parentTurns.map(endOfTurn).filter(seq => seq !== undefined)
+      const childSeqs = childTurns.map(startOfTurn).filter(seq => seq !== undefined)
+      if (seed !== undefined && parentEnds.length > 0) {
+        // A durable boundary that lands inside the parent's history names the
+        // branch point exactly.
+        const bySeed = parentTurns.filter(turn => {
+          const end = endOfTurn(turn)
+          return end !== undefined && end <= seed
+        })
+        const hit = bySeed.reduce((latest, turn) => (latest === undefined || endOfTurn(turn) > endOfTurn(latest) ? turn : latest), undefined)
+        if (hit !== undefined) {
+          thread.anchorCardId = `${parent.id}:turn:${Number.isSafeInteger(hit.seq) ? hit.seq : 'i0'}`
+          thread.sourceAnchorSeq = endOfTurn(hit)
+          changed = true
+          continue
+        }
+        // A seed of 0 means "inherited nothing". Trust it only when the child
+        // continues the parent's numbering; a child numbered below the parent's
+        // first turn re-counts from its own origin and its 0 is noise.
+        const earliest = Math.min(...parentTurns.map(startOfTurn).filter(seq => seq !== undefined))
+        const continuesParent = childSeqs.length === 0 || Math.min(...childSeqs) > earliest
+        if (continuesParent || seed > Math.max(...parentEnds)) continue
+      }
+      // No usable boundary: the child's first own turn begins right after the
+      // inherited prefix, so every parent turn starting at or before it is what
+      // this branch copied. The last such turn is the branch point.
+      if (childSeqs.length === 0) continue
+      const childStart = Math.min(...childSeqs)
+      const inherited = parentTurns.filter(turn => {
+        const start = startOfTurn(turn)
+        return start !== undefined && start <= childStart
+      })
+      const anchor = inherited.reduce((latest, turn) => (latest === undefined || endOfTurn(turn) > endOfTurn(latest) ? turn : latest), undefined)
+      if (anchor === undefined) continue
+      thread.anchorCardId = `${parent.id}:turn:${Number.isSafeInteger(anchor.seq) ? anchor.seq : 'i0'}`
+      thread.sourceAnchorSeq = endOfTurn(anchor)
+      changed = true
+    }
+  }
+  return changed
+}
+
+/** Sequence a stored turn card starts at (its question). */
+function startOfTurn(turn) {
+  return turn !== null && typeof turn === 'object' && Number.isSafeInteger(turn.seq) ? turn.seq : undefined
+}
+
+/** Sequence a stored turn card ends at (its answer, else its question). */
+function endOfTurn(turn) {
+  if (turn === null || typeof turn !== 'object') return undefined
+  return Number.isSafeInteger(turn.answerSeq) ? turn.answerSeq : startOfTurn(turn)
 }
 
 /**
@@ -1039,6 +1303,7 @@ function usableSessionTitle(value) {
 
 /** A card the user never asked for: a generated label standing in for a question. */
 function isPlaceholderTurn(turn) {
+  if (turn?.human === true) return false
   return turn != null && isSessionLabelQuestion(turn.question)
 }
 
@@ -1127,20 +1392,17 @@ function rewriteSessionLabelQuestions(workspaces) {
  * projected from 0, which would duplicate their parent's history onto the map.
  */
 async function backfillForks(ctx, store, workspaceTitle, reportFailure) {
-  let persistence
-  try {
-    persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : ctx.sessionPersistence
-  } catch {
-    return
-  }
+  const persistence = resolvePersistence(ctx)
   if (persistence === undefined || persistence === null || typeof persistence.list !== 'function') return
-  let headers
+  let listed
   try {
-    headers = await persistence.list()
+    listed = await persistence.list()
   } catch {
     return
   }
-  if (!Array.isArray(headers)) return
+  const records = persistenceListEntries(listed)
+  if (records.length === 0) return
+  const headers = records.map(record => record.header)
   const alreadyProjected = await store.projectedSessionIds()
   // Subagent children are delegation mechanics, not conversation branches:
   // drop any cards an earlier pass gave them (without hiding them — a live
@@ -1148,12 +1410,14 @@ async function backfillForks(ctx, store, workspaceTitle, reportFailure) {
   const subagentIds = headers.filter(header => isSubagentSession(header)).map(header => header.id)
   const leftoverSubagents = [...alreadyProjected].filter(id => subagentIds.includes(id))
   if (leftoverSubagents.length > 0) await store.dropProjectedSessions(leftoverSubagents)
-  const queue = headers.filter(header =>
-    typeof header?.parentSession === 'string'
-    && typeof header?.id === 'string'
-    && !subagentIds.includes(header.id)
-    && !isSubagentSession(header)
-    && !alreadyProjected.has(header.id))
+  const queue = records.filter(record => {
+    const header = record.header
+    return typeof header?.parentSession === 'string'
+      && typeof header?.id === 'string'
+      && !subagentIds.includes(header.id)
+      && !isSubagentSession(header)
+      && !alreadyProjected.has(header.id)
+  }).map(record => record.header)
   if (queue.length === 0) return
   const projected = new Set(alreadyProjected)
   // Yield between sessions: a large profile has hundreds of logs, and the
@@ -1222,6 +1486,40 @@ function inheritedCountOf(header) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null
 }
 
+function resolvePersistence(ctx) {
+  try {
+    if (typeof ctx.get === 'function') {
+      const viaGet = ctx.get('sessionPersistence')
+      if (viaGet !== undefined && viaGet !== null) return viaGet
+    }
+    return ctx.sessionPersistence
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Normalize `sessionPersistence.list()` across DSH hosts.
+ *
+ * 0.1.5 returns `{ header, revision, sizeBytes }` snapshots. Earlier hosts
+ * returned the header objects themselves. Either shape is accepted.
+ */
+export function persistenceListEntries(listed) {
+  if (!Array.isArray(listed)) return []
+  const entries = []
+  for (const item of listed) {
+    if (item == null || typeof item !== 'object') continue
+    const nested = item.header
+    const header = nested != null && typeof nested === 'object' && typeof nested.id === 'string'
+      ? nested
+      : (typeof item.id === 'string' ? item : null)
+    if (header == null) continue
+    const inherited = inheritedCountOf(item) ?? inheritedCountOf(header)
+    entries.push(inherited == null ? { header } : { header: { ...header, inheritedEventCount: inherited }, inheritedEventCount: inherited })
+  }
+  return entries
+}
+
 /**
  * Read one session's committed events, live or cold.
  *
@@ -1244,29 +1542,131 @@ async function readSessionEvents(ctx, sessionId) {
   } catch {
     live = undefined
   }
+  if ((live === undefined || live === null) && typeof ctx.sessions?.list === 'function') {
+    try {
+      live = ctx.sessions.list().find(session => session?.id === sessionId || String(session?.id ?? '') === sessionId)
+    } catch {
+      live = undefined
+    }
+  }
   if (live !== undefined && live !== null) {
     const events = sessionEventLog(live)
     if (events !== null) return events
   }
-  // `ctx.sessionPersistence` is NOT declared in `inject`, so touching it
-  // directly makes cordis throw `cannot get property ... without inject`
-  // (its Context proxy rejects undeclared services) — that throw used to
-  // escape into the route's catch and surface as a 500. Resolve it through
-  // `ctx.get`, the safe accessor, and guard the whole lookup anyway.
-  let persistence
-  try {
-    persistence = typeof ctx.get === 'function' ? ctx.get('sessionPersistence') : ctx.sessionPersistence
-  } catch {
-    return null
+  const persistence = resolvePersistence(ctx)
+  if (persistence === undefined || persistence === null) return null
+  // DSH 0.1.1 exposed `inspect`. 0.1.5 removed it: cold sessions are opened
+  // read-only and `read()` from seq 0, then the handle is closed. Using
+  // `inspect` when it still exists keeps older hosts working.
+  if (typeof persistence.inspect === 'function') {
+    try {
+      const inspection = await persistence.inspect(sessionId)
+      return Array.isArray(inspection?.events) ? inspection.events : null
+    } catch {
+      return null
+    }
   }
-  if (persistence === undefined || persistence === null || typeof persistence.inspect !== 'function') return null
+  if (typeof persistence.open !== 'function') return null
+  let handle
   try {
-    const inspection = await persistence.inspect(sessionId)
-    return Array.isArray(inspection?.events) ? inspection.events : null
+    handle = await persistence.open(sessionId, 'read')
+    const result = await handle.read()
+    return Array.isArray(result?.events) ? result.events : null
   } catch {
     // A session whose log was deleted or is still being written has no detail
     // to show; the card summary still renders.
     return null
+  } finally {
+    if (handle != null && typeof handle.close === 'function') {
+      try { await handle.close() } catch { /* already closed or never opened */ }
+    }
+  }
+}
+
+/** Resolve a card's completed history without inheriting the following inbox insertion. */
+export function cardForkSeed(events, target) {
+  if (!Number.isSafeInteger(target?.seq) && !target?.reference?.messageId) throw new InputError('缺少分支来源消息')
+  if (!target?.reference?.messageId && !target?.reference?.question) throw new InputError('缺少分支来源消息身份')
+  const detail = buildTurnDetail(events, target.seq, undefined, target.reference)
+  if (detail.question === null) throw new InputError('无法定位所选卡片的原始消息，请刷新后重试')
+  const ordered = [...events].sort((left, right) => left.seq - right.seq)
+  const start = ordered.findIndex(event => event.seq === detail.seq)
+  for (let index = start + 1; index < ordered.length; index++) {
+    const event = ordered[index]
+    if (event.type === 'turn/start' || isHumanUserEvent(event)) break
+    if (event.type !== 'turn/end') continue
+    if (event.data?.reason?.kind !== 'completed') break
+    const seed = ordered.slice(0, index + 1)
+    const answer = seed.findLast(item => item.seq > detail.seq && item.type === 'assistant/message')
+    return { seed, sourceAnchorSeq: answer?.seq ?? detail.seq }
+  }
+  throw new InputError('请等待所选卡片完成后再创建分支')
+}
+
+/** Create an ordinary host session, but with the exact card boundary and an empty inbox. */
+export async function forkCardSession(ctx, input) {
+  const parentId = requiredText(input?.sessionId, 200, 'sessionId')
+  if (typeof input?.operationId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId)) {
+    throw new InputError('缺少有效的分支操作标识')
+  }
+  const childId = `session-${input.operationId}`
+  const existing = ctx.sessions.get(childId)
+  if (existing !== undefined && existing.header.parentSession !== parentId) throw new InputError('分支操作标识已被其他会话使用')
+  const source = await ctx.sessionQuery.observeSession(parentId)
+  try {
+    const { seed, sourceAnchorSeq } = cardForkSeed(source.events, input.target)
+    const workspaces = ctx.workspaceRegistry.list()
+    let workspace = workspaces.find(item => item.sessionIds.includes(parentId))
+    if (workspace === undefined && source.header.origin === 'subagent') {
+      const lineage = await ctx.sessionQuery.traceSession(parentId)
+      for (const ancestor of lineage.ancestors) {
+        workspace = workspaces.find(item => item.sessionIds.includes(ancestor.header.id))
+        if (workspace !== undefined) break
+      }
+    }
+    if (existing === undefined) {
+      const presetId = source.projections?.values?.agentPreset ?? source.header.agentPreset
+      const preset = await ctx.agentPresets.resolve(presetId)
+      const { provider, model } = ctx.agentDefaultModel.currentSelection()
+      await ctx.agents.create({
+        sessionId: childId,
+        seed,
+        inheritedEventCount: seed.length,
+        meta: {
+          ...(source.header.cwd === undefined ? {} : { cwd: source.header.cwd }),
+          parentSession: parentId,
+          isSeeded: true,
+          agentPreset: preset.id,
+        },
+        agentOptions: { provider, model },
+        setup: async (agentCtx, agent) => {
+          // Messages can also have been queued DURING the selected turn.
+          // Clear only the child's inbox, before publication can wake it.
+          agent.inbox.clear()
+          await ctx.agentPresets.mount(agentCtx, preset.id)
+        },
+      })
+    }
+    if (workspace !== undefined && !workspace.sessionIds.includes(childId)) await workspace.attachSession(childId)
+    return { id: childId, parentId, sourceAnchorSeq }
+  } finally {
+    source[Symbol.dispose]?.()
+  }
+}
+
+export function createCardForkRunner(ctx) {
+  const operations = new Map()
+  return input => {
+    const key = input?.operationId
+    const previous = operations.get(key)
+    if (previous !== undefined) {
+      if (previous.parentId !== input.sessionId) return Promise.reject(new InputError('分支操作标识已被其他会话使用'))
+      return previous.promise
+    }
+    const promise = forkCardSession(ctx, input)
+    operations.set(key, { parentId: input?.sessionId, promise })
+    promise.catch(() => { if (operations.get(key)?.promise === promise) operations.delete(key) })
+    return promise
   }
 }
 
@@ -1278,39 +1678,73 @@ async function readSessionEvents(ctx, sessionId) {
  * session instead of from the canvas metadata. `events` are the session's
  * committed events in seq order; `turnSeq` is the turn's opening user event.
  */
-export function buildTurnDetail(events, turnSeq) {
-  if (!Array.isArray(events)) return { question: null, steps: [], process: [] }
+export function buildTurnDetail(events, turnSeq, turnIndex, reference) {
+  if (!Array.isArray(events)) return { question: null, steps: [], process: [], flow: [] }
   const ordered = [...events].sort((left, right) => left.seq - right.seq)
   // Only a REAL user question opens a turn. DSH emits runtime-context
   // snapshots and <system-reminder> blocks as user-role messages too; the
   // card projection already skips them, so the detail view must slice on the
   // same rule or those blocks would split one turn into several.
-  const isTurnStart = event => event.type === 'user/message' && !isRuntimeContextText(contentText(event.data?.content))
-  let start = ordered.findIndex(event => event.seq === turnSeq && isTurnStart(event))
-  if (start === -1) {
-    // Fall back to the nth real turn when the durable seq is unavailable
-    // (legacy data, or a turn discovered before its event was committed).
-    start = ordered.findIndex(isTurnStart)
+  const isTurnStart = isHumanUserEvent
+  const byMessageId = typeof reference?.messageId === 'string'
+    ? ordered.findIndex(event => isTurnStart(event) && (event.data?.id ?? event.data?.message?.id) === reference.messageId)
+    : -1
+  let start = reference?.messageId ? byMessageId : ordered.findIndex(event => event.seq === turnSeq && isTurnStart(event))
+  if (start === -1 && !reference?.messageId && Number.isSafeInteger(turnSeq) && ordered.some(event => event.seq === turnSeq)) {
+    for (let index = 0; index < ordered.length && ordered[index].seq <= turnSeq; index++) {
+      if (isTurnStart(ordered[index])) start = index
+    }
   }
-  if (start === -1) return { question: null, steps: [], process: [] }
+  if (start === -1 && !reference?.messageId && !Number.isSafeInteger(turnSeq)) {
+    // Fall back to the card's zero-based turn index when the durable seq is
+    // unavailable (legacy data, or a turn discovered before its event was
+    // committed). Only fall back to the first turn when neither key exists.
+    const starts = ordered.reduce((indices, event, index) => {
+      if (isTurnStart(event)) indices.push(index)
+      return indices
+    }, [])
+    start = Number.isInteger(turnIndex) && turnIndex >= 0 && turnIndex < starts.length
+      ? starts[turnIndex]
+      : Number.isInteger(turnIndex) ? -1 : starts[0] ?? -1
+  }
+  const expected = typeof reference?.question === 'string' ? reference.question : ''
+  const matchesQuestion = event => {
+    const actual = userMessageText(event).trim()
+    return expected.length === CARD_QUESTION_LENGTH + 1 && expected.endsWith(TRUNCATED_MARK)
+      ? actual.startsWith(expected.slice(0, -1))
+      : actual === expected.trim()
+  }
+  if (start !== -1 && byMessageId === -1 && expected !== '' && !matchesQuestion(ordered[start])) start = -1
+  if (start === -1 && !reference?.messageId && reference?.root === true && reference.unique === true && expected !== '') {
+    const matches = ordered.flatMap((event, index) => isTurnStart(event) && matchesQuestion(event) ? [index] : [])
+    if (matches.length === 1) start = matches[0]
+  }
+  if (start === -1) {
+    return { question: null, steps: [], process: [], flow: [] }
+  }
   const end = ordered.findIndex((event, index) => index > start && isTurnStart(event))
   const slice = ordered.slice(start, end === -1 ? undefined : end)
-  const questionText = contentText(ordered[start].data?.content)
+  const questionText = userMessageText(ordered[start])
   const question = questionText.trim() === '' ? null : questionText
   const steps = []
   const process = []
+  const flow = []
   for (const event of slice.slice(1)) {
     if (event.type === 'assistant/message' || event.type === 'todo/write') {
       const text = event.type === 'todo/write'
         ? (Array.isArray(event.data?.todos) ? event.data.todos.map(todo => `[${todo.status}] ${todo.content}`).join('\n') : '')
         : contentText(event.data?.message?.content)
       if (text.trim() === '') continue
-      steps.push({ kind: 'assistant', seq: event.seq, at: new Date(event.time).toISOString(), text })
+      const step = { kind: 'assistant', seq: event.seq, at: new Date(event.time).toISOString(), text }
+      steps.push(step)
+      flow.push(step)
       continue
     }
-    if (event.type === 'turn/end' && event.data?.reason?.kind === 'error') {
-      const text = errorText(event.data.reason.error) ?? '本轮执行失败'
-      steps.push({ kind: 'error', seq: event.seq, at: new Date(event.time).toISOString(), text })
+    if (event.type === 'turn/end' && ['error', 'cancelled', 'canceled', 'aborted', 'interrupted'].includes(event.data?.reason?.kind)) {
+      const text = event.data.reason.kind === 'error' ? errorText(event.data.reason.error) ?? '本轮执行失败' : '本轮已取消'
+      const step = { kind: 'error', seq: event.seq, at: new Date(event.time).toISOString(), text }
+      steps.push(step)
+      flow.push(step)
       continue
     }
     if (event.type !== 'tool/call' && event.type !== 'tool/result') continue
@@ -1322,27 +1756,40 @@ export function buildTurnDetail(events, turnSeq) {
       if (entry !== undefined) {
         // A redelivered call keeps the first record; only the name/args refresh.
         entry.name = typeof data.name === 'string' ? data.name : entry.name
+        entry.arguments = typeof data.arguments === 'string' ? data.arguments : entry.arguments
         continue
       }
-      process.push({
+      const created = {
+        kind: 'tool',
         callId,
         name: typeof data.name === 'string' ? data.name : '工具调用',
         arguments: typeof data.arguments === 'string' ? data.arguments : '',
         result: null,
         error: null,
-      })
+      }
+      process.push(created)
+      flow.push(created)
       continue
     }
     if (entry === undefined) {
       // A result whose call was never seen (or arrived out of order) still
       // shows its output instead of being dropped.
-      process.push({ callId, name: '工具结果', arguments: '', result: contentText(data.message?.content), error: errorText(data.error) })
+      const created = { kind: 'tool', callId, name: '工具结果', arguments: '', result: contentText(data.message?.content), error: errorText(data.error) }
+      process.push(created)
+      flow.push(created)
       continue
     }
     entry.result = contentText(data.message?.content)
     entry.error = errorText(data.error)
   }
-  return { question, steps, process }
+  return {
+    question, steps, process, flow,
+    format: 'structured-v1',
+    messageId: ordered[start].data?.id ?? ordered[start].data?.message?.id,
+    seq: ordered[start].seq,
+    revision: slice.at(-1)?.seq ?? ordered[start].seq,
+    complete: end !== -1 || slice.some(event => event.type === 'turn/end'),
+  }
 }
 
 function errorText(value) {
@@ -1421,12 +1868,11 @@ function isRuntimeContextMessage(message) {
 
 function contentText(content) {
   if (!Array.isArray(content)) return ''
-  return content.flatMap(block => {
-    if (block?.type === 'text') return [block.text]
-    if (block?.type === 'tool-call') return [block.name, block.arguments]
-    if (block?.type === 'tool-result') return contentText(block.content)
-    return []
-  }).filter(value => typeof value === 'string' && value.trim() !== '').join('\n')
+  // Tool calls already have their own execution records. Flattening their
+  // name/arguments here duplicates them as assistant prose (and Markdown).
+  return content.filter(block => block?.type === 'text')
+    .map(block => block.text)
+    .filter(value => typeof value === 'string' && value.trim() !== '').join('\n')
 }
 
 function titleFromText(text) {
@@ -1490,12 +1936,18 @@ export function apply(ctx, config) {
     // leaving the branch an empty card. `forkSeqBoundary` resolves the real
     // cut (durable seedLength, else the end-seed marker, else an own-log
     // bootstrap header) and falls back to firstLiveSeq only when unknown.
-    const parentSession = session.header?.parentSession
+    const events = sessionEventLog(session) ?? []
+    const header = { ...session.header, inheritedEventCount: session.inheritedEventCount ?? session.header?.inheritedEventCount }
+    const parentSession = header.parentSession
     const replayFrom = parentSession === undefined
       ? 0
-      : (forkSeqBoundary(session.events, session.header) ?? session.firstLiveSeq ?? 0)
+      : (forkSeqBoundary(events, header) ?? session.firstLiveSeq ?? 0)
     void store.projectSession(
-      { ...session, seedBoundary: parentSession === undefined ? undefined : forkAnchorSeq(session.events, session.header) },
+      {
+        id: session.id, title: session.title, header, events,
+        inheritedEventCount: header.inheritedEventCount,
+        seedBoundary: parentSession === undefined ? undefined : forkAnchorSeq(events, header),
+      },
       replayFrom,
       projectionWorkspaceTitle,
     ).catch(reportProjectionFailure)
@@ -1533,11 +1985,17 @@ export function apply(ctx, config) {
   // additional authorities opt in through config.trustedHosts (mirrors the
   // fence's DNS-rebinding defense).
   const trustedHosts = new Set(['localhost', '127.0.0.1', ...[...(config?.trustedHosts ?? [])].map(host => String(host).trim().toLowerCase()).filter(Boolean)])
+  const forkCard = createCardForkRunner(ctx)
   const api = async (req, res) => {
     try {
       const hostname = (typeof req.headers.host === 'string' ? req.headers.host : '').replace(/:\d+$/, '').toLowerCase()
       if (!trustedHosts.has(hostname)) return sendJson(res, 403, { error: '不被信任的 Host' })
       const path = new URL(req.url ?? '/', 'http://dsh.local').pathname
+      if (path === '/synapse/api/fork-card' && req.method === 'POST') {
+        const rejection = typeof ctx.connection?.requestRejection === 'function' ? ctx.connection.requestRejection(req) : 401
+        if (rejection !== undefined) return sendJson(res, rejection, { error: rejection === 401 ? '请先登录 DSH' : '不被信任的请求来源' })
+        return sendJson(res, 201, { session: await forkCard(await readJson(req)) })
+      }
       if (path === '/synapse/api/reset' && req.method === 'POST') return sendJson(res, 200, await store.clearLegacy(ctx.sessions.list()))
       if (path === '/synapse/api/workspaces') {
         if (req.method === 'GET') return sendJson(res, 200, { workspaces: await store.list() })
@@ -1550,7 +2008,19 @@ export function apply(ctx, config) {
       }
       const branch = /^\/synapse\/api\/threads\/([0-9a-f-]+)\/branch$/i.exec(path)
       if (branch !== null && req.method === 'POST') return sendJson(res, 201, { thread: await store.branch(branch[1], await readJson(req)) })
+      const cardTitle = /^\/synapse\/api\/threads\/([0-9a-f-]+)\/cards\/(\d+|i\d+)$/i.exec(path)
+      if (cardTitle !== null && req.method === 'PATCH') return sendJson(res, 200, { thread: await store.updateCardTitle(cardTitle[1], cardTitle[2], (await readJson(req))?.title) })
+      if (path === '/synapse/api/cards/visibility' && req.method === 'PATCH') {
+        const body = await readJson(req)
+        return sendJson(res, 200, await store.updateCardVisibility(body?.cards, body?.hidden))
+      }
       if (path === '/synapse/api/sessions/sync' && req.method === 'POST') { const body = await readJson(req); return sendJson(res, 200, { workspaces: await store.syncSessions(body.sessions, body.removedSessionIds) }) }
+      if (path === '/synapse/api/turn-cursor' && req.method === 'POST') {
+        const body = await readJson(req)
+        const events = await readSessionEvents(ctx, typeof body.sessionId === 'string' ? body.sessionId : '')
+        if (events === null) return sendJson(res, 404, { error: '会话已不可用' })
+        return sendJson(res, 200, { lastUserSeq: events.filter(isHumanUserEvent).at(-1)?.seq ?? -1 })
+      }
       // Detail on demand: the canvas stores only card summaries, so the full
       // turn (every assistant step plus tool arguments and outputs) is read
       // back from the DSH session when the user opens it. Live sessions are
@@ -1560,8 +2030,17 @@ export function apply(ctx, config) {
         const body = await readJson(req)
         const sessionId = typeof body.sessionId === 'string' ? body.sessionId : ''
         const events = await readSessionEvents(ctx, sessionId)
-        if (events === null) return sendJson(res, 404, { error: '会话已不可用' })
-        return sendJson(res, 200, { detail: buildTurnDetail(events, Number.isSafeInteger(body.seq) ? body.seq : null) })
+        if (events === null) {
+          return sendJson(res, 404, { error: '会话已不可用' })
+        }
+        return sendJson(res, 200, {
+          detail: buildTurnDetail(
+            events,
+            Number.isSafeInteger(body.seq) ? body.seq : null,
+            Number.isSafeInteger(body.turnIndex) ? body.turnIndex : null,
+            body.reference,
+          ),
+        })
       }
       const messages = /^\/synapse\/api\/threads\/([0-9a-f-]+)\/messages$/i.exec(path)
       if (messages !== null && req.method === 'POST') return sendJson(res, 201, { thread: await store.addMessage(messages[1], (await readJson(req)).text) })

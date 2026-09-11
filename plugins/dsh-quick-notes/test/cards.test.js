@@ -42,7 +42,7 @@ test('the layer is click-through, so DSH stays usable behind the cards', () => {
 })
 
 test('cards portal onto document.body above the Codex sticky user bubble', () => {
-  // The sticky question pins to body at z-index 45. A card left inside
+  // The sticky question pins to body at z-index 30. A card left inside
   // shell.overlay cannot climb out of that stacking context.
   // The bundler emits `(0, react_dom.createPortal)(..., document.body)`.
   assert.match(client, /react_dom\.createPortal\)\(/)

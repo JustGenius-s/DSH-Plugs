@@ -1,38 +1,43 @@
-import { spawn } from 'node:child_process'
-import { statSync } from 'node:fs'
-import { isAbsolute, join, normalize } from 'node:path'
+import { isAbsolute, normalize } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AssembleContext, Context } from '@just-genius/dsh-plugin-runtime/host'
-import { HOST_SERVICES } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, Schema, settingsNamespace } from '@just-genius/dsh-plugin-runtime/host'
 
-import { adoptFolder } from './scan.ts'
+import { adoptFolder, InvalidFolderError } from './scan.ts'
 import {
   OPEN_PATH,
+  PINS_PATH,
   PROJECT_PATH,
   SCAN_PATH,
-  normalizePrimaryPath,
-  roleOf,
-  samePath,
+  SESSION_TITLES_PATH,
+  SETTINGS_NS,
   type HttpResult,
   type ProjectAction,
   type RepoFolder,
-  type WorkspaceBinding,
+  type SessionTitleLookup,
 } from './shared.ts'
 import { bindBinding, deleteBinding, findBindingForCwd, listBindings, storeRoot } from './store.ts'
+import { requestRejection, type RequestAuthFace } from './request-auth.ts'
+import { resolveSessionTitleFacts } from './session-titles.ts'
+import { renderWorkspaceContext, type WorkspacePromptInput } from './workspace-prompt.ts'
+import { openInOs } from './open-path.ts'
+import { parsePinAction } from './pin-state.ts'
+import { changeStoredPins, readStoredPins } from './pin-store.ts'
 
 export const name = 'dsh-workspace-plus'
 export const inject = [
+  HOST_SERVICES.connection,
+  HOST_SERVICES.sessions,
+  HOST_SERVICES.sessionPersistence,
+  HOST_SERVICES.settings,
   HOST_SERVICES.systemPrompt,
   HOST_SERVICES.webServer,
 ] as const
 
+const SettingsSchema = Schema.object({})
+
 interface PromptAgent {
   session?: { header?: { cwd?: string } }
-}
-
-/** The `webRuntime` bind-trust face the web app provides after bind. */
-interface WebRuntime {
-  trustedHosts: readonly string[]
 }
 
 interface RouteLease {
@@ -46,54 +51,26 @@ interface RouteLease {
 const routeLeases = new WeakMap<object, RouteLease>()
 
 export function apply(ctx: Context): void {
-  ctx.systemPrompt.section({
+  ctx.systemPrompt.variable('workspace_plus_context', (context) => {
+    return renderWorkspaceContext(bindingFor(context))
+  })
+  ctx.systemPrompt.context({
     name: 'workspace-plus:workspace',
     order: 41,
-    text: (context) => renderPrompt(bindingFor(context)),
+    text: '{{workspace_plus_context}}',
   })
 
   ctx.effect(() => acquireRoutes(ctx), 'dsh-workspace-plus: host routes')
+  ctx.settings.register(settingsNamespace(SETTINGS_NS), SettingsSchema, { base: {} })
 }
 
-function bindingFor(context: AssembleContext): WorkspaceBinding | null {
+function bindingFor(context: AssembleContext): WorkspacePromptInput | null {
   const agent = (context as AssembleContext & { agent?: PromptAgent }).agent
   const cwd = agent?.session?.header?.cwd
   if (typeof cwd !== 'string' || cwd.trim() === '') return null
   const binding = findBindingForCwd(cwd)
   if (binding === null || binding.repos.length < 2) return null
-  return binding
-}
-
-function renderPrompt(binding: WorkspaceBinding | null): string {
-  if (binding === null) return ''
-  const primaryPath = normalizePrimaryPath(binding.repos, binding.primaryPath)
-  const primary = binding.repos.find((repo) => samePath(repo.path, primaryPath))
-  const secondaries = binding.repos.filter((repo) => roleOf(repo.path, primaryPath) === 'secondary')
-  const lines: string[] = [
-    '## Multi-folder workspace',
-    '',
-    'This session is one workspace made of multiple folders the user added. They are all in-scope work.',
-    `Session working directory and workspace-write follow the primary only: \`${primaryPath}\`.`,
-    'Other listed folders are readable and in-scope. Writes there are outside workspace-write: call the tool normally, then follow its denial and request a one-shot escalation so the user can approve.',
-    '',
-  ]
-  if (primary !== undefined) {
-    lines.push(`Primary (official workspace / writable range): \`${primary.name}\` — \`${primary.path}\``)
-  } else {
-    lines.push(`Primary (official workspace / writable range): \`${primaryPath}\``)
-  }
-  if (secondaries.length > 0) {
-    lines.push('', 'Also in this workspace (escalate writes):')
-    for (const repo of secondaries) {
-      lines.push(`- \`${repo.name}\` — \`${repo.path}\``)
-    }
-  }
-  lines.push(
-    '',
-    'Prefer the primary unless the task is clearly in another listed folder.',
-    'Do not assume a single-package layout.',
-  )
-  return lines.join('\n')
+  return { binding, cwd }
 }
 
 /** Register every host route once per server, shared across duplicate applies. */
@@ -109,7 +86,7 @@ function acquireRoutes(ctx: Context): () => void {
     ctx.webServer.register({
       kind: 'exact',
       path: SCAN_PATH,
-      handler: (req, res) => { void handleAdopt(req, res) },
+      handler: (req, res) => { void handleAdopt(ctx, req, res) },
     }),
     ctx.webServer.register({
       kind: 'exact',
@@ -120,6 +97,16 @@ function acquireRoutes(ctx: Context): () => void {
       kind: 'exact',
       path: OPEN_PATH,
       handler: (req, res) => { void handleOpen(ctx, req, res) },
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: SESSION_TITLES_PATH,
+      handler: (req, res) => { void handleSessionTitles(ctx, req, res) },
+    }),
+    ctx.webServer.register({
+      kind: 'exact',
+      path: PINS_PATH,
+      handler: (req, res) => { void handlePins(ctx, req, res) },
     }),
   ]
   const lease: RouteLease = {
@@ -139,7 +126,34 @@ function releaseRoutes(server: object, lease: RouteLease): void {
   lease.dispose()
 }
 
-async function handleAdopt(req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handlePins(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!authorizeRequest(ctx, req, res)) return
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    json(res, 405, { ok: false, message: 'method not allowed' })
+    return
+  }
+  let action
+  if (req.method === 'POST') {
+    try {
+      action = parsePinAction(await readJsonBody(req))
+    } catch (error) {
+      json(res, 400, { ok: false, message: errorMessage(error) })
+      return
+    }
+    if (action === undefined) {
+      json(res, 400, { ok: false, message: 'invalid pin action' })
+      return
+    }
+  }
+  try {
+    json(res, 200, { ok: true, value: action === undefined ? readStoredPins() : changeStoredPins(action) })
+  } catch (error) {
+    json(res, 500, { ok: false, message: errorMessage(error) })
+  }
+}
+
+async function handleAdopt(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!authorizeRequest(ctx, req, res)) return
   if (req.method !== 'POST') {
     json(res, 405, { ok: false, message: 'method not allowed' })
     return
@@ -159,15 +173,12 @@ async function handleAdopt(req: IncomingMessage, res: ServerResponse): Promise<v
   try {
     json(res, 200, { ok: true, value: adoptFolder(path) })
   } catch (error) {
-    json(res, 500, { ok: false, message: errorMessage(error) })
+    json(res, error instanceof InvalidFolderError ? 400 : 500, { ok: false, message: errorMessage(error) })
   }
 }
 
 async function handleBinding(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!isTrustedApiRequest(ctx, req)) {
-    json(res, 403, { ok: false, message: 'forbidden' })
-    return
-  }
+  if (!authorizeRequest(ctx, req, res)) return
   if (req.method === 'GET') {
     json(res, 200, {
       ok: true,
@@ -202,21 +213,19 @@ async function handleBinding(ctx: Context, req: IncomingMessage, res: ServerResp
     }
     const binding = bindBinding({
       root: action.root,
+      previousRoot: action.previousRoot,
       repos: action.repos,
       title: action.title,
       primaryPath: action.primaryPath,
     })
     json(res, 200, { ok: true, value: binding })
   } catch (error) {
-    json(res, 500, { ok: false, message: errorMessage(error) })
+    json(res, error instanceof InvalidFolderError ? 400 : 500, { ok: false, message: errorMessage(error) })
   }
 }
 
 async function handleOpen(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!isTrustedApiRequest(ctx, req)) {
-    json(res, 403, { ok: false, message: 'forbidden' })
-    return
-  }
+  if (!authorizeRequest(ctx, req, res)) return
   if (req.method !== 'POST') {
     json(res, 405, { ok: false, message: 'method not allowed' })
     return
@@ -234,10 +243,36 @@ async function handleOpen(ctx: Context, req: IncomingMessage, res: ServerRespons
     return
   }
   try {
-    await openInOs(normalize(raw))
+    const path = normalize(raw)
+    await openInOs(path)
     json(res, 200, { ok: true, value: { opened: true } })
   } catch (error) {
     json(res, 400, { ok: false, message: errorMessage(error) })
+  }
+}
+
+async function handleSessionTitles(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!authorizeRequest(ctx, req, res)) return
+  if (req.method !== 'POST') {
+    json(res, 405, { ok: false, message: 'method not allowed' })
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    json(res, 400, { ok: false, message: errorMessage(error) })
+    return
+  }
+  const lookups = parseSessionTitleLookups(body)
+  if (lookups === undefined) {
+    json(res, 400, { ok: false, message: 'invalid session title request' })
+    return
+  }
+  try {
+    json(res, 200, { ok: true, value: { sessions: await resolveSessionTitleFacts(ctx, lookups) } })
+  } catch (error) {
+    json(res, 500, { ok: false, message: errorMessage(error) })
   }
 }
 
@@ -269,9 +304,32 @@ function parseBindingAction(body: unknown): ProjectAction | undefined {
       repos,
       title: typeof value.title === 'string' ? value.title : undefined,
       primaryPath: typeof value.primaryPath === 'string' ? value.primaryPath : undefined,
+      previousRoot: typeof value.previousRoot === 'string' ? value.previousRoot : undefined,
     }
   }
   return undefined
+}
+
+function parseSessionTitleLookups(body: unknown): SessionTitleLookup[] | undefined {
+  if (body === null || typeof body !== 'object') return undefined
+  const sessions = (body as { sessions?: unknown }).sessions
+  if (!Array.isArray(sessions)) return undefined
+  const lookups: SessionTitleLookup[] = []
+  for (const item of sessions) {
+    if (item === null || typeof item !== 'object') return undefined
+    const value = item as Record<string, unknown>
+    if (typeof value.id !== 'string' || value.id.trim() === '') return undefined
+    if (typeof value.updatedAt !== 'number' || !Number.isFinite(value.updatedAt)) return undefined
+    if (typeof value.listedBlank !== 'boolean') return undefined
+    if (value.cwd !== undefined && typeof value.cwd !== 'string') return undefined
+    lookups.push({
+      id: value.id,
+      updatedAt: value.updatedAt,
+      listedBlank: value.listedBlank,
+      ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
+    })
+  }
+  return lookups
 }
 
 function readString(body: unknown, key: string): string | undefined {
@@ -323,143 +381,12 @@ function readJsonBody(req: IncomingMessage, limit = 256 * 1024): Promise<unknown
   })
 }
 
-// ── OS file manager ────────────────────────────────────────────────────────
+// ── Browser authentication ────────────────────────────────────────────────
 
-function isDirectoryPath(path: string): boolean {
-  try {
-    return statSync(path).isDirectory()
-  } catch {
-    return false
-  }
-}
-
-function spawnOpener(cmd: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
-    child.on('error', (error) => {
-      if (settled) return
-      settled = true
-      reject(error)
-    })
-    child.on('spawn', () => {
-      if (settled) return
-      settled = true
-      child.unref()
-      resolve()
-    })
-    child.on('exit', (code) => {
-      if (settled) return
-      settled = true
-      if (code === 0 || code === null) resolve()
-      else reject(new Error(`opener exited with code ${code}`))
-    })
-  })
-}
-
-/** Reveal `path` in the platform file manager. */
-async function openInOs(path: string): Promise<void> {
-  if (process.platform === 'win32') {
-    const explorer = process.env.SystemRoot
-      ? join(process.env.SystemRoot, 'explorer.exe')
-      : 'explorer.exe'
-    const args = isDirectoryPath(path) ? [path] : [`/select,${path}`]
-    await spawnOpener(explorer, args)
-    return
-  }
-  if (process.platform === 'darwin') {
-    await spawnOpener('open', [path])
-    return
-  }
-  // Linux: prefer xdg-open, then the common desktop file managers.
-  const candidates: Array<{ cmd: string; args: string[] }> = [
-    { cmd: 'xdg-open', args: [path] },
-    { cmd: 'gio', args: ['open', path] },
-    { cmd: 'nautilus', args: [path] },
-    { cmd: 'dolphin', args: [path] },
-    { cmd: 'thunar', args: [path] },
-    { cmd: 'pcmanfm', args: [path] },
-  ]
-  let lastError: unknown
-  for (const candidate of candidates) {
-    try {
-      await spawnOpener(candidate.cmd, candidate.args)
-      return
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('no file manager available')
-}
-
-// ── Trust fence (mirrors the official DSH API route check) ─────────────────
-
-function header(req: IncomingMessage, name: string): string | undefined {
-  const value = req.headers[name]
-  return typeof value === 'string' ? value : undefined
-}
-
-function parseAuthority(authority: string): URL | undefined {
-  try {
-    return new URL(`http://${authority}`)
-  } catch {
-    return undefined
-  }
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  if (hostname === 'localhost' || hostname === '[::1]') return true
-  const parts = hostname.split('.')
-  return parts.length === 4
-    && parts[0] === '127'
-    && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)
-}
-
-function canonicalAuthority(entry: string, entryUrl: URL): string {
-  const port = entryUrl.port !== '' ? entryUrl.port : new URL(`https://${entry}`).port
-  return port === '' ? entryUrl.hostname : `${entryUrl.hostname}:${port}`
-}
-
-function isTrustedAuthority(hostUrl: URL, trustedHosts: readonly string[]): boolean {
-  return trustedHosts.some((entry) => {
-    const entryUrl = parseAuthority(entry)
-    if (entryUrl === undefined) return false
-    return canonicalAuthority(entry, entryUrl) === entryUrl.hostname
-      ? entryUrl.hostname === hostUrl.hostname
-      : entryUrl.host === hostUrl.host
-  })
-}
-
-/**
- * Read the web app's bind-trust values without declaring `webRuntime`.
- *
- * That service is provided by the web app once the server binds, and an
- * unknown inject name parks the plugin forever, so it is read defensively:
- * when it is absent the fence falls back to the loopback check, which is what
- * the GUI always arrives on anyway.
- */
-function trustedHostsOf(ctx: Context): readonly string[] {
-  try {
-    const runtime = (ctx as Context & { webRuntime?: WebRuntime }).webRuntime
-    return runtime?.trustedHosts ?? []
-  } catch {
-    return []
-  }
-}
-
-function isTrustedApiRequest(ctx: Context, req: IncomingMessage): boolean {
-  const trustedHosts = trustedHostsOf(ctx)
-  const host = header(req, 'host')
-  if (host === undefined) return false
-  const hostUrl = parseAuthority(host)
-  if (hostUrl === undefined) return false
-  if (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false
-  if (header(req, 'sec-fetch-site') === 'cross-site') return false
-  const origin = header(req, 'origin')
-  if (origin === undefined) return true
-  try {
-    return new URL(origin).host === hostUrl.host
-  } catch {
-    return false
-  }
+function authorizeRequest(ctx: Context, req: IncomingMessage, res: ServerResponse): boolean {
+  const connection = (ctx as unknown as { connection?: RequestAuthFace }).connection
+  const status = requestRejection(connection, req)
+  if (status === undefined) return true
+  json(res, status, { ok: false, message: status === 401 ? 'unauthorized' : 'forbidden' })
+  return false
 }

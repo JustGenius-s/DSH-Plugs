@@ -30,6 +30,7 @@ export async function commitBinding(
   await postJson(PROJECT_PATH, {
     action: 'bind',
     root: decision.primaryPath,
+    previousRoot: options?.previousPrimaryPath,
     repos: decision.repos,
     title: decision.title,
     primaryPath: decision.primaryPath,

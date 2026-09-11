@@ -7,13 +7,16 @@ import {
 } from '@just-genius/dsh-plugin-runtime/client'
 
 import { BindingDialog } from './BindingDialog.tsx'
+import { openSession } from './actions.ts'
 import { MenuSettingsItem } from './MenuSettingsItem.tsx'
 import { RowMenuOverlay } from './RowMenuOverlay.tsx'
 import { WorkspaceRowChrome } from './WorkspaceRowChrome.tsx'
 import { commitBinding, type WorkspaceFace } from './commit.ts'
 import { askCreateBinding, type ConfirmDecision } from './flow.ts'
 import { en, zh, type WorkspacePlusKey } from './locales.ts'
-import { normalizeCompare } from '../shared.ts'
+import { normalizeCompare, SETTINGS_NS } from '../shared.ts'
+import { installSessionTitleRepair } from './session-title-repair.ts'
+import { installPinPersistence, listenForMenuStateChanges } from './features.ts'
 
 declare module '@just-genius/dsh-plugin-runtime/client' {
   interface PluginLocaleNamespaceMap {
@@ -50,6 +53,9 @@ export function apply(ctx: ClientContext): void {
 
   ctx.effect(() => patchPickDirectory(uiWorkspace), 'dsh-workspace-plus: intercept directory pick')
   ctx.effect(() => patchCreate(ctx, workspaceFace), 'dsh-workspace-plus: intercept workspace create')
+  ctx.effect(() => installSessionTitleRepair(ctx), 'dsh-workspace-plus: repair cold session titles')
+  ctx.effect(() => listenForMenuStateChanges(), 'dsh-workspace-plus: sync local pin state')
+  ctx.effect(() => installPinPersistence(), 'dsh-workspace-plus: persist and restore pins')
 
   // Multi-folder binding: add/edit dialog and the sidebar row decorations.
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({
@@ -83,11 +89,10 @@ export function apply(ctx: ClientContext): void {
     inject: () => ({ t, ctx }),
   }, RowMenuOverlay as never))
 
-  // Switches for every menu action, in the General settings page.
-  ctx.slots.inject('settings.general.item', () => ctx.slots.register({
-    name: 'settings.general.item',
-    id: 'workspace-plus',
-    order: 200,
+  // Switches for every menu action, in the Plugins settings page.
+  ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
+    name: 'settings.plugin.item',
+    key: SETTINGS_NS,
     locale: NS,
     inject: () => ({ t }),
   }, MenuSettingsItem as never))
@@ -137,7 +142,6 @@ function patchCreate(ctx: ClientContext, workspaceFace: WorkspaceFace): () => vo
     const pending = pendingDecision
     if (pending !== null && pending.kind === 'multi' && normalizeCompare(pending.primaryPath) === normalizeCompare(input.path)) {
       pendingDecision = null
-      if (pending.repos.length < 2) return original(input)
       return bindAndCreate(pending)
     }
 
@@ -183,7 +187,7 @@ function handleDeepLink(ctx: ClientContext): () => void {
     const found = Object.keys(byId).find((id) => id === target)
     if (found !== undefined) {
       window.clearInterval(timer)
-      sessions.open(found as never)
+      openSession(ctx, found)
       return
     }
     if (tries >= 30) {
@@ -194,7 +198,7 @@ function handleDeepLink(ctx: ClientContext): () => void {
       if (refresh === undefined) return
       refresh().then(() => {
         const refreshed = Object.keys(sessions.list.getSnapshot().byId).find((id) => id === target)
-        if (refreshed !== undefined) sessions.open(refreshed as never)
+        if (refreshed !== undefined) openSession(ctx, refreshed)
       }).catch(() => undefined)
     }
   }, 250)

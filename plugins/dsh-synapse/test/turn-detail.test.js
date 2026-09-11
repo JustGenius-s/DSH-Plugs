@@ -2,12 +2,24 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
-import { buildTurnDetail } from '../index.js'
+import { buildTurnDetail, persistenceListEntries } from '../index.js'
 
 const userMessage = (seq, text) => ({ type: 'user/message', seq, time: seq * 1000, data: { content: [{ type: 'text', text }] } })
 const assistantMessage = (seq, text, turn = 1) => ({ type: 'assistant/message', seq, time: seq * 1000, data: { turn, step: 1, message: { content: [{ type: 'text', text }] } } })
 const toolCall = (seq, callId, name, args, turn = 1) => ({ type: 'tool/call', seq, time: seq * 1000, data: { turn, step: 1, callId, name, arguments: args } })
 const toolResult = (seq, callId, output, turn = 1) => ({ type: 'tool/result', seq, time: seq * 1000, data: { turn, step: 1, message: { source: { kind: 'tool', callId }, content: [{ type: 'text', text: output }] } } })
+
+test('persistence.list snapshots unwrap to headers', () => {
+  const header = { id: 'fork-1', parentSession: 'parent-1', cwd: '/work' }
+  assert.deepEqual(persistenceListEntries([{ header, revision: 'r1', sizeBytes: 12 }]), [{ header }])
+  assert.deepEqual(persistenceListEntries([header]), [{ header }])
+  assert.deepEqual(persistenceListEntries([{ header, inheritedEventCount: 8 }]), [{
+    header: { ...header, inheritedEventCount: 8 },
+    inheritedEventCount: 8,
+  }])
+  assert.deepEqual(persistenceListEntries(undefined), [])
+  assert.deepEqual(persistenceListEntries([{ revision: 'r' }]), [])
+})
 
 test('rebuilds one turn with its full answer and tool records', () => {
   const events = [
@@ -27,6 +39,8 @@ test('rebuilds one turn with its full answer and tool records', () => {
   assert.equal(detail.process[0].name, 'bash')
   assert.equal(detail.process[0].arguments, '{"cmd":"pnpm test"}')
   assert.equal(detail.process[0].result.length, 20_000)
+  assert.deepEqual(detail.flow.map(item => item.kind), ['assistant', 'tool', 'assistant'])
+  assert.equal(detail.flow[1].name, 'bash')
 })
 
 test('a turn stops at the next question', () => {
@@ -70,11 +84,23 @@ test('the last turn runs to the end of the log', () => {
   assert.deepEqual(detail.steps.map(step => step.text), ['第二答', '补充'])
 })
 
+test('uses the card turn index when its durable source sequence is missing', () => {
+  const events = [
+    userMessage(1, '第一问'),
+    assistantMessage(2, '第一答'),
+    userMessage(3, '第二问'),
+    assistantMessage(4, '第二答'),
+  ]
+  const detail = buildTurnDetail(events, null, 1)
+  assert.equal(detail.question, '第二问')
+  assert.deepEqual(detail.steps.map(step => step.text), ['第二答'])
+})
+
 test('survives a missing or unreadable log', () => {
-  assert.deepEqual(buildTurnDetail(undefined, 1), { question: null, steps: [], process: [] })
-  assert.deepEqual(buildTurnDetail([], 1), { question: null, steps: [], process: [] })
+  assert.deepEqual(buildTurnDetail(undefined, 1), { question: null, steps: [], process: [], flow: [] })
+  assert.deepEqual(buildTurnDetail([], 1), { question: null, steps: [], process: [], flow: [] })
   // No user event at all: nothing to show rather than throwing.
-  assert.deepEqual(buildTurnDetail([assistantMessage(1, 'hi')], 1), { question: null, steps: [], process: [] })
+  assert.deepEqual(buildTurnDetail([assistantMessage(1, 'hi')], 1), { question: null, steps: [], process: [], flow: [] })
 })
 
 test('pairs a tool result that arrives before its call', () => {
@@ -135,10 +161,8 @@ test('a later real turn stops at its own next question', () => {
 async function loadReadSessionEvents() {
   const source = await readFile(new URL('../index.js', import.meta.url), 'utf8')
   const helperStart = source.indexOf('function sessionEventLog')
-  const helperEnd = source.indexOf('function inheritedCountOf')
-  const start = source.indexOf('async function readSessionEvents')
-  const end = source.indexOf('/**', start)
-  const module = await import(`data:text/javascript,${encodeURIComponent(`${source.slice(helperStart, helperEnd)}\n${source.slice(start, end)}\nexport { readSessionEvents }`)}`)
+  const end = source.indexOf('/**', source.indexOf('async function readSessionEvents'))
+  const module = await import(`data:text/javascript,${encodeURIComponent(`${source.slice(helperStart, end)}\nexport { readSessionEvents }`)}`)
   return module.readSessionEvents
 }
 
@@ -163,6 +187,27 @@ test('falls back to persistence for a cold session', async () => {
   assert.equal(inspected, 'session-cold')
 })
 
+test('reads a cold session through persistence.open when inspect is gone', async () => {
+  const readSessionEvents = await loadReadSessionEvents()
+  const events = [{ seq: 1, type: 'user/message', time: 1, data: { content: [{ type: 'text', text: 'fork q' }] } }]
+  const closed = []
+  const ctx = {
+    sessions: { get: () => undefined, list: () => [] },
+    get: name => name === 'sessionPersistence' ? {
+      open: async (id, access) => {
+        assert.equal(id, 'session-fork')
+        assert.equal(access, 'read')
+        return {
+          read: async () => ({ events }),
+          close: async () => { closed.push(id) },
+        }
+      },
+    } : undefined,
+  }
+  assert.deepEqual(await readSessionEvents(ctx, 'session-fork'), events)
+  assert.deepEqual(closed, ['session-fork'])
+})
+
 test('a rejecting session lookup degrades to no detail instead of failing the request', async () => {
   const readSessionEvents = await loadReadSessionEvents()
   // A branded-id store rejects a raw string; that must not surface as a 500.
@@ -183,24 +228,30 @@ test('the client falls back to the card summary when the detail read fails', asy
   // A failed/404 detail read must cache a null result, not throw: the canvas
   // keeps rendering the stored summary and never shows a broken pane.
   assert.match(load, /catch \(error\)/)
-  assert.match(load, /historyBySession\.set\(`\$\{thread\.dshSessionId\}:\$\{target\.id\}`, null\)/)
+  assert.match(load, /if \(!state\.historyBySession\.has\(key\)\) state\.historyBySession\.set\(key, null\)/)
+  assert.match(load, /turnIndex: Number\.isInteger\(target\.turn\.turnIndex\) \? target\.turn\.turnIndex : null/)
   // The inspector and the thread view both read the nullable detail and fall
   // back to the card fields when it is null.
-  const inspector = source.slice(source.indexOf('function inspectorReply'), source.indexOf('function renderThread'))
+  const inspector = source.slice(source.indexOf('function lastAssistantText'), source.indexOf('function renderThread'))
   assert.match(inspector, /detail\?\.steps \?\? \[\]/)
   assert.match(inspector, /card\.answer\?\.text/)
   assert.match(inspector, /const pending = card\.answer\?\.pending === true/)
   assert.doesNotMatch(inspector, /live\?\.running === true/)
+  assert.match(inspector, /texts\[texts\.length - 1\]/)
+  assert.match(inspector, /正在回复/)
+  assert.doesNotMatch(inspector, /正在读取完整内容/)
+  assert.doesNotMatch(inspector, /等待助手回复/)
   const thread = source.slice(source.indexOf('function renderThread'), source.indexOf('function render()'))
   assert.match(thread, /card\.turn\.answer/)
 })
 
 test('reading events never trips the cordis inject guard', async () => {
+  const { inject } = await import('../index.js')
+  for (const service of ['webServer', 'sessions', 'sessionPersistence']) assert.ok(inject.includes(service))
   const readSessionEvents = await loadReadSessionEvents()
-  // Cordis's Context proxy THROWS `cannot get property "..." without inject`
-  // when an undeclared service is touched. `sessionPersistence` is deliberately
-  // not in `inject`, so a plain ctx.sessionPersistence read would escape the
-  // route handler as a 500. The lookup must use ctx.get and stay guarded.
+  // Even with the inject declaration, a host proxy can still throw if the
+  // service is missing. The lookup must stay guarded so turn-detail is a 404,
+  // not a 500.
   const throwingProxy = new Proxy({ sessions: { get: () => undefined } }, {
     get(target, prop) {
       if (prop === 'sessionPersistence') throw new Error('cannot get property "sessionPersistence" without inject')
@@ -228,7 +279,7 @@ test('reading events never trips the cordis inject guard', async () => {
 
 test('inspector keeps settled card text while a later turn is live', async () => {
   const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
-  const start = source.indexOf('function inspectorReply')
+  const start = source.indexOf('function lastAssistantText')
   const end = source.indexOf('function inspectorNoteBody')
   const context = {
     state: {
@@ -260,4 +311,39 @@ test('inspector keeps settled card text while a later turn is live', async () =>
   })
   assert.equal(live.pending, true)
   assert.equal(live.answerText, '')
+})
+
+test('inspector uses only the last assistant markdown from a multi-step turn', async () => {
+  const source = await readFile(new URL('../app.js', import.meta.url), 'utf8')
+  const start = source.indexOf('function lastAssistantText')
+  const end = source.indexOf('function inspectorNoteBody')
+  const context = {
+    state: {
+      workspace: { threads: [{ id: 't1', dshSessionId: 's1' }] },
+      liveReplies: new Map(),
+      historyBySession: new Map(),
+    },
+    historyForCard: () => ({
+      steps: [
+        { kind: 'assistant', text: '我先看看。' },
+        { kind: 'assistant', text: '测试通过了。' },
+      ],
+      process: [],
+    }),
+    isSessionLabelQuestion: () => false,
+  }
+  vm.createContext(context)
+  vm.runInContext(source.slice(start, end), context)
+  assert.equal(context.lastAssistantText(context.historyForCard().steps, '摘要'), '测试通过了。')
+  assert.equal(context.lastAssistantText([], '卡片摘要'), '卡片摘要')
+  const reply = context.inspectorReply({
+    id: 't1:turn:1',
+    dshThreadId: 't1',
+    question: '跑一下测试',
+    answer: { kind: 'assistant', text: '卡片摘要', pending: false },
+    error: null,
+    sourceSeq: 1,
+  })
+  assert.equal(reply.pending, false)
+  assert.equal(reply.answerText, '测试通过了。')
 })

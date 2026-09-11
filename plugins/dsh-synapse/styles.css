@@ -30,6 +30,12 @@ button.primary:hover { border-color: #000; background: #000; color: #fff; }
 .canvas-controls button { min-width: 32px; padding: 0 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
 .canvas-controls button svg { width: 14px; height: 14px; flex: none; }
 .canvas-controls span { min-width: 42px; color: #64748b; font-size: 12px; text-align: center; }
+.canvas-controls { max-width: calc(100% - 32px); flex-wrap: wrap; justify-content: flex-end; }
+.visibility-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.hidden-card { position: absolute; }
+.hidden-card-restore { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 100%; padding: 0 14px; border-style: dashed; border-color: #a5b3bf; background: #edf1f4; color: #596572; font-size: 12px; white-space: nowrap; }
+.hidden-card .graph-continue-button { z-index: 1; }
+.canvas-minimap-card.is-hidden { background: transparent; border: 1px dashed #8f9ba7; }
 .canvas-minimap { position: fixed; z-index: 70; right: 16px; bottom: 16px; width: 176px; height: 118px; border: 1px solid #d8dee8; border-radius: 8px; background: rgba(255,255,255,.94); box-shadow: 0 4px 14px rgba(33,48,67,.12); overflow: hidden; }
 .canvas-minimap.beside-inspector { right: min(calc(var(--inspector-width, 460px) + 16px), calc(100% - 32px)); }
 .canvas-minimap.is-full { display: none; }
@@ -65,8 +71,8 @@ button.primary:hover { border-color: #000; background: #000; color: #fff; }
 .sidebar-collapsed .sidebar-toggle { width: 36px; height: 36px; min-height: 36px; color: #111827; }
 .sidebar-collapsed .new-workspace { width: 36px; height: 36px; min-height: 36px; margin: 0 0 12px; border-color: transparent; background: transparent; padding: 0; }
 .sidebar-collapsed .new-workspace span, .sidebar-collapsed .workspace-label, .sidebar-collapsed .sidebar-heading, .sidebar-collapsed .thread-tree { display: none; }
-.status-message { position: absolute; z-index: 6; top: 12px; right: 16px; display: flex; align-items: center; gap: 10px; max-width: 400px; padding: 9px 10px 9px 13px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: #991b1b; font-size: 12px; box-shadow: 0 3px 10px rgba(127,29,29,.12); }
-.status-message span { flex: 1; line-height: 1.5; }
+.status-message { position: absolute; z-index: 100; top: 12px; right: 16px; display: flex; align-items: center; gap: 10px; max-width: min(400px, calc(100% - 32px)); padding: 9px 10px 9px 13px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: #991b1b; font-size: 12px; box-shadow: 0 3px 10px rgba(127,29,29,.12); }
+.status-message span { min-width: 0; flex: 1; line-height: 1.5; overflow-wrap: anywhere; }
 .status-message button { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border: 0; border-radius: 50%; background: transparent; padding: 0; color: #b91c1c; font-size: 15px; line-height: 1; }
 .status-message button:hover { background: #fee2e2; }
 .main-stage { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #fff; }
@@ -86,20 +92,33 @@ button.primary:hover { border-color: #000; background: #000; color: #fff; }
    and connector per frame. Zoom drops the layer to avoid upscaling a stale
    raster (see zoomCanvas in app.js). */
 .canvas-viewport.is-panning .canvas-content { will-change: transform; }
-.canvas-content { position: absolute; inset: 0; transform-origin: 0 0; }
-.connectors { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.canvas-content { position: absolute; inset: 0; transform-origin: 0 0; overflow: visible; }
+.connectors { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+.connectors .connector-link { position: absolute; overflow: visible; pointer-events: none; }
 .connectors path { fill: none; stroke: #aebbc9; stroke-width: 1.5; }
 .connectors path.active-connector { stroke: #3478f6; }
 .connectors .draft-connector { stroke: #3478f6; stroke-dasharray: 5 4; }
-.cards-layer { position: absolute; inset: 0; }
+.cards-layer { position: absolute; inset: 0; overflow: visible; }
 .thread-card { position: absolute; display: grid; width: 310px; height: 276px; grid-template-rows: auto auto minmax(0, 1fr) auto; border: 1px solid #d8e0e8; border-radius: 7px; background: #fff; box-shadow: 0 3px 11px rgba(33,48,67,.08); overflow: visible; }
 .thread-card:hover { border-color: #9ca3af; box-shadow: 0 8px 20px rgba(33,48,67,.13); }
 .thread-card.selected { box-shadow: 0 0 0 2px rgba(17,24,39,.16), 0 8px 20px rgba(33,48,67,.13); }
+/* A branch with no message yet is part of the family tree but carries no
+   content, so it reads as an outline rather than a filled card. */
+.thread-card.card-blank { border-style: dashed; background: rgba(255,255,255,.6); box-shadow: none; }
+.thread-card.card-blank .thread-title { color: #64748b; font-weight: 620; }
 .node-handle { position: absolute; top: -8px; left: 50%; display: grid; width: 28px; height: 15px; min-height: 15px; place-items: center; transform: translateX(-50%); border: 1px solid #d8e0e8; border-radius: 4px; background: #fff; cursor: grab; padding: 0; }
 .node-handle::after { content: '...'; display: block; margin: -5px 0 0 2px; color: #94a3b8; font-size: 11px; letter-spacing: 1.5px; line-height: 1; }
 .thread-card-head { gap: 8px; min-width: 0; padding: 15px 12px 8px; }
 .thread-card-head .topic-dot { background: var(--thread-color); }
-.thread-title { display: block; min-width: 0; flex: 1; min-height: 22px; overflow: hidden; margin: 0; color: #1f2937; font-size: 13px; font-weight: 720; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.thread-title { display: -webkit-box; min-width: 0; flex: 1; min-height: 22px; overflow: hidden; margin: 0; color: #1f2937; font-size: 13px; font-weight: 720; text-align: left; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.thread-title[data-rename-title] { cursor: text; }
+.thread-title[data-rename-title]:focus-visible { outline: 2px solid #3478f6; outline-offset: 2px; border-radius: 3px; }
+/* In-place rename: the input stands in for the title, matching its metrics so
+   the card does not change height while editing. */
+.card-rename-form { display: flex; min-width: 0; flex: 1; margin: 0; }
+.thread-title-input { width: 100%; min-width: 0; min-height: 22px; border: 1px solid #3478f6; border-radius: 5px; background: #fff; padding: 1px 6px; color: #1f2937; font-size: 13px; font-weight: 720; line-height: 1.4; outline: none; }
+.card-inspector-head .card-rename-form { grid-column: 1 / -1; width: 100%; }
+.card-inspector-rename-input { width: 100%; min-width: 0; border: 1px solid #3478f6; border-radius: 6px; background: #fff; padding: 4px 8px; color: #172033; font-size: 15px; font-weight: 680; line-height: 1.5; outline: none; }
 .graph-continue-button, .graph-fold-button, .graph-branch-button { position: absolute; right: -12px; z-index: 4; display: grid; width: 24px; height: 24px; min-height: 24px; place-items: center; border-color: #9ca3af; border-radius: 50%; background: #fff; padding: 0; color: #111827; }
 .graph-continue-button, .graph-fold-button { top: 50%; transform: translateY(-50%); }
 .graph-branch-button { top: calc(50% + 30px); transform: translateY(-50%); }
@@ -112,17 +131,22 @@ button.primary:hover { border-color: #000; background: #000; color: #fff; }
 .selection-followup:hover { border-color: #2563eb; background: #2563eb; color: #fff; }
 .selection-followup svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .selection-followup[hidden] { display: none; }
-.thread-meta { gap: 7px; padding: 0 12px; color: #94a3b8; font-size: 10px; }
+.thread-meta { gap: 7px; min-width: 0; height: 22px; overflow: hidden; padding: 0 12px; color: #94a3b8; font-size: 10px; white-space: nowrap; }
 .thread-meta span + span::before { content: '·'; margin-right: 7px; }
 .thread-meta .card-process-count { display: inline-flex; align-items: center; min-height: 18px; margin-left: auto; border-radius: 9px; background: #eef4ff; padding: 0 6px; color: #3478f6; font-size: 10px; font-weight: 650; white-space: nowrap; }
 .thread-meta .card-process-count::before { content: none; }
+.thread-meta .card-anchor-inferred { display: inline-flex; align-items: center; min-height: 18px; border-radius: 9px; background: #fdf3e7; padding: 0 6px; color: #b45309; font-size: 10px; font-weight: 650; white-space: nowrap; }
+.thread-meta .card-anchor-inferred::before { content: none; }
+[data-theme="dark"] .thread-meta .card-anchor-inferred { background: #3a2a12; color: #e0a860; }
 .thread-meta .card-error-status { color: #b42318; font-weight: 650; }
 /* Card state badge: 待处理 / 进行中 / 已完成 / 失败 / 等待中.
    待处理 is the one state that needs the user to act, so it is the loudest. */
-.thread-meta .card-state { display: inline-flex; align-items: center; gap: 4px; min-height: 18px; border-radius: 9px; padding: 0 7px; font-size: 10px; font-weight: 700; white-space: nowrap; letter-spacing: .02em; }
+.thread-meta .card-state { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 4px; min-width: 58px; min-height: 18px; border-radius: 9px; padding: 0 7px; font-size: 10px; font-weight: 700; white-space: nowrap; letter-spacing: 0; }
 .thread-meta .card-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 .thread-meta .card-state-needs-input { background: #fff4e5; color: #b45309; }
 .thread-meta .card-state-running { background: #eaf0fa; color: #3b6fd4; }
+.thread-meta .card-state-creating { background: #e5f5f2; color: #0f766e; }
+.thread-meta .card-state-queued, .thread-meta .card-state-cancelled { background: #eef2f7; color: #64748b; }
 .thread-meta .card-state-done { background: #e7f6ec; color: #15803d; }
 .thread-meta .card-state-failed { background: #fdecec; color: #b42318; }
 .thread-meta .card-state-waiting { background: #eef2f7; color: #64748b; }
@@ -158,7 +182,7 @@ button.primary:hover { border-color: #000; background: #000; color: #fff; }
 .thread-answer-pending, .message-pending p { color: #374151; font-style: italic; }
 .thread-answer-error { display: -webkit-box; margin: 8px 0 0; overflow: hidden; color: #b42318; font-weight: 620; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .thread-card footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; padding: 7px; border-top: 1px solid #edf0f3; }
-.thread-card footer button { min-height: 26px; padding: 0 7px; border: 0; display: inline-flex; align-items: center; gap: 4px; color: #526174; font-size: 11px; }
+.thread-card footer button { min-height: 26px; padding: 0 7px; border: 0; display: inline-flex; flex: none; align-items: center; gap: 4px; color: #526174; font-size: 11px; white-space: nowrap; }
 .thread-card footer button svg { width: 13px; height: 13px; flex: none; }
 .thread-card footer button:hover { background: #f3f4f6; color: #111827; border-radius: 6px; }
 .thread-card footer .compare-button { margin-right: auto; color: #374151; }
@@ -171,13 +195,13 @@ button.primary:hover { border-color: #000; background: #000; color: #fff; }
 .card-inspector-resize::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 1px; background: transparent; }
 .card-inspector-resize:hover::after, .card-inspector.is-resizing .card-inspector-resize::after { background: #3478f6; }
 html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !important; user-select: none !important; }
-.card-inspector-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 18px 20px 12px; background: #fff; }
-.card-inspector-tools { display: flex; align-items: center; gap: 2px; }
-.card-inspector-meta { display: flex; align-items: center; gap: 7px; color: #8390a0; font-size: 11px; }
+.card-inspector-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 18px 20px 12px; background: #fff; }
+.card-inspector-tools { display: flex; align-items: center; justify-self: end; gap: 2px; }
+.card-inspector-meta { display: flex; min-width: 0; align-items: center; gap: 7px; color: #8390a0; font-size: 11px; }
 .card-inspector-meta span + span::before { content: '·'; margin-right: 7px; color: #bdc7d2; }
 .card-inspector-meta span:last-child { color: inherit; font-weight: inherit; }
 .card-inspector-meta .card-inspector-error-status { color: #b42318; font-weight: 650; }
-.card-inspector-head h2 { margin: 8px 0 0; overflow-wrap: anywhere; color: #172033; font-size: 15px; font-weight: 680; line-height: 1.5; }
+.card-inspector-head h2 { grid-column: 1 / -1; display: -webkit-box; width: 100%; min-width: 0; margin: 0; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; color: #172033; font-size: 15px; font-weight: 680; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .card-inspector-close, .card-inspector-head .card-inspector-icon-action { display: grid; width: 32px; height: 32px; min-height: 32px; place-items: center; border: 0; border-radius: 50%; background: transparent; padding: 0; color: #718096; }
 .card-inspector-close:hover, .card-inspector-head .card-inspector-icon-action:hover { background: #eef2f6; color: #1f2937; }
 .card-inspector-head .card-inspector-icon-action.is-active { background: #eef4ff; color: #2563eb; }
@@ -211,15 +235,32 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 .card-inspector-scroll::-webkit-scrollbar-thumb:hover { background: #6b7280; }
 .card-inspector-answer { color: #314057; font-size: 14px; line-height: 1.75; }
 .card-inspector-answer > :first-child { margin-top: 0; }
+.card-inspector-answer > :last-child { margin-bottom: 0; }
+/* pre-wrap keeps the author's own line breaks: a paragraph's soft line is part
+   of its meaning for lists, addresses and shell output, and collapsing it was
+   what made rendered answers read as one undifferentiated block. */
 .card-inspector-answer p { margin: 0 0 0.9em; overflow-wrap: anywhere; white-space: pre-wrap; }
 .card-inspector-answer ul, .card-inspector-answer ol { margin: 0 0 0.9em; padding-left: 1.4em; }
 .card-inspector-answer li + li { margin-top: 0.35em; }
+.card-inspector-answer li > p { margin: 0; }
+.card-inspector-answer li > p + p { margin-top: 0.45em; }
+.card-inspector-answer li > ul, .card-inspector-answer li > ol { margin: 0.35em 0 0; }
+/* Nested lists need less indent than the top level or a three-deep answer
+   runs out of width in a 460px drawer. */
+.card-inspector-answer ul ul, .card-inspector-answer ol ol, .card-inspector-answer ul ol, .card-inspector-answer ol ul { margin-bottom: 0; padding-left: 1.15em; }
 .card-inspector-answer h1, .card-inspector-answer h2, .card-inspector-answer h3, .card-inspector-answer h4, .card-inspector-answer h5, .card-inspector-answer h6 { margin: 1.35em 0 0.5em; color: #1e293b; line-height: 1.35; }
 .card-inspector-answer h1 { font-size: 22px; }
 .card-inspector-answer h2 { font-size: 18px; }
 .card-inspector-answer h3 { font-size: 16px; }
 .card-inspector-answer h4, .card-inspector-answer h5, .card-inspector-answer h6 { font-size: 14px; }
+/* A heading should sit with the section it introduces, so the gap above it is
+   larger than the gap below — the classic "space before, not after" rhythm. */
+.card-inspector-answer h1 + *, .card-inspector-answer h2 + *, .card-inspector-answer h3 + * { margin-top: 0; }
 .card-inspector-answer blockquote { margin: 0 0 0.9em; border-left: 3px solid #dbe3ec; padding-left: 10px; color: #64748b; }
+.card-inspector-answer blockquote > :last-child { margin-bottom: 0; }
+.card-inspector-answer blockquote p { white-space: normal; }
+.card-inspector-answer hr { margin: 1.4em 0; border: 0; border-top: 1px solid #e4eaf1; }
+.card-inspector-answer a { color: #2563eb; text-underline-offset: 2px; }
 .card-inspector-answer code { overflow-wrap: anywhere; border-radius: 3px; background: #eef2f5; padding: 1px 3px; color: #334155; font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; }
 .card-inspector-answer pre { max-width: 100%; margin: 0 0 0.9em; overflow-x: auto; border: 1px solid #e0e7ee; border-radius: 6px; background: #f8fafc; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .card-inspector-answer pre code { background: transparent; padding: 0; }
@@ -233,9 +274,6 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 .card-inspector-error { margin: 0; border-left: 3px solid #d92d20; padding: 3px 0 3px 10px; color: #7a271a; font-size: 13px; line-height: 1.65; }
 .card-inspector-error strong { display: block; color: #b42318; font-size: 12px; }
 .card-inspector-error p { margin: 5px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.card-inspector .process-records { margin-top: 22px; border-top-style: solid; padding-top: 12px; }
-.card-inspector .process-records-fold { border-radius: 0; background: transparent; padding: 4px 0; }
-.card-inspector .process-records-fold:hover { background: transparent; }
 .card-inspector-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; padding: 11px 14px; border-top: 1px solid #e7edf3; background: #fff; }
 .card-inspector-actions button { display: inline-flex; min-height: 30px; align-items: center; gap: 4px; padding: 0 9px; font-size: 11px; font-weight: 600; transition: transform 140ms ease-out, border-color 150ms ease, background 150ms ease, color 150ms ease; }
 .card-inspector-actions button svg { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.4; }
@@ -264,10 +302,9 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 .draft-actions button { display: grid; width: 32px; height: 32px; min-height: 32px; place-items: center; border-radius: 50%; background: #fff; padding: 0; color: #64748b; line-height: 0; }
 .draft-actions button.primary { border-color: #3478f6; background: #3478f6; color: #fff; }
 .draft-actions svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
-.empty-canvas, .compare-empty { display: grid; align-content: center; justify-items: center; height: 100%; padding: 32px; text-align: center; }
-.empty-canvas strong, .compare-empty strong { color: #334155; font-size: 16px; }
-.empty-canvas p, .compare-empty p { max-width: 460px; color: #64748b; font-size: 13px; line-height: 1.65; }
-.empty-canvas div { display: flex; gap: 8px; }
+.compare-empty { display: grid; align-content: center; justify-items: center; height: 100%; padding: 32px; text-align: center; }
+.compare-empty strong { color: #334155; font-size: 16px; }
+.compare-empty p { max-width: 460px; color: #64748b; font-size: 13px; line-height: 1.65; }
 .detail-view { box-sizing: border-box; width: min(880px, 100%); height: 100%; min-height: 0; flex: 1; display: flex; flex-direction: column; margin: 0 auto; background: #fbfcfe; }
 .detail-head { flex: none; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 34px 38px 18px; border-bottom: 1px solid #e7edf3; }
 .detail-head-title { min-width: 0; }
@@ -361,7 +398,7 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 .compare-notes { display: grid; gap: 1px; padding: 0 16px 16px; }
 .compare-notes p { margin: 0; padding: 11px 0; border-top: 1px solid #eef2f5; color: #475569; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 @media (max-width: 760px) { .synapse-shell { --sidebar-width: 200px; --sidebar-half: 100px; } .synapse-shell.sidebar-collapsed { --sidebar-width: 56px; --sidebar-half: 28px; } .sidebar { padding: 6px 10px; } .detail-head { display: grid; gap: 12px; padding: 22px 18px 14px; } .detail-scroll { padding: 16px 18px 20px; } .message-composer { padding: 12px 18px 16px; } .message-user { max-width: 92%; } .compare-view { padding: 26px 18px; } .compare-columns { grid-template-columns: 1fr; } .topbar { padding: 0 10px; } .brand strong { display: none; } .card-inspector { top: auto; width: 100% !important; min-width: 0; max-height: 78%; border-top: 1px solid #dbe3ec; border-left: 0; } .card-inspector.is-opening, .card-inspector.is-closing { transform: translateY(24px); } .card-inspector-resize, .card-inspector-toc-resize, .card-inspector-head [data-action="toggle-inspector-expand"] { display: none; } }
-@media (max-width: 560px) { .synapse-shell { min-width: 0; grid-template-columns: 1fr; } .sidebar { display: none; } .topbar, .main-stage { grid-column: 1; } .view-switch { left: 50%; } .view-switch button { padding: 0 7px; } .top-actions > button { font-size: 11px; padding: 0 7px; } .thread-card { width: 280px; } .canvas-minimap { display: none; } }
+@media (max-width: 560px) { .synapse-shell { min-width: 0; grid-template-columns: 1fr; } .sidebar { display: none; } .topbar, .main-stage { grid-column: 1; } .view-switch { left: 50%; } .view-switch button { padding: 0 7px; } .top-actions > button { font-size: 11px; padding: 0 7px; } .canvas-minimap { display: none; } }
 @media (prefers-reduced-motion: reduce) { .card-inspector { transition: opacity 120ms ease; } .card-inspector.is-opening, .card-inspector.is-closing { transform: none; } }
 
 /* ── Dark theme: follows DSH's body[data-ds-dark-theme] via synapse:theme ── */
@@ -381,6 +418,8 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 [data-theme="dark"] .connectors .draft-connector { stroke: #5b8def; }
 [data-theme="dark"] .thread-card { border-color: #2a2d33; background: #1b1c1f; box-shadow: 0 3px 11px rgba(0,0,0,.35); }
 [data-theme="dark"] .thread-card:hover { border-color: #4a4f57; box-shadow: 0 8px 20px rgba(0,0,0,.45); }
+[data-theme="dark"] .thread-card.card-blank { border-color: #34373d; background: rgba(27,28,31,.6); box-shadow: none; }
+[data-theme="dark"] .thread-card.card-blank .thread-title { color: #8f959e; }
 [data-theme="dark"] .thread-card.selected { box-shadow: 0 0 0 2px rgba(91,141,239,.4), 0 8px 20px rgba(0,0,0,.45); }
 [data-theme="dark"] .node-handle { border-color: #2a2d33; background: #1b1c1f; }
 [data-theme="dark"] .node-handle::after { color: #737a83; }
@@ -405,6 +444,9 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 [data-theme="dark"] .thread-card footer button:hover { background: #26282d; color: #e6e8eb; }
 [data-theme="dark"] .thread-card footer .compare-button { color: #d7dae0; }
 [data-theme="dark"] .thread-card footer .compare-button.selected { background: #2a2d33; color: #fff; }
+[data-theme="dark"] .thread-title[data-rename-title]:focus-visible { outline-color: #7ea6f5; }
+[data-theme="dark"] .hidden-card-restore { border-color: #59626e; background: #202329; color: #b5bfca; }
+[data-theme="dark"] .thread-title-input, [data-theme="dark"] .card-inspector-rename-input { border-color: #5b8def; background: #15171b; color: #e6e8eb; }
 [data-theme="dark"] .card-inspector { border-left-color: #2a2d33; background: #15171b; }
 [data-theme="dark"] .card-inspector-resize:hover::after, [data-theme="dark"] .card-inspector.is-resizing .card-inspector-resize::after { background: #5b8def; }
 [data-theme="dark"] .card-inspector-head, [data-theme="dark"] .card-inspector-actions { border-color: #2a2d33; background: #1b1c1f; }
@@ -414,6 +456,8 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 [data-theme="dark"] .thread-meta .card-error-status, [data-theme="dark"] .card-inspector-meta .card-inspector-error-status { color: #f87171; }
 [data-theme="dark"] .thread-meta .card-state-needs-input { background: #3a2a12; color: #fbbf24; }
 [data-theme="dark"] .thread-meta .card-state-running { background: #1e2a44; color: #7ea6f5; }
+[data-theme="dark"] .thread-meta .card-state-creating { background: #16352f; color: #5eead4; }
+[data-theme="dark"] .thread-meta .card-state-queued, [data-theme="dark"] .thread-meta .card-state-cancelled { background: #222428; color: #8f959e; }
 [data-theme="dark"] .thread-meta .card-state-done { background: #14301f; color: #4ade80; }
 [data-theme="dark"] .thread-meta .card-state-failed { background: #3a1a1c; color: #f87171; }
 [data-theme="dark"] .thread-meta .card-state-waiting { background: #222428; color: #8f959e; }
@@ -426,12 +470,12 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 [data-theme="dark"] .card-inspector-answer pre { border-color: #2a2d33; background: #15171b; }
 [data-theme="dark"] .card-inspector-answer th, [data-theme="dark"] .card-inspector-answer td { border-color: #2a2d33; }
 [data-theme="dark"] .card-inspector-answer th { background: #222428; }
+[data-theme="dark"] .card-inspector-answer hr { border-top-color: #2a2d33; }
+[data-theme="dark"] .card-inspector-answer a { color: #7ea6f5; }
 [data-theme="dark"] .card-inspector-pending { color: #8f959e; }
 [data-theme="dark"] .thread-answer-error { color: #f87171; }
 [data-theme="dark"] .card-inspector-error { border-left-color: #f87171; color: #f0a3a3; }
 [data-theme="dark"] .card-inspector-error strong { color: #f87171; }
-[data-theme="dark"] .card-inspector .process-records-fold { color: #a7adb5; }
-[data-theme="dark"] .card-inspector .process-records-fold:hover { color: #7ea6f5; }
 [data-theme="dark"] .card-inspector-close, [data-theme="dark"] .card-inspector-head .card-inspector-icon-action { color: #8f959e; }
 [data-theme="dark"] .card-inspector-close:hover, [data-theme="dark"] .card-inspector-head .card-inspector-icon-action:hover { background: #26282d; color: #e6e8eb; }
 [data-theme="dark"] .card-inspector-head .card-inspector-icon-action.is-active { background: #1e2a44; color: #7ea6f5; }
@@ -482,8 +526,6 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 [data-theme="dark"] .tree-row i { color: #737a83; }
 [data-theme="dark"] .tree-empty { color: #737a83; }
 [data-theme="dark"] .brand::after { background: #e6e8eb; color: #111317; }
-[data-theme="dark"] .empty-canvas strong { color: #d7dae0; }
-[data-theme="dark"] .empty-canvas p { color: #8f959e; }
 [data-theme="dark"] .note-empty { border-color: #2a2d33; color: #8f959e; }
 [data-theme="dark"] .status-message { border-color: #7a2e2e; background: #2b1a1c; color: #f0a3a3; box-shadow: 0 3px 10px rgba(0,0,0,.4); }
 [data-theme="dark"] .status-message button { color: #f0a3a3; }
@@ -544,3 +586,7 @@ html.is-resizing-inspector, html.is-resizing-inspector * { cursor: ew-resize !im
 [data-theme="dark"] button.primary { border-color: #3478f6; background: #3478f6; color: #fff; }
 [data-theme="dark"] button.primary:hover { border-color: #2563eb; background: #2563eb; color: #fff; }
 @media (max-width: 760px) { [data-theme="dark"] .card-inspector { border-top-color: #2a2d33; border-left: 0; } }
+@media (max-width: 560px) {
+  .canvas-controls { top: 10px; right: 8px; max-width: calc(100% - 16px); gap: 4px; }
+  .canvas-controls [data-action="layout"], .canvas-controls [data-action="focus-active"] { width: 28px; min-width: 28px; justify-content: center; padding: 0; font-size: 0; gap: 0; }
+}

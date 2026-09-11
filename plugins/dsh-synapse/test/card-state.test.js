@@ -18,12 +18,13 @@ const done = { answer: { text: '答' }, error: null }
 const empty = { answer: null, error: null }
 const failed = { answer: null, error: { text: '炸了' } }
 
-test('a session blocked on a human reports needs-input first', async () => {
+test('a pending interaction affects the active turn, not historical cards', async () => {
   const { cardState } = await loadStateMachine()
   // Nothing progresses until the user answers, so this outranks running/done.
-  assert.equal(cardState(done, { pendingInteraction: 'approval' }), 'needs-input')
+  assert.equal(cardState(done, { pendingInteraction: 'approval' }), 'done')
+  assert.equal(cardState({ ...done, isTail: true, status: 'running' }, { pendingInteraction: 'approval' }), 'needs-input')
   assert.equal(cardState(empty, { pendingInteraction: 'question', running: true }), 'needs-input')
-  assert.equal(cardState(failed, { pendingInteraction: 'plan-review' }), 'needs-input')
+  assert.equal(cardState(failed, { pendingInteraction: 'plan-review' }), 'failed')
 })
 
 test('each pending interaction kind gets its own actionable label', async () => {
@@ -74,7 +75,7 @@ test('an unanswered idle card reports waiting', async () => {
 
 test('every state has a label and every label is reachable', async () => {
   const { CARD_STATES, CARD_STATE_LABELS } = await loadStateMachine()
-  assert.deepEqual(CARD_STATES, ['needs-input', 'running', 'failed', 'done', 'waiting'])
+  assert.deepEqual(CARD_STATES, ['creating', 'queued', 'needs-input', 'running', 'failed', 'cancelled', 'done', 'waiting'])
   for (const state of CARD_STATES) assert.equal(typeof CARD_STATE_LABELS[state], 'string', state)
 })
 

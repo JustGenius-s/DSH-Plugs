@@ -34,7 +34,9 @@ import type {
   ConversationNodeDefinition,
   ISessions,
   IWorkspaces,
+  SessionId,
   SnapshotStore,
+  WorkspaceId,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   SessionEvent as CoreSessionEvent,
@@ -166,6 +168,11 @@ export interface PluginChatNodeDataMap {}
 
 /** DSH 0.1.2 split directory/navigation commands out of `workspaces`. */
 export interface UiWorkspaceFace {
+  openWorkspace?: (workspaceId: WorkspaceId) => Promise<void>
+  openSession?: (sessionId: SessionId) => void
+  forkSession?: (sessionId: SessionId) => Promise<void>
+  startSession?: (workspaceId?: WorkspaceId) => void
+  archiveSession?: (sessionId: SessionId) => Promise<void>
   pickDirectory: () => Promise<string | null>
 }
 
@@ -438,7 +445,7 @@ export function getConversationEventRegistry(
 }
 
 export function getConnection(ctx: ClientContext): ConnectionHandle {
-  return ctx.get('connection') as ConnectionHandle
+  return ctx.get('connection') as unknown as ConnectionHandle
 }
 
 export function getRemote(ctx: ClientContext): ClientRemote {
@@ -529,4 +536,99 @@ export function postResult<T>(path: string, body: unknown): Promise<T> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+export interface SessionModelCatalogModel {
+  id: string
+  name: string
+}
+
+export interface SessionModelCatalogGroup {
+  id: string
+  name: string
+  models: readonly SessionModelCatalogModel[]
+}
+
+export interface SessionModelCatalogFailure {
+  id: string
+  name: string
+  message: string
+}
+
+export interface SessionModelCatalog {
+  current?: { provider: string; model: string }
+  groups: readonly SessionModelCatalogGroup[]
+  failures: readonly SessionModelCatalogFailure[]
+}
+
+interface SessionModelRemote {
+  modelCatalog?: () => Promise<{ ok?: boolean; value?: unknown }>
+}
+
+function modelRemoteOf(ctx: { get(name: string): unknown }): SessionModelRemote | undefined {
+  try {
+    const remote = ctx.get(CLIENT_SERVICES.remoteSession)
+    return remote == null || typeof remote !== 'object' ? undefined : remote as SessionModelRemote
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeSessionModelCatalog(raw: unknown): SessionModelCatalog | undefined {
+  if (raw == null || typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  const groups = (Array.isArray(record.groups) ? record.groups : [])
+    .filter((group): group is SessionModelCatalogGroup => (
+      group != null
+      && typeof group === 'object'
+      && Array.isArray((group as SessionModelCatalogGroup).models)
+      && (group as SessionModelCatalogGroup).models.length > 0
+    ))
+  const failures = Array.isArray(record.failures) ? record.failures as SessionModelCatalogFailure[] : []
+  const selected = record.default
+  const current = selected != null && typeof selected === 'object'
+    ? selected as { provider: string; model: string }
+    : undefined
+  return { current, groups, failures }
+}
+
+/** One-shot read of the session model directory. Missing remotes degrade to undefined. */
+export async function readSessionModelCatalog(
+  ctx: { get(name: string): unknown },
+): Promise<SessionModelCatalog | undefined> {
+  try {
+    const remote = modelRemoteOf(ctx)
+    if (remote === undefined || typeof remote.modelCatalog !== 'function') return undefined
+    const result = await remote.modelCatalog()
+    if (result == null || result.ok === false) return undefined
+    return normalizeSessionModelCatalog(result.value)
+  } catch {
+    return undefined
+  }
+}
+
+export interface SessionModelCatalogWaitOptions {
+  timeoutMs?: number
+  intervalMs?: number
+}
+
+/**
+ * Wait until `remote.session` is mounted, then read the model directory.
+ *
+ * `dsh-api-remotes` attaches namespaces asynchronously. A single read on
+ * mount can miss the catalog and leave a picker disabled for the session.
+ */
+export async function readSessionModelCatalogWhenReady(
+  ctx: { get(name: string): unknown },
+  options: SessionModelCatalogWaitOptions = {},
+): Promise<SessionModelCatalog | undefined> {
+  const timeoutMs = options.timeoutMs ?? 8_000
+  const intervalMs = options.intervalMs ?? 50
+  const started = Date.now()
+  while (true) {
+    const catalog = await readSessionModelCatalog(ctx)
+    if (catalog !== undefined) return catalog
+    if (Date.now() - started >= timeoutMs) return undefined
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
 }

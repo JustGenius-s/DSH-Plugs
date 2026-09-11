@@ -13,9 +13,9 @@ import {
 import type { WorkspacePlusKey } from './locales.ts'
 
 /**
- * General-settings card listing the row-menu switches.
+ * Plugin-settings card listing the row-menu switches.
  *
- * Rendered into the `settings.general.item` slot; every action can be turned
+ * Rendered into the `settings.plugin.item` slot; every action can be turned
  * off so the menu only shows what the user wants.
  */
 export function MenuSettingsItem({ t }: { t?: (key: WorkspacePlusKey) => string }) {

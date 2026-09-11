@@ -1,3 +1,6 @@
+/** Official right sidebar: normal panel is 10, fullscreen overlay is 40. */
+export const STICKY_USER_BUBBLE_Z_INDEX = 30
+
 /** Transcript bottom that is not covered by the sticky composer card. */
 function visibleBottom(scrollport: HTMLElement, portBottom: number): number {
   const seat = scrollport.querySelector('[data-composer-seat]')

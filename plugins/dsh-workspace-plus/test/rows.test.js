@@ -12,7 +12,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-const { rowInfo } = await import('../src/client/rows.ts')
+const { rowInfo, isWorkspaceBrowserTree } = await import('../src/client/rows.ts')
 
 /** Attach a fake React fiber to an element, as React does at runtime. */
 function withFiber(props, extra = {}) {
@@ -43,9 +43,24 @@ test('a session row is identified from its node', () => {
   assert.deepEqual(rowInfo(el), { kind: 'session', id: 's-1', title: 'Fix the bug' })
 })
 
-test('a session row falls back to displayTitle', () => {
-  const el = withFiber({ node: { id: 's-2', displayTitle: 'Derived', updatedAt: 0, blank: true } })
+test('a nonblank session row falls back to displayTitle', () => {
+  const el = withFiber({ node: { id: 's-2', displayTitle: 'Derived', updatedAt: 0, blank: false } })
   assert.equal(rowInfo(el)?.title, 'Derived')
+})
+
+test('the provisional blank session row has no custom menu identity', () => {
+  const el = withFiber({ node: { id: 's-blank', displayTitle: 'New Session', updatedAt: 0, blank: true } })
+  assert.equal(rowInfo(el), undefined)
+})
+
+test('a current DSH search result is identified from result props', () => {
+  const el = withFiber({ result: { id: 's-search', title: 'Found title', workspace: 'Project' } })
+  assert.deepEqual(rowInfo(el), { kind: 'session', id: 's-search', title: 'Found title' })
+})
+
+test('a null React fiber parent ends the scan without throwing', () => {
+  const el = withFiber({ className: 'unrelated' }, { return: null })
+  assert.equal(rowInfo(el), undefined)
 })
 
 test('the row props are found several hops up the fiber chain', () => {
@@ -90,4 +105,36 @@ test('a deeply nested chain without row props gives up instead of hanging', () =
 test('ids are stringified so branded ids match the stored strings', () => {
   const el = withFiber({ group: { workspaceId: { toString: () => 'ws-9' }, label: 'Branded' } })
   assert.equal(rowInfo(el)?.id, 'ws-9')
+})
+
+test('workspace tree discovery recognizes the current host contract without invoking actions', () => {
+  const el = withFiberChain([
+    { role: 'tree' },
+    {
+      useSessions: () => { throw new Error('not a render') },
+      open: () => { throw new Error('not navigation') },
+      setSessionOrder: () => { throw new Error('pinning must not change session order') },
+    },
+  ])
+  assert.equal(isWorkspaceBrowserTree(el), true)
+})
+
+test('empty search trees remain valid pinned-section hosts', () => {
+  assert.equal(isWorkspaceBrowserTree(withFiber({ useSessions: () => {}, open: () => {}, workspaces: [] })), true)
+})
+
+test('unrelated and cyclic trees cannot become pinned-section hosts', () => {
+  assert.equal(isWorkspaceBrowserTree(withFiber({ node: { name: 'src' } }, { return: null })), false)
+  const el = withFiber({})
+  el.__reactFiber$abc.return = el.__reactFiber$abc
+  assert.equal(isWorkspaceBrowserTree(el), false)
+})
+
+test('shortcut row identity is independent of the source row DOM', () => {
+  const workspacePlusRow = { kind: 'session', id: 's-1', title: 'Pinned task' }
+  assert.deepEqual(rowInfo(withFiber({ workspacePlusRow })), workspacePlusRow)
+})
+
+test('null props in a real fiber chain are skipped safely', () => {
+  assert.equal(rowInfo(withFiber(null, { return: null })), undefined)
 })

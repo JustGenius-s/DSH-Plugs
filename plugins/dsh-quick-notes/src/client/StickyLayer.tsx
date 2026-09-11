@@ -3,7 +3,7 @@
 // This is the whole "always on top" half of the plugin. It registers on
 // `shell.overlay` (click-through by default) but paints through a portal on
 // `document.body`. Codex's sticky user bubble also portals there at z-index
-// 45; staying inside the overlay slot would leave the cards under it.
+// 30; staying inside the overlay slot would leave the cards under it.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'

@@ -1,5 +1,5 @@
 /* Portaled to document.body. z-index 50 sits above Codex's sticky user
-   bubble (45) and the side panel (40), and below image preview (80) and
+   bubble (30) and the side panel (40), and below image preview (80) and
    DSH modals (1000). The host stays click-through. */
 .layer {
   position: fixed;

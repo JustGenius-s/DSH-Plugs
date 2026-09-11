@@ -8,6 +8,13 @@ import { getSessions, getWorkspaces } from '@just-genius/dsh-plugin-runtime/clie
 import { writeClipboard } from '@just-genius/dsh-plugin-ui'
 import { OPEN_PATH, type WorkspaceView } from '../shared.ts'
 import { postJson } from './http.ts'
+export {
+  archiveSession,
+  forkSession,
+  newSession,
+  openSession,
+  sessionTitleOf,
+} from './session-commands.ts'
 
 /**
  * Row ids arrive as plain strings: they are read off React fiber props and
@@ -75,54 +82,9 @@ export async function renameSession(ctx: ClientCtx, id: string, title: string): 
   if (!result.ok) throw new Error(result.error?.message ?? 'rename failed')
 }
 
-/**
- * Open a new session in a workspace.
- *
- * The workspace service owns session creation on the supported faces; the
- * session service's own `create` is not present on every revision.
- */
-export function newSession(ctx: ClientCtx, workspaceId: string): void {
-  workspacesOf(ctx).startSession(asWorkspaceId(workspaceId))
-}
-
 /** Remove the workspace from the DSH list. Disk contents and records stay. */
 export async function removeWorkspace(ctx: ClientCtx, workspaceId: string): Promise<void> {
   await workspacesOf(ctx).delete(asWorkspaceId(workspaceId))
-}
-
-export async function pinWorkspace(ctx: ClientCtx, workspaceId: string, pinned: boolean): Promise<void> {
-  if (!pinned) return
-  const items = workspacesOf(ctx).list.getSnapshot().items
-  const first = items[0]
-  if (first === undefined || String(first.workspaceId) === workspaceId) return
-  await workspacesOf(ctx).insertBefore(asWorkspaceId(workspaceId), first.workspaceId)
-}
-
-export async function pinSession(
-  ctx: ClientCtx,
-  sessionId: string,
-  pinned: boolean,
-): Promise<void> {
-  if (!pinned) return
-  const workspaceId = workspaceIdForSession(ctx, sessionId)
-  if (workspaceId === undefined) return
-  const workspace = findWorkspace(ctx, workspaceId)
-  const first = workspace?.sessionIds[0]
-  if (first === undefined || String(first) === sessionId) return
-  await workspacesOf(ctx).insertSessionBefore(
-    asWorkspaceId(workspaceId),
-    asSessionId(sessionId),
-    asSessionId(String(first)),
-  )
-}
-
-export async function archiveSession(ctx: ClientCtx, sessionId: string): Promise<void> {
-  await workspacesOf(ctx).archiveSession(asSessionId(sessionId))
-}
-
-export async function forkSession(ctx: ClientCtx, sessionId: string): Promise<void> {
-  const childId = await sessionsOf(ctx).fork({ sessionId: asSessionId(sessionId), increaseTitle: true })
-  sessionsOf(ctx).open(childId)
 }
 
 /**

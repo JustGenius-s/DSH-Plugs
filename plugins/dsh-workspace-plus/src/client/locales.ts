@@ -6,6 +6,9 @@
  * dsh-workspace-menu v1.2.0.
  */
 export type WorkspacePlusKey =
+  | 'pins.title'
+  | 'pins.ungrouped'
+  | 'pins.actions'
   // ── Binding dialog ──
   | 'cancel'
   | 'primary'
@@ -86,6 +89,9 @@ export type WorkspacePlusKey =
   | 'confirm.removeWorkspace'
 
 export const zh: Record<WorkspacePlusKey, string> = {
+  'pins.title': '置顶',
+  'pins.ungrouped': '未分组',
+  'pins.actions': '更多操作',
   cancel: '取消',
   primary: '主仓',
   setPrimary: '设为主仓',
@@ -165,6 +171,9 @@ export const zh: Record<WorkspacePlusKey, string> = {
 }
 
 export const en: Record<WorkspacePlusKey, string> = {
+  'pins.title': 'Pinned',
+  'pins.ungrouped': 'Ungrouped',
+  'pins.actions': 'More actions',
   cancel: 'Cancel',
   primary: 'Primary',
   setPrimary: 'Make primary',

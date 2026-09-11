@@ -17,6 +17,7 @@ import { commitBinding, type WorkspaceFace } from './commit.ts'
 import { askEditBinding } from './flow.ts'
 import type { WorkspacePlusKey } from './locales.ts'
 import { getBindings, refreshBindings, subscribeBindings } from './bindings.ts'
+import { rowInfo } from './rows.ts'
 import styles from './WorkspaceRowChrome.module.css'
 
 export interface WorkspaceRowChromeInjected {
@@ -167,9 +168,9 @@ function collectRowMatches(
 ): RowMatch[] {
   const matches: RowMatch[] = []
   for (const row of document.querySelectorAll<HTMLElement>('[role="treeitem"][aria-expanded]')) {
-    const title = row.children.item(2)?.textContent?.trim() ?? ''
-    if (title === '') continue
-    const workspace = items.find((item) => item.title === title)
+    const info = rowInfo(row)
+    if (info?.kind !== 'workspace') continue
+    const workspace = items.find((item) => String(item.workspaceId) === info.id)
     if (workspace === undefined) continue
     const actions = row.children.item(row.children.length - 1)
     if (!(actions instanceof HTMLElement)) continue

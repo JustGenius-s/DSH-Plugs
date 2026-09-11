@@ -11,8 +11,9 @@ export async function getJson<T>(path: string): Promise<T> {
   return value.value
 }
 
-export async function postJson<T>(path: string, body: unknown): Promise<T> {
+export async function postJson<T>(path: string, body: unknown, options: Pick<RequestInit, 'keepalive'> = {}): Promise<T> {
   const response = await fetch(path, {
+    ...options,
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify(body),

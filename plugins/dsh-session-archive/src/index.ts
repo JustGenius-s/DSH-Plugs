@@ -83,7 +83,7 @@ async function handleDelete(ctx: Context, req: IncomingMessage, res: ServerRespo
 
 async function listArchived(ctx: Context): Promise<ArchiveListPayload> {
   const archived = [...ctx.workspaceRegistry.archivedSessionIds]
-  const headers = await ctx.sessionPersistence.list()
+  const headers = persistenceHeaders(await ctx.sessionPersistence.list())
   const headerById = new Map(headers.map((header) => [String(header.id), header]))
   const workspaces = ctx.workspaceRegistry.list()
   const rows: ArchivedSessionRow[] = []
@@ -93,18 +93,17 @@ async function listArchived(ctx: Context): Promise<ArchiveListPayload> {
     const live = liveSession(ctx, SessionId(String(id)))
     let title = String(id)
     let updatedAt: number | null = header?.createdAt ?? null
-    if (live !== undefined) {
-      const derived = titleFromEvents(live.events as SessionEvent[], title)
+    const liveEvents = sessionEventLog(live)
+    if (liveEvents !== null) {
+      const derived = titleFromEvents(liveEvents, title)
       title = derived.title
       updatedAt = derived.updatedAt ?? updatedAt
     } else if (header !== undefined) {
-      try {
-        const inspection = await ctx.sessionPersistence.inspect(header.id)
-        const derived = titleFromEvents(inspection.events as SessionEvent[], title)
+      const persisted = await readPersistedEvents(ctx.sessionPersistence, String(header.id))
+      if (persisted !== null) {
+        const derived = titleFromEvents(persisted.events, title)
         title = derived.title
-        updatedAt = derived.updatedAt ?? inspection.meta.createdAt
-      } catch {
-        title = String(id)
+        updatedAt = derived.updatedAt ?? persisted.createdAt ?? updatedAt
       }
     }
 
@@ -152,7 +151,8 @@ async function deleteArchived(ctx: Context, rawId: string): Promise<void> {
 
   const header = await readHeader(ctx, sessionId)
   if (header !== undefined) {
-    const location = ctx.sessionPersistence.locate(header)
+    const locate = (ctx.sessionPersistence as { locate?: (stored: SessionHeader) => { path?: string } | undefined }).locate
+    const location = typeof locate === 'function' ? locate.call(ctx.sessionPersistence, header) : undefined
     if (location?.path !== undefined) {
       await rm(dirname(location.path), { recursive: true, force: true })
     }
@@ -177,25 +177,99 @@ interface AgentRegistryLike {
 
 async function readHeader(ctx: Context, sessionId: SessionId): Promise<SessionHeader | undefined> {
   const live = liveSession(ctx, sessionId)
-  if (live !== undefined) return live.header
-  const headers = await ctx.sessionPersistence.list()
+  if (live?.header !== undefined) return live.header
+  const headers = persistenceHeaders(await ctx.sessionPersistence.list())
   return headers.find((header) => String(header.id) === String(sessionId))
 }
 
-function liveSession(ctx: Context, sessionId: SessionId): { events: readonly SessionEvent[]; header: SessionHeader } | undefined {
+function liveSession(ctx: Context, sessionId: SessionId): { events?: unknown; snapshotEvents?: () => unknown; header?: SessionHeader } | undefined {
   return ctx.get('sessions')?.get(sessionId)
 }
 
-function titleFromEvents(events: readonly SessionEvent[], fallback: string): { title: string; updatedAt: number | null } {
+/**
+ * Normalize `sessionPersistence.list()` across DSH hosts.
+ * 0.1.5 returns `{ header, revision }` snapshots; earlier hosts returned headers.
+ */
+export function persistenceHeaders(listed: unknown): SessionHeader[] {
+  if (!Array.isArray(listed)) return []
+  const headers: SessionHeader[] = []
+  for (const item of listed) {
+    if (item == null || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const nested = record.header
+    if (nested != null && typeof nested === 'object' && typeof (nested as { id?: unknown }).id === 'string') {
+      headers.push(nested as SessionHeader)
+      continue
+    }
+    if (typeof record.id === 'string') headers.push(item as SessionHeader)
+  }
+  return headers
+}
+
+function sessionEventLog(session: { snapshotEvents?: () => unknown; events?: unknown } | undefined): SessionEvent[] | null {
+  if (session === undefined) return null
+  if (typeof session.snapshotEvents === 'function') return iterableEvents(session.snapshotEvents())
+  return iterableEvents(session.events)
+}
+
+function iterableEvents(events: unknown): SessionEvent[] | null {
+  if (Array.isArray(events)) return events as SessionEvent[]
+  if (events == null || typeof events !== 'object') return null
+  if (typeof (events as Iterable<unknown>)[Symbol.iterator] !== 'function') return null
+  try {
+    return [...events as Iterable<SessionEvent>]
+  } catch {
+    return null
+  }
+}
+
+interface PersistenceReader {
+  inspect?: (id: string) => Promise<{ events?: unknown; meta?: { createdAt?: number } }>
+  open?: (id: string, access: 'read' | 'write') => Promise<{
+    header?: { createdAt?: number }
+    read: () => Promise<{ events?: unknown }>
+    close?: () => Promise<void>
+  }>
+}
+
+async function readPersistedEvents(persistence: PersistenceReader, sessionId: string): Promise<{ events: SessionEvent[]; createdAt?: number } | null> {
+  if (typeof persistence.inspect === 'function') {
+    try {
+      const inspection = await persistence.inspect(sessionId)
+      const events = iterableEvents(inspection?.events)
+      if (events !== null) return { events, createdAt: inspection?.meta?.createdAt }
+      if (inspection?.meta?.createdAt !== undefined) return { events: [], createdAt: inspection.meta.createdAt }
+    } catch {
+      // 0.1.5 removed inspect; fall through to open/read.
+    }
+  }
+  if (typeof persistence.open !== 'function') return null
+  let handle: Awaited<ReturnType<NonNullable<PersistenceReader['open']>>> | undefined
+  try {
+    handle = await persistence.open(sessionId, 'read')
+    const result = await handle.read()
+    const events = iterableEvents(result?.events) ?? []
+    return { events, createdAt: handle.header?.createdAt }
+  } catch {
+    return null
+  } finally {
+    if (handle != null && typeof handle.close === 'function') {
+      try { await handle.close() } catch { /* already closed or never opened */ }
+    }
+  }
+}
+
+export function titleFromEvents(events: unknown, fallback: string): { title: string; updatedAt: number | null } {
+  const ordered = iterableEvents(events) ?? []
   let title = fallback
   let updatedAt: number | null = null
-  for (const event of events) {
+  for (const event of ordered) {
     updatedAt = event.time
     const named = eventTitle(event)
     if (named !== null) title = named
   }
   if (title === fallback) {
-    for (const event of events) {
+    for (const event of ordered) {
       const preview = userPreview(event)
       if (preview !== null) {
         title = preview

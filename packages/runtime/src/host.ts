@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
@@ -29,6 +30,7 @@ export type {} from '@deepseek-ai/dsh-agent'
 export type {} from '@deepseek-ai/dsh-agent-default-model'
 export type {} from '@deepseek-ai/dsh-agent-presets'
 export type {} from '@deepseek-ai/dsh-commands'
+export type {} from '@deepseek-ai/dsh-client-connection'
 export type {} from '@deepseek-ai/dsh-credentials'
 export type {} from '@deepseek-ai/dsh-fs'
 export type {} from '@deepseek-ai/dsh-host-webserver'
@@ -66,6 +68,7 @@ export type { PresetBearingSession } from './session-preset.ts'
 export { sessionEventsOf } from './session-events.ts'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
+export { fallbackSessionTitle } from '@deepseek-ai/dsh-session-title'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
 export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
@@ -94,6 +97,7 @@ export const HOST_SERVICES = {
   agentDefaultModel: 'agentDefaultModel',
   agentPresets: 'agentPresets',
   commands: 'commands',
+  connection: 'connection',
   credentials: 'credentials',
   fs: 'fs',
   jobs: 'jobs',

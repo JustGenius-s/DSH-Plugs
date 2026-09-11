@@ -10,20 +10,22 @@ import {
   forkSession,
   newSession,
   openInExplorer,
-  pinSession,
-  pinWorkspace,
   refreshSessions,
   removeWorkspace,
   renameSession,
   renameWorkspace,
+  sessionTitleOf,
+  workspaceIdForSession,
 } from './actions.ts'
 import { PROJECT_PATH } from '../shared.ts'
 import { postJson } from './http.ts'
 import { refreshBindings } from './bindings.ts'
-import { getMenuState, isEnabled, setPinnedSessions, setPinnedWorkspaces, setUnreadSessions, subscribeMenuState, toggleId, type FeatureKey } from './features.ts'
+import { getMenuState, isEnabled, setPin, setUnreadSessions, subscribeMenuState, toggleId, type FeatureKey } from './features.ts'
 import type { WorkspacePlusKey } from './locales.ts'
 import { RowMenu, type MenuAnchor } from './RowMenu.tsx'
 import { rowInfo, tagRows, type RowInfo } from './rows.ts'
+import { isPinned } from './pins.ts'
+import { PinnedSection } from './PinnedSection.tsx'
 
 export interface RowMenuOverlayInjected {
   t?: (key: WorkspacePlusKey) => string
@@ -118,6 +120,21 @@ export function RowMenuOverlay({ t, ctx }: RowMenuOverlayInjected) {
 
   return (
     <>
+      {ctx !== undefined ? (
+        <PinnedSection
+          ctx={ctx}
+          state={state}
+          t={translate}
+          onMenu={(row, anchor) => { setOpen({ row, anchor }) }}
+          onUnpin={(pin) => {
+            void Promise.resolve(setPin(pin, false)).then(
+              () => { flash('toast.unpinned') },
+              () => { flash('toast.failed') },
+            )
+          }}
+          onError={() => { flash('toast.openFailed') }}
+        />
+      ) : null}
       {open !== null && ctx !== undefined
         ? (
           <RowMenu
@@ -212,11 +229,11 @@ function workspaceEntries(
   t: (key: WorkspacePlusKey) => string,
 ): MenuEntry[] {
   const entries: MenuEntry[] = []
-  const pinned = getMenuState().pinnedWorkspaces.includes(row.id)
+  const pinned = isPinned(getMenuState().pins, row)
   const workspace = findWorkspace(ctx, row.id)
 
   if (on(flags, 'workspacePin')) {
-    entries.push({ id: 'pin', label: pinned ? t('menu.unpin') : t('menu.pin') })
+    entries.push({ id: 'pin', label: pinned ? t('menu.unpin') : t('menu.pin'), disabled: workspace === undefined })
   }
   if (on(flags, 'workspaceRename')) {
     entries.push({ id: 'rename', label: t('menu.rename') })
@@ -250,12 +267,17 @@ function sessionEntries(
 ): MenuEntry[] {
   const entries: MenuEntry[] = []
   const state = getMenuState()
-  const pinned = state.pinnedSessions.includes(row.id)
+  const workspaceId = workspaceIdForSession(ctx, row.id)
+  const pinned = isPinned(state.pins, row)
   const unread = state.unreadSessions.includes(row.id)
   const session = findSession(ctx, row.id)
 
   if (on(flags, 'sessionPin')) {
-    entries.push({ id: 'pin', label: pinned ? t('menu.unpin') : t('menu.pin') })
+    entries.push({
+      id: 'pin',
+      label: pinned ? t('menu.unpin') : t('menu.pin'),
+      disabled: !pinned && workspaceId === undefined,
+    })
   }
   if (on(flags, 'sessionRename')) {
     entries.push({ id: 'rename', label: t('menu.rename') })
@@ -323,9 +345,9 @@ async function dispatch(
     const workspace = findWorkspace(ctx, row.id)
     switch (id) {
       case 'pin': {
-        const pinned = !state.pinnedWorkspaces.includes(row.id)
-        setPinnedWorkspaces(toggleId(state.pinnedWorkspaces, row.id))
-        await pinWorkspace(ctx, row.id, pinned)
+        if (workspace === undefined) return
+        const pinned = !isPinned(state.pins, row)
+        await setPin({ kind: 'workspace', id: row.id }, pinned)
         flash(pinned ? 'toast.pinned' : 'toast.unpinned')
         return
       }
@@ -370,18 +392,20 @@ async function dispatch(
   }
 
   const session = findSession(ctx, row.id)
+  const sessionTitle = sessionTitleOf(session, row.title)
   switch (id) {
     case 'pin': {
-      const pinned = !state.pinnedSessions.includes(row.id)
-      setPinnedSessions(toggleId(state.pinnedSessions, row.id))
-      await pinSession(ctx, row.id, pinned)
+      const workspaceId = workspaceIdForSession(ctx, row.id)
+      const pinned = !isPinned(state.pins, row)
+      if (pinned && workspaceId === undefined) return
+      await setPin({ kind: 'session', id: row.id, workspaceId: workspaceId ?? '' }, pinned)
       flash(pinned ? 'toast.pinned' : 'toast.unpinned')
       return
     }
     case 'rename': {
       setPending({
         title: t('menu.renameSession'),
-        initial: row.title,
+        initial: sessionTitle,
         confirm: async (next) => {
           await renameSession(ctx, row.id, next)
           flash('toast.renamed')
@@ -410,7 +434,7 @@ async function dispatch(
       return
     }
     case 'copyTitle': {
-      flash((await copyText(row.title)) ? 'toast.titleCopied' : 'toast.copyFailed')
+      flash((await copyText(sessionTitle)) ? 'toast.titleCopied' : 'toast.copyFailed')
       return
     }
     case 'openWindow': {

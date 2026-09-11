@@ -183,6 +183,132 @@ test('merges a browser fork callback with an already projected DSH fork', async 
   assert.equal(merged.parentId, parentThread.id)
 })
 
+test('uses the human user message as the card title instead of the session label', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-card-title-'))
+  const store = new WorkspaceStore(join(directory, 'state.json'))
+  // The assistant answers before the first human prompt is committed (a fork
+  // replayed from its boundary, or a mid-turn replay). The placeholder card
+  // must adopt the real question, not stay titled 当前会话.
+  await store.projectSession({
+    id: 'session-title',
+    title: '当前会话',
+    header: { meta: { cwd: 'C:\\work\\titles' } },
+    firstLiveSeq: 0,
+    events: [
+      { type: 'assistant/message', seq: 1, time: 1, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '先铺垫。' }] } } },
+      { type: 'user/message', seq: 2, time: 2, data: { content: [{ type: 'text', text: '帮我看一下登录' }] } },
+      { type: 'assistant/message', seq: 3, time: 3, data: { turn: 1, step: 2, message: { content: [{ type: 'text', text: '登录链路正常。' }] } } },
+    ],
+  })
+  const [workspace] = await store.list()
+  const thread = (await store.get(workspace.id)).threads[0]
+  assert.equal(thread.turns.length, 1)
+  assert.equal(thread.turns[0].question, '帮我看一下登录')
+  assert.equal(thread.turns[0].answer, '登录链路正常。')
+  assert.notEqual(thread.title, '当前会话')
+})
+
+test('renames a turn card by seq, keeps it across reloads, and clears it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-rename-'))
+  const dataFile = join(directory, 'state.json')
+  const store = new WorkspaceStore(dataFile)
+  await store.projectSession({
+    id: 'session-rename',
+    header: { meta: { cwd: 'C:\\work\\rename' } },
+    firstLiveSeq: 0,
+    events: [
+      { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: '原始问题' }] } },
+      { type: 'assistant/message', seq: 1, time: 2, data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '回答' }] } } },
+    ],
+  })
+  const [workspace] = await store.list()
+  const thread = (await store.get(workspace.id)).threads[0]
+
+  // The rename lives on the turn and leaves the auto-derived question intact.
+  const renamed = await store.updateCardTitle(thread.id, '0', '登录排查')
+  assert.equal(renamed.turns[0].title, '登录排查')
+  assert.equal(renamed.turns[0].question, '原始问题')
+
+  // Reprojection must not drop the override.
+  await store.projectSession({
+    id: 'session-rename',
+    header: { meta: { cwd: 'C:\\work\\rename' } },
+    events: [{ type: 'assistant/message', seq: 2, time: 3, data: { turn: 1, step: 2, message: { content: [{ type: 'text', text: '补充' }] } } }],
+  }, 2)
+  const reprojected = (await store.get(workspace.id)).threads[0]
+  assert.equal(reprojected.turns[0].title, '登录排查')
+
+  // A reload from disk keeps it too.
+  const reloaded = await new WorkspaceStore(dataFile).get(workspace.id)
+  assert.equal(reloaded.threads[0].turns[0].title, '登录排查')
+
+  // An empty title clears the override; an unknown card key 404s.
+  const cleared = await store.updateCardTitle(thread.id, '0', '   ')
+  assert.equal(cleared.turns[0].title, undefined)
+  await assert.rejects(store.updateCardTitle(thread.id, '99', 'x'), /卡片不存在/)
+  await assert.rejects(store.updateCardTitle(thread.id, '0', 'x'.repeat(121)), /超过长度限制/)
+})
+
+test('skips injected user-role events that are not a human prompt', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-injected-title-'))
+  const store = new WorkspaceStore(join(directory, 'state.json'))
+  await store.projectSession({
+    id: 'session-injected',
+    title: '当前会话',
+    header: { meta: { cwd: 'C:\\work\\injected' } },
+    firstLiveSeq: 0,
+    events: [
+      { type: 'user/message', seq: 1, time: 1, data: { source: { kind: 'system' }, content: [{ type: 'text', text: '内部上下文' }] } },
+      { type: 'user/message', seq: 2, time: 2, data: { content: [{ type: 'text', text: 'The approval policy changed from always-allow to default.' }] } },
+      { type: 'user/message', seq: 3, time: 3, data: { content: [{ type: 'text', text: '继续' }] } },
+    ],
+  })
+  const [workspace] = await store.list()
+  const questions = (await store.get(workspace.id)).threads[0].turns.map(turn => turn.question)
+  assert.deepEqual(questions, ['继续'])
+})
+
+test('does not stamp a generated session label onto a projected thread', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-label-stamp-'))
+  const store = new WorkspaceStore(join(directory, 'state.json'))
+  await store.syncSessions([
+    { id: 'parent', title: '当前会话', cwd: 'C:\\work\\labels', blank: false },
+    { id: 'fork', title: '当前会话 分支', cwd: 'C:\\work\\labels', parentId: 'parent', blank: true },
+  ])
+  const [workspace] = await store.list()
+  const graph = await store.get(workspace.id)
+  const parent = graph.threads.find(item => item.dshSessionId === 'parent')
+  const fork = graph.threads.find(item => item.dshSessionId === 'fork')
+  assert.notEqual(parent.title, '当前会话')
+  assert.notEqual(fork.title, '当前会话 分支')
+  assert.equal(parent.dshSessionTitle, null)
+  assert.equal(fork.dshSessionTitle, null)
+})
+
+test('repairs stored cards that carry injected text or a generated label', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-repair-'))
+  const file = join(directory, 'state.json')
+  await writeFile(file, JSON.stringify({
+    version: 5, workspaces: [{ id: 'w', title: 'w', kind: 'dsh', cwd: 'C:\\work\\w', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', threads: [{
+      id: 't', title: '当前会话', parentId: null, dshSessionId: 's', dshSessionTitle: '当前会话',
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      turns: [
+        { seq: 1, at: '2026-01-01T00:00:00.000Z', question: '当前会话', answer: 'a', answerSeq: 2, error: null, processCount: 0, processIds: [] },
+        { seq: 3, at: '2026-01-01T00:00:00.000Z', question: 'This is an automatically generated checkpoint condensing the conversation', answer: 'b', answerSeq: 4, error: null, processCount: 0, processIds: [] },
+        { seq: 5, at: '2026-01-01T00:00:00.000Z', question: '真实问题', answer: 'c', answerSeq: 6, error: null, processCount: 0, processIds: [] },
+      ],
+    }] }],
+  }))
+  const store = new WorkspaceStore(file)
+  const [workspace] = await store.list()
+  const questions = (await store.get(workspace.id)).threads[0].turns.map(turn => turn.question)
+  // The injected checkpoint block is gone outright; the generated label no
+  // longer poses as a question. Both are filtered off the canvas as well.
+  assert.ok(!questions.some(question => question.startsWith('This is an automatically generated')))
+  assert.ok(!questions.includes('当前会话'))
+  assert.ok(questions.includes('真实问题'))
+})
+
 test('groups DSH sessions by their working directory', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-synapse-cwd-'))
   const store = new WorkspaceStore(join(directory, 'state.json'))
