@@ -1411,11 +1411,27 @@ function questionFor(thread) {
 }
 function answerFor(thread) { return latestMessage(thread, 'assistant') ?? null }
 
+// Models wrap footnotes in <small> and drop <br>/<sup> into prose. Those
+// phrasing tags are restored after escaping; attributes never are, so
+// <small onclick> stays text. Code spans are skipped, so a literal tag in
+// backticks stays visible.
+const SAFE_INLINE_HTML = /<code>[\s\S]*?<\/code>|&lt;(\/?)(small|br|wbr|sub|sup|mark|kbd|cite|q|dfn|samp|var|abbr|b|i|u|s|em|strong|del|ins)\s*\/?&gt;/gi
+const VOID_INLINE_HTML = new Set(['br', 'wbr'])
+function restoreSafeInlineHtml(html) {
+  return String(html ?? '').replace(SAFE_INLINE_HTML, (match, close, name) => {
+    if (match.startsWith('<code>')) return match
+    const tag = name.toLowerCase()
+    if (close === '/') return VOID_INLINE_HTML.has(tag) ? `<${tag}>` : `</${tag}>`
+    return `<${tag}>`
+  })
+}
+
 // Inline formatting is applied to already-escaped text, so every rule below
 // matches against entity references (&quot;, &amp; …) rather than raw
-// characters — and must never produce markup the escaping removed.
+// characters — and must never produce markup the escaping removed, except
+// the phrasing-tag allowlist restored at the end.
 function inlineMarkdown(text) {
-  return escapeHtml(text)
+  return restoreSafeInlineHtml(escapeHtml(text)
     // A code span wins over every other rule: `**` inside backticks is literal.
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -1423,7 +1439,7 @@ function inlineMarkdown(text) {
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
     // [label](url) — the url is scheme-checked, so a `javascript:` target can
     // never become a clickable link in a rendered answer.
-    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label, url) => (safeLinkUrl(url) === null ? match : `<a href="${safeLinkUrl(url)}" target="_blank" rel="noreferrer noopener">${label}</a>`))
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (match, label, url) => (safeLinkUrl(url) === null ? match : `<a href="${safeLinkUrl(url)}" target="_blank" rel="noreferrer noopener">${label}</a>`)))
 }
 
 /**

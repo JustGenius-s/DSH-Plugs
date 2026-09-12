@@ -232,3 +232,36 @@ test('a heading keeps its closing hashes out of the text', async () => {
   const { renderMarkdown } = await loadMarkdownHelpers()
   assert.match(renderMarkdown('## 标题 ##'), /<h2 id="md-h-1">标题<\/h2>/)
 })
+
+test('keeps a tight allowlist of phrasing HTML and leaves everything else escaped', async () => {
+  const { renderMarkdown } = await loadMarkdownHelpers()
+  const footnote = '<small>*ARC-AGI-3 分数有出入：Engadget 报 98.6%，另一家报 99.9%。这正是我上一轮说的"看口径"的活案例。另外 Epoch AI 的 ECI 综合指数榜首是 GPT-6 Astra。</small>'
+  const result = renderMarkdown(footnote)
+  assert.match(result, /<p><small>\*ARC-AGI-3/)
+  assert.match(result, /<\/small><\/p>/)
+  assert.doesNotMatch(result, /&lt;small/)
+  // A lone opening * is a footnote marker, not emphasis.
+  assert.doesNotMatch(result, /<em>/)
+
+  assert.match(renderMarkdown('<small>*footnote*</small>'), /<small><em>footnote<\/em><\/small>/)
+  assert.match(renderMarkdown('line<br>break'), /<p>line<br>break<\/p>/)
+  assert.match(renderMarkdown('x<br/>y'), /<p>x<br>y<\/p>/)
+  assert.match(renderMarkdown('E = mc<sup>2</sup>'), /<sup>2<\/sup>/)
+
+  // Attributes and unknown tags stay escaped so they cannot become markup.
+  assert.match(renderMarkdown('<small onclick="alert(1)">x</small>'), /&lt;small onclick=/)
+  assert.match(renderMarkdown('<script>alert(1)</script>'), /&lt;script&gt;/)
+  assert.doesNotMatch(renderMarkdown('<script>alert(1)</script>'), /<script>/)
+
+  const code = renderMarkdown('`<small>x</small>`')
+  assert.match(code, /<code>&lt;small&gt;x&lt;\/small&gt;<\/code>/)
+  const fence = renderMarkdown('```\n<small>x</small>\n```')
+  assert.match(fence, /<code>&lt;small&gt;x&lt;\/small&gt;<\/code>/)
+})
+
+test('sidebar small tags shrink without changing the surrounding type', async () => {
+  const css = await readFile(new URL('../styles.css', import.meta.url), 'utf8')
+  assert.match(css, /\.card-inspector-answer small \{[^}]*font-size: 0\.85em/)
+  assert.match(css, /\.thread-answer small \{[^}]*font-size: 0\.85em/)
+  assert.match(css, /\.message-body small \{[^}]*font-size: 0\.85em/)
+})
