@@ -8,6 +8,11 @@
 .bubble {
   position: fixed;
   z-index: 100;
+  /* Portaled into the page, so a tooltip anchored near the window's top edge
+     sits inside the shell's drag band. Tooltips are read-only, but a drag rect
+     left over them would swallow the pointer (see Modal.module.css). */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
   /* Fixed-position shrink-to-fit measures only the space from `left` to the
      viewport edge, so anchors near the right edge would wrap early;
      max-content sizes by the label alone, capped at half the viewport. */

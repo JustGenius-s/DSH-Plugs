@@ -7,6 +7,13 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
+  /* DSH-Desktop's hiddenInset title bar injects -webkit-app-region:drag onto
+     the shell's top band; an element without its own app-region value emits no
+     drag rect, so it cannot occlude that band. The full-viewport layer crosses
+     it, and so does the centered card whenever the window is short: without
+     this, clicks on the dialog's own controls start a window move instead. */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 /* User/spec mask: rgba(0,0,0,0.24) + blur(2px) via --dsw-alias-bg-mask-1 /

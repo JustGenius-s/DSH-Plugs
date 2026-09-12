@@ -30,6 +30,7 @@ export const inject = [
 
 /** Host-side schema for the one durable Codex configuration namespace. */
 export const ConfigSchema: Schema<DshCodexConfig> = Schema.object({
+  longMessageCollapseEnabled: Schema.boolean().default(DEFAULT_CONFIG.longMessageCollapseEnabled),
   stickyUserBubbleEnabled: Schema.boolean().default(DEFAULT_CONFIG.stickyUserBubbleEnabled),
   stickyUserBubbleMode: Schema.union([
     Schema.const('running'),

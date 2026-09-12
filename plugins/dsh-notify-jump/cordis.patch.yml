@@ -1,0 +1,8 @@
+# Bundle patch for @just-genius/dsh-notify-jump.
+#
+# Client half wraps window.Notification so a dsh-notification banner click
+# focuses the window and opens the session encoded in the notification tag.
+
+- insert:
+    - id: dsh-notify-jump
+      name: '@just-genius/dsh-notify-jump'

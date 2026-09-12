@@ -1,0 +1,10 @@
+# Bundle patch for @just-genius/dsh-quick-notes.
+#
+# Host half owns the note library on disk, the pasted-image attachments, and
+# the one model call that mints a title and tags.
+# Browser half owns the floating cards, the shortcut search overlay, and the
+# Settings → 随手笔记 page.
+
+- insert:
+    - id: dsh-quick-notes
+      name: '@just-genius/dsh-quick-notes'

@@ -3,12 +3,8 @@ import type {
   ClientContext,
   SessionId,
   SettingsScope,
-  SidebarRightService,
-  SidebarRightTabDefinition,
 } from '@just-genius/dsh-plugin-runtime/client'
-import {
-  IconFolderColor16,
-} from '@just-genius/dsh-plugin-ui'
+import { IconFolderColor16 } from '@just-genius/dsh-plugin-ui'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
 import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
@@ -30,74 +26,34 @@ import { FilesPanel, type FilesPanelProps } from './files-panel'
 import { FileTabIcon } from './file-tab-icon'
 import { createFilesTabStateRegistry } from './tree-store'
 import {
-  FILE_ADDRESS_PATTERN,
   fileAddressFor,
-  fileTitleFromAddress,
   filesNavigationFrom,
   parseFileAddress,
   type FilesNavigationState,
 } from './resource-address'
+import {
+  FILES_TAB_KIND,
+  filesTabDefinition,
+} from './files-tab'
+import {
+  fileViewerDefinition,
+  switchActiveFileViewer,
+} from './file-viewer'
 
-export const FILES_TAB_KIND = 'files'
-export const FILES_TAB_ID = '@just-genius/dsh-codex/files'
-export const OFFICIAL_FILE_VIEWER_KIND = 'text'
-export const FILE_VIEWER_KIND = 'dsh-codex-file'
-export const FILE_VIEWER_ID = '@just-genius/dsh-codex/file-viewer'
+export {
+  FILES_TAB_ID,
+  FILES_TAB_KIND,
+  filesTabDefinition,
+} from './files-tab'
+export {
+  FILE_VIEWER_ID,
+  FILE_VIEWER_KIND,
+  OFFICIAL_FILE_VIEWER_KIND,
+  fileViewerDefinition,
+  switchActiveFileViewer,
+} from './file-viewer'
 
 const NS = 'settings.codex'
-
-export function filesTabDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
-  return {
-    id: FILES_TAB_ID,
-    kind: FILES_TAB_KIND,
-    priority: 'extension',
-    title: () => t('view.files'),
-    guide: [{
-      order: 10,
-      title: () => t('view.files'),
-      icon: IconFolderColor16,
-    }],
-  }
-}
-
-export function fileViewerDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
-  return {
-    id: FILE_VIEWER_ID,
-    kind: FILE_VIEWER_KIND,
-    patterns: [FILE_ADDRESS_PATTERN],
-    priority: 'extension',
-    canOpen: address => parseFileAddress(address) !== undefined,
-    title: address => fileTitleFromAddress(address, t('view.files')),
-  }
-}
-
-/** Reclassify the visible file tab after its preferred viewer changes. */
-export function switchActiveFileViewer(
-  sidebar: Pick<SidebarRightService, 'active' | 'openResource'>,
-  customEnabled: boolean,
-): boolean {
-  const active = sidebar.active()
-  if (active === undefined || parseFileAddress(active.contentId) === undefined) return false
-
-  if (customEnabled) {
-    if (active.kind === FILE_VIEWER_KIND) return false
-    sidebar.openResource(active.contentId, {
-      kind: FILE_VIEWER_KIND,
-      replaceTab: active.id,
-      revealIfOpened: false,
-    })
-    return true
-  }
-
-  if (active.kind !== FILE_VIEWER_KIND) return false
-  // The extension registration has already left, so normal resource
-  // resolution selects DSH's best built-in/fallback viewer.
-  sidebar.openResource(active.contentId, {
-    replaceTab: active.id,
-    revealIfOpened: false,
-  })
-  return true
-}
 
 function useFilesConfig(scope: SettingsScope<DshCodexConfig>): DshCodexConfig {
   const settings = useSyncExternalStore(
@@ -230,7 +186,7 @@ export function createFilesFeature(
 
           const disposeFilesPage = registerSidebarTab(
             ctx,
-            filesTabDefinition(t),
+            filesTabDefinition(t, IconFolderColor16),
             FilesPageTab,
             { locale: NS, title: FilesTitle },
           )
@@ -257,3 +213,7 @@ export function createFilesFeature(
 }
 
 export { FilesPanel }
+export {
+  officialRenderedPreviewExtension,
+  usesOfficialRenderedPreview,
+} from './official-rendered-preview'

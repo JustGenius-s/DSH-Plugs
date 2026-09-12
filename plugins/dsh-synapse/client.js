@@ -6,18 +6,29 @@ window.__ModuleLoader__.load({
     let primitives = null
     try { primitives = require('@deepseek-ai/dsh-client-ui-primitives') } catch { primitives = null }
     const module = { exports: {} }
+    // Card state-machine inputs. DSH already carries every signal on its
+    // session summary: `running` (the agent is working), `pendingInteraction`
+    // (blocked on a human — approval / plan-review / question, which is the
+    // sidebar's amber dot), and `completed` (finished while not selected, the
+    // green done reminder).
+    const statusOf = session => ({
+      running: session.running === true,
+      pendingInteraction: typeof session.pendingInteraction === 'string' ? session.pendingInteraction : null,
+      completed: session.completed === true,
+      blank: session.blank === true,
+    })
     const currentSession = ctx => {
       const snapshot = ctx.sessions.list.getSnapshot()
       const id = snapshot.current
       if (id === undefined) return null
       const session = snapshot.byId[id]
-      return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null }
+      return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, ...statusOf(session) }
     }
     const sessionSnapshot = ctx => {
       const snapshot = ctx.sessions.list.getSnapshot()
       return snapshot.ids.map(id => {
         const session = snapshot.byId[id]
-        return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, blank: session.blank }
+        return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, blank: session.blank, ...statusOf(session) }
       }).filter(Boolean)
     }
     const rootIdsOf = (sessions, ids) => ids.filter(id => sessions.byId[id]?.parentId == null)
@@ -38,14 +49,72 @@ window.__ModuleLoader__.load({
       ]
     }
 
-    const TOOL_VARIANTS = { bash: 'bash', pwsh: 'bash', read: 'read', web_fetch: 'read', web_search: 'search', grep: 'search', glob: 'search', write: 'write', edit: 'edit', run_code: 'code' }
-    const TOOL_TITLES = { search: 'Search', read: 'Read', bash: 'Bash', write: 'Write', edit: 'Edit', code: 'Code', others: 'Tool call' }
+    const TOOL_VARIANTS = { bash: 'bash', pwsh: 'bash', read: 'read', web_fetch: 'web', web_search: 'search', search: 'search', grep: 'search', glob: 'search', write: 'write', edit: 'edit', run_code: 'code', todo_write: 'todo', todo: 'todo', job: 'job', ask_user_question: 'question', skill: 'skill', workflow: 'code', ralph: 'agent', subagent: 'agent', view_image: 'image' }
+    const TOOL_TITLES = { search: 'Search', read: '读取', bash: '命令', write: '写入', edit: '编辑', code: '代码', todo: '任务清单', job: '后台任务', web: '网页', agent: '子代理', skill: '技能', question: '提问', image: '图片', others: '工具调用' }
+    const TOOL_SUMMARY_KEYS = {
+      bash: ['description', 'command', 'cmd'],
+      search: ['query', 'keywords', 'pattern', 'q'],
+      read: ['path', 'file_path'],
+      write: ['path', 'file_path'],
+      edit: ['path', 'file_path'],
+      code: ['code', 'source', 'name'],
+      todo: ['todos'],
+      job: ['jobId', 'id', 'title'],
+      web: ['url'],
+      agent: ['description', 'prompt', 'objective'],
+      skill: ['skill', 'name'],
+      question: ['questions'],
+      image: ['path', 'file_path', 'url'],
+      others: ['path', 'file_path', 'url', 'description', 'command', 'name'],
+    }
     const seqOf = node => {
       if (node == null) return undefined
       if (typeof node.anchorSeq === 'number' && Number.isFinite(node.anchorSeq)) return node.anchorSeq
       const data = node.data
       const raw = data !== null && typeof data === 'object' ? data.seq : undefined
       return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+    }
+    const nodeOfChat = (chat, key) => {
+      if (chat == null || chat.nodes == null) return undefined
+      return typeof chat.nodes.get === 'function' ? chat.nodes.get(key) : chat.nodes[key]
+    }
+    const assistantTextOfBlocks = blocks => Array.isArray(blocks)
+      ? blocks.filter(block => block?.kind === 'text').map(block => String(block.text ?? '')).join('\n')
+      : ''
+    const replyTextOfSnapshot = snapshot => {
+      const partial = assistantTextOfBlocks(snapshot?.partial?.blocks)
+      if (partial !== '') return partial
+      const keys = Array.from(snapshot?.chat?.order ?? [])
+      for (let index = keys.length - 1; index >= 0; index--) {
+        const node = nodeOfChat(snapshot?.chat, keys[index])
+        if (node?.visibility === 'hidden') continue
+        if (node?.kind === 'user' || node?.kind === 'steering') return ''
+        if (node?.kind !== 'assistant-step') continue
+        const text = assistantTextOfBlocks(node.data?.blocks)
+        if (text !== '') return text
+      }
+      return ''
+    }
+    const turnNumberOf = node => {
+      const location = node?.location
+      if (location?.kind === 'turn' || location?.kind === 'step') {
+        const turn = location.turn?.turn
+        return typeof turn === 'number' && Number.isFinite(turn) ? turn : undefined
+      }
+      return undefined
+    }
+    const visibleUserKeys = chat => {
+      const keys = []
+      for (const key of Array.from(chat?.order ?? [])) {
+        const node = nodeOfChat(chat, key)
+        if (node != null && (node.kind === 'user' || node.kind === 'steering') && node.visibility !== 'hidden') keys.push(key)
+      }
+      return keys
+    }
+    const keysForTurn = (chat, turn) => {
+      const indexed = typeof chat?.locations?.getTurn === 'function' ? chat.locations.getTurn(turn) : undefined
+      if (Array.isArray(indexed) && indexed.length > 0) return [...indexed]
+      return Array.from(chat?.order ?? []).filter(key => turnNumberOf(nodeOfChat(chat, key)) === turn)
     }
     const asRecord = data => data !== null && typeof data === 'object' ? data : null
     const textOfContent = content => {
@@ -75,6 +144,123 @@ window.__ModuleLoader__.load({
       }
       return ''
     }
+    const toolSummary = (args, keys, name) => {
+      if (args !== undefined) {
+        for (const key of keys) {
+          const value = args[key]
+          if (typeof value === 'string' && value.trim() !== '') return value.trim()
+          if (Array.isArray(value)) {
+            const items = value.filter(item => typeof item === 'string' && item.trim() !== '').map(item => item.trim())
+            if (items.length > 0) return items.join(' · ')
+            if (key === 'todos' && value.length > 0) return `${value.length} 项`
+          }
+        }
+      }
+      return pickString(args, ['path', 'file_path', 'url']) || name || ''
+    }
+    const asSources = value => {
+      if (!Array.isArray(value)) return []
+      return value.map(item => {
+        if (typeof item === 'string') return { title: item, url: /^https?:/i.test(item) ? item : undefined }
+        if (item == null || typeof item !== 'object') return null
+        const title = typeof item.title === 'string' ? item.title : typeof item.name === 'string' ? item.name : ''
+        const url = typeof item.url === 'string' ? item.url : typeof item.link === 'string' ? item.link : typeof item.href === 'string' ? item.href : undefined
+        const snippet = typeof item.snippet === 'string' ? item.snippet : typeof item.description === 'string' ? item.description : typeof item.content === 'string' ? item.content : undefined
+        if (title === '' && url === undefined) return null
+        return snippet === undefined ? { title: title || url, url } : { title: title || url, url, snippet }
+      }).filter(Boolean)
+    }
+    const inferResultView = (name, output) => {
+      if (typeof output !== 'string' || output.trim() === '') return null
+      const text = output.trim()
+      try {
+        const parsed = JSON.parse(text)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const sources = asSources(parsed)
+          if (sources.length > 0) return { card: 'web', sources }
+        }
+        if (parsed !== null && typeof parsed === 'object') {
+          const sources = asSources(parsed.sources ?? parsed.results ?? parsed.items ?? parsed.organic)
+          if (sources.length > 0) return { card: 'web', sources }
+          if (Array.isArray(parsed.paths) && parsed.paths.length > 0) return { card: 'search', kind: 'paths', paths: parsed.paths, total: parsed.total ?? parsed.paths.length, truncated: parsed.truncated === true }
+          if (Array.isArray(parsed.files) && parsed.files.length > 0) return { card: 'search', kind: 'matches', files: parsed.files, total: parsed.total ?? parsed.files.length, truncated: parsed.truncated === true }
+        }
+      } catch { /* not JSON */ }
+      if (name === 'web_search' || name === 'web_fetch') {
+        const sources = []
+        const matcher = /\[([^\]]+)\]\((https?:[^)]+)\)/g
+        let match
+        while ((match = matcher.exec(text)) !== null) sources.push({ title: match[1], url: match[2] })
+        if (sources.length > 0) return { card: 'web', sources }
+      }
+      return null
+    }
+    const processToToolNode = (entry, key) => ({
+      key,
+      kind: 'tool-call',
+      data: {
+        root: entry?.result == null && entry?.error == null ? {
+          name: entry?.name ?? '',
+          argsRaw: entry?.arguments ?? '',
+          callId: entry?.callId,
+        } : {
+          kind: 'result',
+          name: entry?.name ?? '',
+          call: { name: entry?.name ?? '', argsRaw: entry?.arguments ?? '' },
+          argsRaw: entry?.arguments ?? '',
+          content: typeof entry?.result === 'string' && entry.result !== '' ? [{ type: 'text', text: entry.result }] : [],
+          isError: typeof entry?.error === 'string' && entry.error !== '',
+          error: typeof entry?.error === 'string' && entry.error !== '' ? { name: 'Error', message: entry.error } : undefined,
+          resultView: inferResultView(entry?.name ?? '', entry?.result ?? ''),
+        },
+      },
+    })
+    const detailAssistantText = (item, detail) => {
+      let text = String(item.text ?? '')
+      if (detail?.format === 'structured-v1') return text
+      const calls = detail?.process ?? detail?.flow?.filter(entry => entry.kind === 'tool') ?? []
+      // Compatibility for the old endpoint's exact "name\\narguments" suffix,
+      // and only when the corresponding structured execution is also present.
+      for (let changed = true; changed;) {
+        changed = false
+        for (const call of calls) {
+          if (typeof call.name !== 'string' || typeof call.arguments !== 'string' || call.arguments === '') continue
+          const suffix = `${call.name}\n${call.arguments}`
+          if (text !== suffix && !text.endsWith(`\n${suffix}`)) continue
+          const prefix = text.slice(0, text.length - suffix.length)
+          if ((prefix.match(/^\s*(?:`{3,}|~{3,})/gm) ?? []).length % 2 !== 0) continue
+          text = prefix.trimEnd()
+          changed = true
+          break
+        }
+      }
+      return text
+    }
+    const detailToChatNodes = detail => {
+      const nodes = []
+      if (typeof detail?.question === 'string' && detail.question !== '') {
+        nodes.push({ key: 'question', kind: 'user', data: { content: [{ type: 'text', text: detail.question }] } })
+      }
+      const flow = Array.isArray(detail?.flow) && detail.flow.length > 0
+        ? detail.flow
+        : [
+            ...(Array.isArray(detail?.steps) ? detail.steps : []),
+            ...(Array.isArray(detail?.process) ? detail.process.map(entry => ({ kind: 'tool', ...entry })) : []),
+          ]
+      flow.forEach((item, index) => {
+        if (item?.kind === 'assistant') {
+          const text = detailAssistantText(item, detail)
+          if (text.trim() !== '') nodes.push({ key: `assistant:${item.seq ?? index}`, kind: 'assistant-step', data: { status: 'settled', blocks: [{ kind: 'text', text }] } })
+          return
+        }
+        if (item?.kind === 'error') {
+          nodes.push({ key: `error:${index}`, kind: 'turn-error', data: { message: String(item.text ?? '本轮未完成') } })
+          return
+        }
+        if (item?.kind === 'tool' || item?.name != null) nodes.push(processToToolNode(item, `tool:${item.callId || item.seq || index}`))
+      })
+      return nodes
+    }
     const isSettledTool = block => block !== null && typeof block === 'object' && 'kind' in block
     const callName = block => isSettledTool(block) ? block.call?.name ?? '' : block.name ?? ''
     const callArgsRaw = block => (isSettledTool(block) ? block.call?.argsRaw : block.argsRaw) ?? ''
@@ -84,50 +270,111 @@ window.__ModuleLoader__.load({
         if (block !== null && typeof block === 'object' && block.type === 'text') parts.push(String(block.text ?? ''))
         else parts.push(JSON.stringify(block, null, 2))
       }
-      if (parts.length === 0 && node.error != null) parts.push(`${node.error.name ?? 'Error'}: ${node.error.code ?? ''}`)
+      if (parts.length === 0 && node.error != null) parts.push(`${node.error.name ?? 'Error'}: ${node.error.message ?? node.error.code ?? ''}`)
       return parts.join('\n')
     }
-    // Slice one user turn out of the live session chat (same nodes side-chat
-    // renders). seq is the user event; turnIndex is the fallback when seq is
-    // missing. Read-only: the pane never prompts.
-    const sliceTurnNodes = (chat, seq, turnIndex) => {
-      if (chat == null || chat.order == null || chat.nodes == null) return []
-      const order = Array.from(chat.order)
-      const nodeOf = key => typeof chat.nodes.get === 'function' ? chat.nodes.get(key) : chat.nodes[key]
-      const userKeys = []
-      for (const key of order) {
-        const node = nodeOf(key)
-        if (node != null && node.kind === 'user' && node.visibility !== 'hidden') userKeys.push(key)
-      }
-      let start = -1
-      if (Number.isInteger(seq)) start = userKeys.findIndex(key => seqOf(nodeOf(key)) === seq)
-      if (start === -1 && Number.isInteger(turnIndex) && turnIndex >= 0 && turnIndex < userKeys.length) start = turnIndex
-      if (start === -1) return []
-      const from = order.indexOf(userKeys[start])
-      const endKey = userKeys[start + 1]
+    // Slice one user turn out of the live Chat target. Prefer the official
+    // turn location index (DSH 0.1.2+); fall back to visible user rows when
+    // a snapshot has no locations or the window has not loaded that turn.
+    // seq is the user event; turnIndex is the 0-based card fallback.
+    const keysBetweenUser = (chat, userKey) => {
+      const order = Array.from(chat?.order ?? [])
+      const from = order.indexOf(userKey)
+      if (from === -1) return []
+      const userKeys = visibleUserKeys(chat)
+      const index = userKeys.indexOf(userKey)
+      const endKey = index === -1 ? undefined : userKeys[index + 1]
       const to = endKey === undefined ? order.length : order.indexOf(endKey)
-      const nodes = []
-      for (let index = from; index < to; index += 1) {
-        const node = nodeOf(order[index])
-        if (node != null) nodes.push(node)
-      }
-      return nodes
+      return order.slice(from, to === -1 ? order.length : to)
     }
-    const isLastUserTurn = (chat, seq, turnIndex) => {
-      if (chat == null || chat.order == null || chat.nodes == null) return true
+    const sliceTurnKeys = (chat, seq, turnIndex) => {
+      if (chat == null || chat.order == null) return []
       const order = Array.from(chat.order)
-      const nodeOf = key => typeof chat.nodes.get === 'function' ? chat.nodes.get(key) : chat.nodes[key]
-      const userKeys = order.filter(key => {
-        const node = nodeOf(key)
-        return node != null && node.kind === 'user' && node.visibility !== 'hidden'
+      const resolved = keys => (Array.isArray(keys) && keys.length > 0 ? keys : null)
+      let userKey
+      if (Number.isInteger(seq)) {
+        for (const key of order) {
+          const node = nodeOfChat(chat, key)
+          if (node == null || seqOf(node) !== seq) continue
+          if (node.kind === 'user' || node.kind === 'steering') { userKey = key; break }
+          if (userKey === undefined) userKey = key
+        }
+      }
+      const turn = userKey === undefined ? undefined : turnNumberOf(nodeOfChat(chat, userKey))
+      if (turn !== undefined) {
+        const keys = resolved(keysForTurn(chat, turn))
+        if (keys !== null) return keys
+      }
+      if (userKey !== undefined) return keysBetweenUser(chat, userKey)
+      // An explicit event address must never be replaced by an unrelated
+      // window-relative turn index, especially on forks with inherited turns.
+      if (Number.isInteger(seq)) return []
+      if (Number.isInteger(turnIndex)) {
+        const keyed = resolved(keysForTurn(chat, turnIndex + 1)) ?? resolved(keysForTurn(chat, turnIndex))
+        if (keyed !== null) return keyed
+        const userKeys = visibleUserKeys(chat)
+        if (turnIndex >= 0 && turnIndex < userKeys.length) {
+          const key = userKeys[turnIndex]
+          const keyedTurn = turnNumberOf(nodeOfChat(chat, key))
+          if (keyedTurn !== undefined) {
+            const keys = resolved(keysForTurn(chat, keyedTurn))
+            if (keys !== null) return keys
+          }
+          return keysBetweenUser(chat, key)
+        }
+      }
+      return []
+    }
+    const sliceTurnNodes = (chat, seq, turnIndex) =>
+      sliceTurnKeys(chat, seq, turnIndex).map(key => nodeOfChat(chat, key)).filter(node => node != null)
+    const isLastUserTurn = (chat, seq, turnIndex) => {
+      if (chat == null || chat.order == null || chat.nodes == null) return false
+      const sliced = sliceTurnKeys(chat, seq, turnIndex)
+      if (sliced.length === 0) return false
+      const userKeys = visibleUserKeys(chat)
+      const lastUser = userKeys[userKeys.length - 1]
+      if (lastUser !== undefined && sliced.includes(lastUser)) return true
+      const lastVisible = [...Array.from(chat.order)].reverse().find(key => {
+        const node = nodeOfChat(chat, key)
+        return node != null && node.visibility !== 'hidden' && node.kind !== 'turn-tail'
       })
-      let start = -1
-      if (Number.isInteger(seq)) start = userKeys.findIndex(key => seqOf(nodeOf(key)) === seq)
-      if (start === -1 && Number.isInteger(turnIndex)) start = turnIndex
-      return start === -1 || start === userKeys.length - 1
+      return lastVisible !== undefined && sliced.includes(lastVisible)
+    }
+    // The live tail of a running turn. Location indexes freeze when the user
+    // message lands, so later think/tool/stream nodes never appear in
+    // keysForTurn — 详情 would show the question and then stall.
+    const liveTailKeys = chat => {
+      if (chat == null || chat.order == null) return []
+      const userKeys = visibleUserKeys(chat)
+      if (userKeys.length === 0) {
+        return Array.from(chat.order).filter(key => {
+          const node = nodeOfChat(chat, key)
+          return node != null && node.visibility !== 'hidden' && node.kind !== 'turn-tail'
+        })
+      }
+      return keysBetweenUser(chat, userKeys[userKeys.length - 1])
+    }
+    const sliceTurnKeysLive = (chat, seq, turnIndex, running) => {
+      const keys = sliceTurnKeys(chat, seq, turnIndex)
+      if (running !== true) return keys
+      const tail = liveTailKeys(chat)
+      if (keys.length === 0) return []
+      if (isLastUserTurn(chat, seq, turnIndex) && tail.length > keys.length) return tail
+      return keys
+    }
+    const MARKDOWN_CODE_LABELS = { copyLabel: '复制', copiedLabel: '已复制' }
+    const MARKDOWN_LABELS = { code: MARKDOWN_CODE_LABELS, footnotes: '脚注' }
+    function markdownBodyProps(text, streaming) {
+      return {
+        text: String(text ?? ''),
+        streaming: streaming === true,
+        // 0.1.2 requires labels; 0.1.1 still reads codeLabels.
+        labels: MARKDOWN_LABELS,
+        codeLabels: MARKDOWN_CODE_LABELS,
+      }
     }
     function MarkdownBody({ text, streaming }) {
-      if (primitives?.MarkdownText) return h(primitives.MarkdownText, { text, streaming: streaming === true, codeLabels: { copyLabel: '复制', copiedLabel: '已复制' } })
+      if (primitives?.MarkdownText) return h(primitives.MarkdownText, markdownBodyProps(text, streaming))
       return h('div', { className: 'dsh-codex-sidechat-md-fallback' }, text)
     }
     // Compact outline glyphs matching dsh-codex's tool/think leading icons.
@@ -152,10 +399,15 @@ window.__ModuleLoader__.load({
     }, h('path', { d }))
     const toolIcon = (variant) => {
       const primitive = variant === 'search' ? primitiveIcon('IconSearchOutline16')
-        : variant === 'read' ? primitiveIcon('IconBrowseOutline16')
-        : variant === 'bash' ? primitiveIcon('IconApiOutline14')
+        : variant === 'read' || variant === 'image' ? primitiveIcon('IconBrowseOutline16')
+        : variant === 'bash' || variant === 'job' ? primitiveIcon('IconApiOutline14')
         : variant === 'write' || variant === 'edit' ? primitiveIcon('IconEditOutline16')
         : variant === 'code' ? primitiveIcon('IconCodeOutline16')
+        : variant === 'web' ? primitiveIcon('IconGlobeOutline14') ?? primitiveIcon('IconLinkOutline14')
+        : variant === 'skill' ? primitiveIcon('IconSkillOutline16')
+        : variant === 'question' ? primitiveIcon('IconQuestionOutline14')
+        : variant === 'agent' ? primitiveIcon('IconUserOutline16')
+        : variant === 'todo' ? primitiveIcon('IconChecklistOutline14')
         : variant === 'think' ? primitiveIcon('IconThinkOutline14')
         : primitiveIcon('IconSparkle16')
       return primitive ?? svgIcon(FALLBACK_ICON[variant] ?? FALLBACK_ICON.others)
@@ -176,6 +428,102 @@ window.__ModuleLoader__.load({
         ),
         body ? h('div', { className: 'dsh-codex-sidechat-think-body' }, body) : null,
       )
+    }
+    function matchLine(match) {
+      if (typeof match === 'object' && match !== null) {
+        const number = typeof match.lineNumber === 'number' ? match.lineNumber : typeof match.number === 'number' ? match.number : 0
+        const text = typeof match.line === 'string' ? match.line : typeof match.text === 'string' ? match.text : ''
+        return { lineNumber: number, line: text }
+      }
+      return { lineNumber: 0, line: String(match ?? '') }
+    }
+    const TERMINAL_LABELS = {
+      copy: '复制', copied: '已复制', running: '运行中', done: '完成', failed: '失败',
+      signal: value => `信号 ${value}`,
+      exitCode: value => `退出码 ${value}`,
+      noOutput: '没有输出',
+      collapseAria: '收起输出', collapse: '收起',
+      expandAria: hidden => `展开其余 ${hidden} 行输出`,
+      expand: hidden => `展开 ${hidden} 行`,
+    }
+    function terminalBodyProps(command, output, running = false) {
+      return { command, output: output || undefined, running, maxLines: 16, labels: TERMINAL_LABELS }
+    }
+    function ToolResultBody({ name, variant, args, output, resultView, running }) {
+      const view = resultView ?? inferResultView(name, output)
+      if (view?.card === 'web') {
+        const sources = Array.isArray(view.sources) ? view.sources : []
+        if (sources.length > 0) {
+          return h('ul', { className: 'dsh-codex-sidechat-sources' },
+            sources.map((source, index) => h('li', { key: source.url ?? String(index), className: 'dsh-codex-sidechat-source' },
+              h('span', { className: 'dsh-codex-sidechat-source-title' }, source.title ?? source.url ?? ''),
+              source.url ? h('a', { className: 'dsh-codex-sidechat-source-link', href: source.url, target: '_blank', rel: 'noreferrer noopener' }, source.url) : null,
+              source.snippet ? h('span', { className: 'dsh-codex-sidechat-source-snippet' }, source.snippet) : null,
+            )),
+          )
+        }
+        if (typeof view.url === 'string') {
+          return h('div', { className: 'dsh-codex-sidechat-toolresult-caption' }, view.statusCode == null ? view.url : `${view.statusCode} · ${view.url}`)
+        }
+      }
+      if (view?.card === 'search' && primitives?.SearchBlock) {
+        const total = view.total ?? 0
+        const truncated = view.truncated === true
+        if (Array.isArray(view.paths) && view.paths.length > 0) {
+          return h('div', { className: 'dsh-codex-sidechat-toolresult' }, h(primitives.SearchBlock, { kind: 'paths', paths: [...view.paths], total, truncated, maxLines: 16 }))
+        }
+        const files = Array.isArray(view.files) ? view.files : []
+        if (files.length > 0) {
+          return h('div', { className: 'dsh-codex-sidechat-toolresult' }, h(primitives.SearchBlock, {
+            kind: 'matches',
+            files: files.map(file => ({ path: file.path ?? '', matches: (file.matches ?? []).map(matchLine) })),
+            total,
+            truncated,
+            maxLines: 16,
+          }))
+        }
+      }
+      if (view?.card === 'read' && primitives?.ReadBlock && Array.isArray(view.lines) && view.lines.length > 0) {
+        return h('div', { className: 'dsh-codex-sidechat-toolresult' }, h(primitives.ReadBlock, {
+          label: view.path,
+          lines: view.lines.map(line => ({ number: line.number ?? 0, text: String(line.text ?? '') })),
+          totalLines: view.totalLines ?? view.lines.length,
+          maxLines: 16,
+        }))
+      }
+      if ((variant === 'bash' || variant === 'code') && primitives?.TerminalBlock) {
+        return h('div', { className: 'dsh-codex-sidechat-terminal' }, h(primitives.TerminalBlock,
+          terminalBodyProps(pickString(args, ['command', 'cmd']) || '', output, running),
+        ))
+      }
+      if (output && primitives?.CodeBlock) return h('div', { className: 'dsh-codex-sidechat-code' }, h(primitives.CodeBlock, { code: output, copyLabel: '复制', copiedLabel: '已复制' }))
+      return output ? h('div', { className: 'dsh-codex-sidechat-think-body' }, output) : null
+    }
+    function ToolCard({ block }) {
+      const name = callName(block)
+      const variant = TOOL_VARIANTS[name] ?? 'others'
+      const settled = isSettledTool(block)
+      const state = !settled ? 'running' : block.error?.code === 'interrupted' ? 'stopped' : block.isError ? 'error' : 'ok'
+      const args = parseArgs(callArgsRaw(block))
+      const summary = toolSummary(args, TOOL_SUMMARY_KEYS[variant] ?? TOOL_SUMMARY_KEYS.others, name)
+      const output = settled ? resultText(block) : ''
+      const resultView = settled ? block.resultView : undefined
+      const subCalls = Array.isArray(block.subCalls) ? block.subCalls : []
+      const body = h(ToolResultBody, { name, variant, args, output, resultView, running: state === 'running' })
+      return h(FoldRow, {
+        title: TOOL_TITLES[variant] ?? (name || '工具调用'),
+        summary: state === 'error' ? firstLineOf(output) || summary : summary,
+        body: body == null && subCalls.length === 0 ? null : h(React.Fragment, null,
+          body,
+          subCalls.length === 0 ? null : h('div', { className: 'dsh-codex-sidechat-subcalls' },
+            subCalls.map((child, index) => h(ToolCard, { key: child.callId ?? String(index), block: child })),
+          ),
+        ),
+        running: state === 'running',
+        error: state === 'error',
+        kind: 'tool',
+        variant,
+      })
     }
     function ChatNodeView({ node }) {
       if (node.visibility === 'hidden') return null
@@ -211,15 +559,7 @@ window.__ModuleLoader__.load({
         case 'tool-call': {
           const root = data.root
           if (root == null || typeof root !== 'object') return null
-          const name = callName(root)
-          const variant = TOOL_VARIANTS[name] ?? 'others'
-          const settled = isSettledTool(root)
-          const state = !settled ? 'running' : root.error?.code === 'interrupted' ? 'stopped' : root.isError ? 'error' : 'ok'
-          const args = parseArgs(callArgsRaw(root))
-          const keys = variant === 'bash' ? ['description', 'command'] : variant === 'search' ? ['query', 'pattern', 'url'] : variant === 'code' ? ['code', 'source'] : ['path', 'file_path', 'url', 'description', 'command']
-          const summary = pickString(args, keys) || (variant === 'others' && name ? name : '')
-          const output = settled ? resultText(root) : ''
-          return h(FoldRow, { title: TOOL_TITLES[variant] ?? (name || 'Tool call'), summary: state === 'error' ? firstLineOf(output) || summary : summary, body: output, running: state === 'running', error: state === 'error', kind: 'tool', variant })
+          return h(ToolCard, { block: root })
         }
         case 'turn-error':
           return h('div', { className: 'dsh-codex-sidechat-status-row is-error' }, typeof data.message === 'string' ? data.message : 'Turn error')
@@ -227,44 +567,188 @@ window.__ModuleLoader__.load({
           return h('div', { className: 'dsh-codex-sidechat-status-row' }, '已达到输出上限')
         case 'model-retry':
           return h('div', { className: 'dsh-codex-sidechat-status-row' }, '正在重试…')
+        case 'command': {
+          const name = typeof data.name === 'string' && data.name !== '' ? data.name : 'command'
+          const args = typeof data.args === 'string' ? data.args.trim() : ''
+          const outcome = asRecord(data.outcome)
+          const outcomeText = typeof outcome?.text === 'string' ? outcome.text : ''
+          return h(FoldRow, { title: `/${name}`, summary: firstLineOf(outcomeText || args), body: [args, outcomeText].filter(part => part.length > 0).join('\n'), error: outcome?.kind === 'error', kind: 'tool', variant: 'others' })
+        }
+        case 'context': {
+          const body = textOfContent(data.content)
+          const provenance = asRecord(data.provenance)
+          const label = typeof provenance?.label === 'string' && provenance.label !== '' ? provenance.label : '上下文'
+          return h(FoldRow, { title: label, summary: firstLineOf(body), body, kind: 'think', variant: 'think' })
+        }
         case 'compaction':
         case 'manual-compaction': {
           const summary = typeof data.summary === 'string' ? data.summary : asRecord(data.compaction)?.summary
           return h(FoldRow, { title: '上下文已压缩', summary: typeof summary === 'string' ? firstLineOf(summary) : '', body: typeof summary === 'string' ? summary : '', kind: 'tool', variant: 'others' })
         }
         default:
-          return null
+          return primitives?.JsonBlock
+            ? h(primitives.JsonBlock, { label: node.kind, payload: node.data, defaultOpen: false })
+            : null
       }
     }
-    function SynapseTurnPane({ watch, ctx, onClose, onOpenInDialog }) {
-      const [, setTick] = React.useState(0)
-      React.useEffect(() => {
-        try { ctx.sessions.open(watch.sessionId) } catch { /* session gone */ }
-        let unsubscribe = () => {}
-        let timer = 0
-        let tries = 0
-        const bind = () => {
-          const scope = ctx.sessions.scope(watch.sessionId)
-          const session = scope === undefined ? undefined : ctx.sessions.sessionOf(scope)
-          if (session === undefined) {
-            if (tries < 25) {
-              tries += 1
-              timer = window.setTimeout(bind, 200)
-            }
-            setTick(value => value + 1)
-            return
-          }
-          unsubscribe = session.subscribe(() => setTick(value => value + 1))
-          setTick(value => value + 1)
+    const loadTurnThrough = (ctx, sessionId, seq) => {
+      if (!Number.isInteger(seq)) return
+      try {
+        const scope = ctx.sessions.scope(sessionId)
+        const session = scope === undefined ? undefined : ctx.sessions.sessionOf(scope)
+        if (session !== undefined && typeof session.loadThrough === 'function') return session.loadThrough(seq)
+      } catch { /* session gone */ }
+    }
+    const liveSessionOf = (ctx, sessionId) => {
+      try {
+        const scoped = ctx.sessions.scope(sessionId)
+        const fromScope = scoped === undefined ? undefined : ctx.sessions.sessionOf(scoped)
+        if (fromScope != null) return fromScope
+      } catch { /* not in a scoped window */ }
+      try {
+        const bound = ctx.sessions.binding?.(sessionId)?.session
+        if (bound != null) return bound
+      } catch { /* the session has not reached the list yet */ }
+      try {
+        const listed = ctx.sessions.get?.(sessionId)
+        if (listed != null) return listed
+      } catch { /* branded-id store or missing get */ }
+      return undefined
+    }
+    const chatTargetOf = (ctx, sessionId, uiConversation) => {
+      try {
+        const face = uiConversation ?? (typeof ctx.get === 'function' ? ctx.get('uiConversation') : ctx.uiConversation)
+        if (face == null || typeof face.binding !== 'function') return undefined
+        return face.binding(sessionId)?.target('chat')
+      } catch {
+        return undefined
+      }
+    }
+    // A listed session can still have a cold event window. The watched-session
+    // subscription opens that window without selecting the session; until it
+    // is ready, the detail endpoint supplies the readable fallback.
+    const isLiveWatch = (ctx, sessionId, uiConversation) => {
+      const snapshot = liveSessionOf(ctx, sessionId)?.getSnapshot?.()
+      if (snapshot?.openState === 'open') return true
+      // Hosts before openState carry the chat on the session snapshot itself;
+      // content already materialized there proves the window is loaded.
+      if (snapshot != null && !('openState' in snapshot) && (snapshot.chat?.order?.length ?? 0) > 0) return true
+      const chat = chatTargetOf(ctx, sessionId, uiConversation)?.getSnapshot?.()
+      return (chat?.order?.length ?? 0) > 0
+    }
+    const subscribeLiveTurn = (ctx, sessionId, onChange, uiConversation) => {
+      const unsubs = []
+      const session = liveSessionOf(ctx, sessionId)
+      if (session != null && typeof session.subscribe === 'function') unsubs.push(session.subscribe(onChange))
+      const target = chatTargetOf(ctx, sessionId, uiConversation)
+      if (target != null && typeof target.subscribe === 'function') unsubs.push(target.subscribe(onChange))
+      return () => { for (const stop of unsubs) try { stop() } catch { /* already gone */ } }
+    }
+    function subscribeWatchedSession(ctx, sessionId, onChange, uiConversation) {
+      let disposed = false
+      let session
+      let target
+      let stopSession = () => {}
+      let stopTarget = () => {}
+      const opened = new WeakSet()
+      const publish = () => { if (!disposed) onChange() }
+      const bind = () => {
+        if (disposed) return
+        const nextSession = liveSessionOf(ctx, sessionId)
+        const nextTarget = chatTargetOf(ctx, sessionId, uiConversation)
+        if (nextSession !== session) {
+          stopSession()
+          session = nextSession
+          stopSession = session?.subscribe?.(bind) ?? (() => {})
         }
-        bind()
-        return () => { window.clearTimeout(timer); unsubscribe() }
-      }, [watch.sessionId])
-      const scope = ctx.sessions.scope(watch.sessionId)
-      const session = scope === undefined ? undefined : ctx.sessions.sessionOf(scope)
-      const snapshot = session?.getSnapshot()
-      const nodes = sliceTurnNodes(snapshot?.chat, watch.seq, watch.turnIndex)
-      const running = snapshot?.running === true && isLastUserTurn(snapshot?.chat, watch.seq, watch.turnIndex)
+        if (nextTarget !== target) {
+          stopTarget()
+          target = nextTarget
+          stopTarget = target?.subscribe?.(publish) ?? (() => {})
+        }
+        if (session != null && typeof session.open === 'function' && !opened.has(session)) {
+          const opening = session
+          opened.add(opening)
+          // Session.open loads its event window only. sessions.open(id) would
+          // instead navigate the host away from the user's current session.
+          void Promise.resolve().then(() => {
+            if (!disposed && session === opening) return opening.open()
+          }).then(() => {
+            if (!disposed && session === opening) bind()
+          }, publish)
+        }
+        publish()
+      }
+      const stopList = ctx?.sessions?.list?.subscribe?.(bind) ?? (() => {})
+      bind()
+      return () => {
+        disposed = true
+        stopList()
+        stopSession()
+        stopTarget()
+      }
+    }
+    class TurnNodeErrorBoundary extends React.Component {
+      state = { failed: false }
+      static getDerivedStateFromError() { return { failed: true } }
+      render() {
+        if (!this.state.failed) return this.props.children
+        let payload
+        try { payload = JSON.stringify(this.props.node.data, null, 2) } catch { payload = '记录暂不可读' }
+        return h('details', { className: 'dsh-synapse-turn-node-fallback' },
+          h('summary', null, '此条记录展示异常，查看原始内容'),
+          h('pre', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflow: 'auto' } }, payload),
+        )
+      }
+    }
+    function TurnNodeSeat({ node }) {
+      if (node == null || node.visibility === 'hidden') return null
+      return h('div', {
+        className: 'dsh-synapse-turn-node',
+        'data-chat-anchor-key': node.key,
+        'data-chat-flow-kind': node.kind,
+      }, h(TurnNodeErrorBoundary, { node }, h(ChatNodeView, { node })))
+    }
+    function OfficialTurnPane({ watch, ctx, onClose, onOpenInDialog, useChat, useSession, sessionId, loadThrough, uiConversation }) {
+      const transcriptRef = React.useRef(null)
+      const scrollTopRef = React.useRef(0)
+      const followTailRef = React.useRef(true)
+      const [, setLiveTick] = React.useState(0)
+      const watchKey = `${watch.sessionId}:${watch.seq ?? ''}:${watch.turnIndex ?? ''}`
+      const lastWatchKeyRef = React.useRef(watchKey)
+      if (lastWatchKeyRef.current !== watchKey) {
+        lastWatchKeyRef.current = watchKey
+        scrollTopRef.current = 0
+      }
+      const order = useChat(snapshot => snapshot?.order ?? [])
+      const nodes = useChat(snapshot => snapshot?.nodes)
+      const locations = useChat(snapshot => snapshot?.locations)
+      const hookRunning = typeof useSession === 'function' ? useSession(snapshot => snapshot?.running === true) : false
+      const boundChat = chatTargetOf(ctx, watch.sessionId, uiConversation)?.getSnapshot()
+      const liveSession = liveSessionOf(ctx, watch.sessionId)
+      const liveRunning = liveSession?.getSnapshot()?.running === true
+      const running = hookRunning === true || liveRunning === true
+      const chat = Array.isArray(order) && order.length > 0
+        ? { order, nodes, locations }
+        : (boundChat ?? liveSession?.getSnapshot()?.chat ?? { order, nodes, locations })
+      const keys = sliceTurnKeysLive(chat, watch.seq, watch.turnIndex, running)
+      const turnNodes = keys.map(key => nodeOfChat(chat, key)).filter(node => node != null && node.kind !== 'turn-tail')
+      const ready = sessionId == null || sessionId === watch.sessionId
+      React.useEffect(() => subscribeLiveTurn(ctx, watch.sessionId, () => setLiveTick(value => value + 1), uiConversation), [watch.sessionId, ctx, uiConversation])
+      React.useEffect(() => {
+        if (!ready || keys.length > 0 || !Number.isInteger(watch.seq)) return
+        const loader = typeof loadThrough === 'function' ? loadThrough(watch.seq) : loadTurnThrough(ctx, watch.sessionId, watch.seq)
+        if (loader != null) void Promise.resolve(loader).catch(() => {})
+      }, [ready, keys.length, watch.seq, watch.sessionId, loadThrough, ctx])
+      React.useLayoutEffect(() => {
+        const node = transcriptRef.current
+        if (node instanceof HTMLElement) {
+          node.scrollTop = followTailRef.current && running && isLastUserTurn(chat, watch.seq, watch.turnIndex) ? node.scrollHeight : scrollTopRef.current
+        }
+      })
+      const lastTurn = isLastUserTurn(chat, watch.seq, watch.turnIndex)
+      const pending = running && lastTurn
+      if (ready && keys.length === 0) return h(RemoteTurnPane, { watch, ctx, onClose, onOpenInDialog })
       return h('aside', { className: 'dsh-synapse-turn-pane', 'aria-label': '本轮对话' },
         h('header', { className: 'dsh-synapse-turn-pane-head' },
           h('div', { className: 'dsh-synapse-turn-pane-meta' },
@@ -275,23 +759,323 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'dsh-synapse-turn-pane-close', onClick: onClose, 'aria-label': '关闭本轮' }, '×'),
           ),
         ),
-        session === undefined
+        !ready
           ? h('div', { className: 'dsh-codex-sidechat-empty-panel' }, h('p', null, '正在打开这一轮…'))
-          : h('div', { className: 'dsh-codex-sidechat-transcript-wrap' },
-              h('div', { className: 'dsh-codex-sidechat-transcript' },
-                nodes.map((node, index) => h(ChatNodeView, { key: node.key ?? String(index), node })),
-                running ? h('div', { key: 'running', className: 'dsh-codex-sidechat-turn-status', role: 'status' }, 'Deep diving…') : null,
-                nodes.length === 0 && !running
+          : h('div', {
+              className: 'dsh-synapse-turn-flow',
+              ref: transcriptRef,
+              onScroll: event => {
+                const node = event.currentTarget
+                scrollTopRef.current = node.scrollTop
+                followTailRef.current = node.scrollHeight - node.clientHeight - node.scrollTop < 48
+              },
+            },
+              h('div', { className: 'dsh-synapse-turn-column' },
+                turnNodes.map(node => h(TurnNodeSeat, { key: node.key, node })),
+                pending ? h('div', { key: 'running', className: 'dsh-codex-sidechat-turn-status', role: 'status' }, '正在回复') : null,
+                turnNodes.length === 0 && !pending
                   ? h('div', { className: 'dsh-codex-sidechat-empty' },
                       h('div', { className: 'dsh-codex-sidechat-empty-hero' },
-                        h('h2', { className: 'dsh-codex-sidechat-empty-title' }, '这一轮还没有内容'),
-                        h('p', { className: 'dsh-codex-sidechat-empty-hint' }, '等待这一轮的第一条消息。'),
+                        h('h2', { className: 'dsh-codex-sidechat-empty-title' }, '正在回复'),
                       ),
                     )
                   : null,
               ),
             ),
       )
+    }
+    function LegacyTurnPane({ watch, ctx, onClose, onOpenInDialog, uiConversation }) {
+      const [, setTick] = React.useState(0)
+      const transcriptRef = React.useRef(null)
+      const scrollTopRef = React.useRef(0)
+      const followTailRef = React.useRef(true)
+      const watchKey = `${watch.sessionId}:${watch.seq ?? ''}:${watch.turnIndex ?? ''}`
+      const lastWatchKeyRef = React.useRef(watchKey)
+      if (lastWatchKeyRef.current !== watchKey) {
+        lastWatchKeyRef.current = watchKey
+        scrollTopRef.current = 0
+      }
+      React.useEffect(() => {
+        let unsubscribe = () => {}
+        let timer = 0
+        let tries = 0
+        const bind = () => {
+          const session = liveSessionOf(ctx, watch.sessionId)
+          const target = chatTargetOf(ctx, watch.sessionId, uiConversation)
+          if (session === undefined && target === undefined) {
+            if (tries < 25) {
+              tries += 1
+              timer = window.setTimeout(bind, 200)
+            }
+            setTick(value => value + 1)
+            return
+          }
+          unsubscribe = subscribeLiveTurn(ctx, watch.sessionId, () => setTick(value => value + 1), uiConversation)
+          const loader = loadTurnThrough(ctx, watch.sessionId, watch.seq)
+          if (loader != null) void Promise.resolve(loader).then(() => setTick(value => value + 1)).catch(() => {})
+          setTick(value => value + 1)
+        }
+        bind()
+        return () => { window.clearTimeout(timer); unsubscribe() }
+      }, [watch.sessionId, watch.seq, ctx, uiConversation])
+      React.useLayoutEffect(() => {
+        const node = transcriptRef.current
+        if (node instanceof HTMLElement) node.scrollTop = followTailRef.current && pending ? node.scrollHeight : scrollTopRef.current
+      })
+      const session = liveSessionOf(ctx, watch.sessionId)
+      const snapshot = session?.getSnapshot()
+      const chat = chatTargetOf(ctx, watch.sessionId, uiConversation)?.getSnapshot() ?? snapshot?.chat
+      const running = snapshot?.running === true
+      const nodes = sliceTurnKeysLive(chat, watch.seq, watch.turnIndex, running)
+        .map(key => nodeOfChat(chat, key))
+        .filter(node => node != null && node.kind !== 'turn-tail')
+      const pending = running && isLastUserTurn(chat, watch.seq, watch.turnIndex)
+      if (nodes.length === 0) return h(RemoteTurnPane, { watch, ctx, onClose, onOpenInDialog })
+      return h('aside', { className: 'dsh-synapse-turn-pane', 'aria-label': '本轮对话' },
+        h('header', { className: 'dsh-synapse-turn-pane-head' },
+          h('div', { className: 'dsh-synapse-turn-pane-meta' },
+            h('span', { className: 'dsh-synapse-turn-pane-badge' }, Number.isInteger(watch.turnIndex) ? `第 ${watch.turnIndex + 1} 轮` : '本轮'),
+          ),
+          h('div', { className: 'dsh-synapse-turn-pane-actions' },
+            h('button', { type: 'button', onClick: onOpenInDialog }, '在会话中打开'),
+            h('button', { type: 'button', className: 'dsh-synapse-turn-pane-close', onClick: onClose, 'aria-label': '关闭本轮' }, '×'),
+          ),
+        ),
+        session === undefined && chat == null
+          ? h('div', { className: 'dsh-codex-sidechat-empty-panel' }, h('p', null, '正在打开这一轮…'))
+          : h('div', { className: 'dsh-codex-sidechat-transcript-wrap' },
+              h('div', {
+                className: 'dsh-codex-sidechat-transcript',
+                ref: transcriptRef,
+                onScroll: event => {
+                  const node = event.currentTarget
+                  scrollTopRef.current = node.scrollTop
+                  followTailRef.current = node.scrollHeight - node.clientHeight - node.scrollTop < 48
+                },
+              },
+                nodes.map((node, index) => h(TurnNodeSeat, { key: node.key ?? String(index), node })),
+                pending ? h('div', { key: 'running', className: 'dsh-codex-sidechat-turn-status', role: 'status' }, 'Deep diving…') : null,
+                nodes.length === 0 && !pending
+                  ? h('div', { className: 'dsh-codex-sidechat-empty' },
+                      h('div', { className: 'dsh-codex-sidechat-empty-hero' },
+                        h('h2', { className: 'dsh-codex-sidechat-empty-title' }, '正在回复'),
+                      ),
+                    )
+                  : null,
+              ),
+            ),
+      )
+    }
+    async function readTurnDetail(watch, request = fetch, signal) {
+      const empty = { question: null, steps: [], process: [], flow: [] }
+      const read = async seq => {
+        const response = await request('/synapse/api/turn-detail', {
+          method: 'POST',
+          signal,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: watch.sessionId, seq,
+            turnIndex: Number.isInteger(watch.turnIndex) ? watch.turnIndex : null,
+            reference: watch.reference,
+          }),
+        })
+        if (!response.ok) throw new Error('detail unavailable')
+        return (await response.json())?.detail ?? empty
+      }
+      const matches = detail => {
+        const expected = watch.reference?.question
+        if (typeof expected !== 'string' || expected === '') return true
+        if (typeof detail.question !== 'string') return false
+        if (watch.reference?.messageId && typeof detail.messageId === 'string') return detail.messageId === watch.reference.messageId
+        return expected.length === 601 && expected.endsWith('…')
+          ? detail.question.startsWith(expected.slice(0, -1))
+          : detail.question.trim() === expected.trim()
+      }
+      let detail = await read(Number.isInteger(watch.seq) ? watch.seq : null)
+      if (detail.question != null && matches(detail)) return detail
+      if (Number.isInteger(watch.seq) && Number.isInteger(watch.turnIndex)
+        && watch.reference?.root === true && watch.reference.unique === true
+        && typeof watch.reference.question === 'string' && watch.reference.question !== '') {
+        detail = await read(null)
+        if (detail.question != null && matches(detail)) return detail
+      }
+      return watch.reference === undefined ? detail : empty
+    }
+    function subscribeTurnDetail(watch, options) {
+      let disposed = false
+      let loading = false
+      let again = false
+      let complete = false
+      let failures = 0
+      let timer
+      const controller = new AbortController()
+      const schedule = options.schedule ?? ((fn, delay) => window.setTimeout(fn, delay))
+      const cancel = options.cancel ?? (id => window.clearTimeout(id))
+      const refresh = async () => {
+        if (disposed) return
+        if (loading) { again = true; return }
+        if (timer !== undefined) { cancel(timer); timer = undefined }
+        loading = true
+        try {
+          const detail = await options.read(watch, controller.signal)
+          if (disposed) return
+          complete = detail.complete === true
+          failures = 0
+          options.onDetail(detail)
+        } catch (error) {
+          if (disposed) return
+          failures += 1
+          options.onError(error)
+        } finally {
+          loading = false
+          if (!disposed && failures < 3 && (!complete && options.isRunning() || again)) {
+            again = false
+            timer = schedule(() => { timer = undefined; void refresh() }, failures === 0 ? 750 : 1000 * 2 ** (failures - 1))
+          }
+        }
+      }
+      const stop = options.subscribe?.(() => { if (!complete) void refresh() }) ?? (() => {})
+      void refresh()
+      return () => {
+        disposed = true
+        controller.abort()
+        if (timer !== undefined) cancel(timer)
+        stop()
+      }
+    }
+    function turnDetailPresentation(detail, preview, failed) {
+      const hasDetail = typeof detail?.question === 'string' && detail.question !== ''
+      const hasPreview = typeof preview?.question === 'string' && preview.question !== ''
+      return {
+        hasDetail, hasPreview,
+        missing: failed || detail !== null && !hasDetail,
+        displayDetail: hasDetail ? detail : hasPreview ? {
+          format: 'structured-v1',
+          question: preview.question,
+          steps: [
+            ...(preview.answer ? [{ kind: 'assistant', text: preview.answer }] : []),
+            ...(preview.error ? [{ kind: 'error', text: preview.error }] : []),
+          ],
+        } : null,
+      }
+    }
+    function RemoteTurnPane({ watch, ctx, onClose, onOpenInDialog }) {
+      const [detail, setDetail] = React.useState(null)
+      const [failed, setFailed] = React.useState(false)
+      const [retry, setRetry] = React.useState(0)
+      const transcriptRef = React.useRef(null)
+      const followTailRef = React.useRef(true)
+      const scrollTopRef = React.useRef(0)
+      const watchKey = `${watch.sessionId}:${watch.seq ?? ''}:${watch.turnIndex ?? ''}`
+      React.useEffect(() => {
+        setDetail(null)
+        setFailed(false)
+        scrollTopRef.current = 0
+        followTailRef.current = true
+        return subscribeTurnDetail(watch, {
+          read: (target, signal) => readTurnDetail(target, fetch, signal),
+          isRunning: () => ctx?.sessions.list.getSnapshot().byId[watch.sessionId]?.running === true,
+          subscribe: changed => ctx?.sessions.list.subscribe(changed) ?? (() => {}),
+          onDetail: value => { setDetail(value); setFailed(false) },
+          onError: () => setFailed(true),
+        })
+      }, [watchKey, ctx, retry])
+      React.useLayoutEffect(() => {
+        const node = transcriptRef.current
+        if (node instanceof HTMLElement) node.scrollTop = followTailRef.current && detail?.complete === false ? node.scrollHeight : scrollTopRef.current
+      })
+      const { hasDetail, hasPreview, displayDetail, missing } = turnDetailPresentation(detail, watch.preview, failed)
+      const nodes = displayDetail === null ? [] : detailToChatNodes(displayDetail)
+      return h('aside', { className: 'dsh-synapse-turn-pane', 'aria-label': '本轮对话' },
+        h('header', { className: 'dsh-synapse-turn-pane-head' },
+          h('div', { className: 'dsh-synapse-turn-pane-meta' },
+            h('span', { className: 'dsh-synapse-turn-pane-badge' }, Number.isInteger(watch.turnIndex) ? `第 ${watch.turnIndex + 1} 轮` : '本轮'),
+          ),
+          h('div', { className: 'dsh-synapse-turn-pane-actions' },
+            h('button', { type: 'button', onClick: onOpenInDialog }, '在会话中打开'),
+            h('button', { type: 'button', className: 'dsh-synapse-turn-pane-close', onClick: onClose, 'aria-label': '关闭本轮' }, '×'),
+          ),
+        ),
+        h('div', { className: 'dsh-synapse-turn-flow', ref: transcriptRef, onScroll: event => {
+          const node = event.currentTarget
+          scrollTopRef.current = node.scrollTop
+          followTailRef.current = node.scrollHeight - node.clientHeight - node.scrollTop < 48
+        } },
+          !hasDetail ? h('div', { className: 'dsh-synapse-turn-notice', role: missing ? 'alert' : 'status' },
+            h('span', null, missing
+              ? hasPreview ? '完整记录暂不可用，当前显示卡片摘要' : '未能定位这一轮的记录'
+              : '正在读取完整记录'),
+            missing ? h('button', { type: 'button', onClick: () => setRetry(value => value + 1) }, '重试') : null,
+          ) : null,
+          h('div', { className: 'dsh-synapse-turn-column' },
+            nodes.map(node => h(TurnNodeSeat, { key: node.key, node })),
+            detail?.complete === false && ctx?.sessions.list.getSnapshot().byId[watch.sessionId]?.running === true ? h('p', { role: 'status' }, '正在同步本轮记录') : null,
+          ),
+        ),
+      )
+    }
+    // The host retires the entire map slot when a descendant render throws.
+    class TurnPaneErrorBoundary extends React.Component {
+      state = { error: null }
+      static getDerivedStateFromError(error) {
+        return { error }
+      }
+      componentDidCatch(error) {
+        console.error('[dsh-synapse] turn preview failed', error)
+      }
+      render() {
+        if (this.state.error === null) return this.props.children
+        return h('aside', { className: 'dsh-synapse-turn-pane', 'aria-label': '本轮对话' },
+          h('header', { className: 'dsh-synapse-turn-pane-head' },
+            h('span', null, '本轮对话'),
+            h('button', { type: 'button', onClick: this.props.onClose, 'aria-label': '关闭本轮' }, '×'),
+          ),
+          h('div', { className: 'dsh-synapse-turn-flow', role: 'alert' },
+            h('p', null, '这一轮渲染失败'),
+            h('pre', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } },
+              String(this.state.error?.message ?? this.state.error),
+            ),
+          ),
+        )
+      }
+    }
+    function turnPaneSource(watchSessionId, currentSessionId, hasOfficialHooks, liveBound) {
+      if (hasOfficialHooks === true && watchSessionId === currentSessionId) return 'official'
+      if (liveBound === true) return 'legacy'
+      return 'remote'
+    }
+    function SynapseTurnPane(props) {
+      const [, setLiveTick] = React.useState(0)
+      React.useEffect(() => subscribeWatchedSession(
+        props.ctx, props.watch.sessionId, () => setLiveTick(value => value + 1), props.uiConversation,
+      ), [props.ctx, props.watch.sessionId, props.uiConversation])
+      const currentSessionId = props.ctx.sessions.list.getSnapshot().current
+      const source = turnPaneSource(
+        props.watch.sessionId,
+        currentSessionId,
+        typeof props.useChat === 'function',
+        isLiveWatch(props.ctx, props.watch.sessionId, props.uiConversation),
+      )
+      if (source === 'official') return h(OfficialTurnPane, props)
+      if (source === 'legacy') {
+        return h(LegacyTurnPane, {
+          key: `${props.watch.sessionId}:${props.watch.seq ?? ''}:${props.watch.turnIndex ?? ''}`,
+          watch: props.watch,
+          ctx: props.ctx,
+          onClose: props.onClose,
+          onOpenInDialog: props.onOpenInDialog,
+          uiConversation: props.uiConversation,
+        })
+      }
+      // Keep a readable fallback while the watched event window is opening,
+      // or when the host cannot provide a live window for this session.
+      return h(RemoteTurnPane, {
+        key: `${props.watch.sessionId}:${props.watch.seq ?? ''}:${props.watch.turnIndex ?? ''}`,
+        watch: props.watch,
+        ctx: props.ctx,
+        onClose: props.onClose,
+        onOpenInDialog: props.onOpenInDialog,
+      })
     }
     const turnWatch = {
       value: null,
@@ -307,6 +1091,54 @@ window.__ModuleLoader__.load({
       },
     }
 
+    async function waitForForkSession(sessions, sessionId, timeoutMs = 5000) {
+      const available = () => {
+        const scope = sessions.scope(sessionId)
+        return scope !== undefined && sessions.sessionOf(scope) !== undefined
+      }
+      if (available()) return
+      await new Promise((resolve, reject) => {
+        let unsubscribe = () => {}
+        const timer = setTimeout(() => {
+          unsubscribe()
+          reject(new Error('新分支尚未同步到客户端，请重试'))
+        }, timeoutMs)
+        const check = () => {
+          if (!available()) return
+          clearTimeout(timer)
+          unsubscribe()
+          resolve()
+        }
+        unsubscribe = sessions.list.subscribe(check)
+        check()
+      })
+    }
+
+    async function requestCardFork(input, request = fetch) {
+      const response = await request('/synapse/api/fork-card', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ operationId: input.operationId, sessionId: input.sessionId, target: input.target }),
+      })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error ?? '会话分支创建失败')
+      if (typeof body.session?.id !== 'string' || body.session.id === '') throw new Error('分支响应缺少会话标识')
+      return body.session
+    }
+
+    function createOperationRunner() {
+      const operations = new Map()
+      return (type, operationId, action) => {
+        if (typeof operationId !== 'string' || operationId === '') return Promise.resolve().then(action)
+        const key = `${type}:${operationId}`
+        if (operations.has(key)) return operations.get(key)
+        const pending = Promise.resolve().then(action)
+        operations.set(key, pending)
+        pending.catch(() => { if (operations.get(key) === pending) operations.delete(key) })
+        return pending
+      }
+    }
+
     const TAB_LABEL = '会话地图'
     const DIALOG_TAB_LABEL = '对话'
     // The session header renders view tabs in raw registration order, not by
@@ -314,15 +1146,37 @@ window.__ModuleLoader__.load({
     const TAB_ORDER_MAP = '1'
     const TAB_ORDER_OTHER = '0'
 
-    // Host chrome hidden while the map is the active session view: only the
-    // Codex message rail overlays this conversation view. DSH's official right
-    // Sidebar owns its own layout and remains independently usable.
-    const CHROME_HIDE_SELECTORS = ['.dsh-codex-nav-rail']
+    // Host chrome hidden while the map is the active session view: the codex
+    // message rail and the right-side terminal/files panels. They are portalled
+    // into <body> by that plugin, so they are addressed by its own class names.
+    const CHROME_HIDE_SELECTORS = ['.dsh-codex-nav-rail', '.dsh-side-panels', '.dsh-side-panels-launcher', '[data-width-handle]']
     const CHROME_HIDE_CLASS = 'dsh-synapse-chrome-hidden'
     // The map has its own composer inside the canvas, so DSH's dock is removed
     // outright: display:none (unlike the panels above) reclaims its space.
     const COMPOSER_HIDE_SELECTORS = ['[data-composer-seat]']
     const COMPOSER_HIDE_CLASS = 'dsh-synapse-composer-hidden'
+    // visibility (not display:none) keeps those panels laid out and measurable,
+    // so their own width/position state survives while the map is open.
+    // dsh-codex squeezes #root with `margin-right: var(--dsh-side-panels-width)`
+    // to make room for its right panel. Hiding the panel with visibility only
+    // hides its pixels — the margin stays, so the map is left in a narrower
+    // box with an empty strip beside it. Zeroing the variable while the map is
+    // open gives the canvas the full width, and the previous value is restored
+    // on exit so the panel comes back exactly as it was.
+    const SIDE_PANELS_WIDTH_VAR = '--dsh-side-panels-width'
+    let savedSidePanelsWidth = null
+    const setSidePanelsSqueeze = squeezed => {
+      const root = document.documentElement
+      if (squeezed === false) {
+        root.style.setProperty(SIDE_PANELS_WIDTH_VAR, '0px')
+        return
+      }
+      // Restoring: put back the value captured before the map took over. If
+      // dsh-codex changed the width meanwhile, its own effect re-runs and
+      // overwrites this anyway, so a stale restore self-heals.
+      root.style.setProperty(SIDE_PANELS_WIDTH_VAR, savedSidePanelsWidth ?? '0px')
+      savedSidePanelsWidth = null
+    }
     const setChromeHidden = hidden => {
       const toggle = (selectors, className) => {
         for (const selector of selectors) {
@@ -334,6 +1188,16 @@ window.__ModuleLoader__.load({
       }
       toggle(CHROME_HIDE_SELECTORS, CHROME_HIDE_CLASS)
       toggle(COMPOSER_HIDE_SELECTORS, COMPOSER_HIDE_CLASS)
+      // Capture the current squeeze BEFORE zeroing it, so leaving the map gives
+      // the panel its width back. The capture happens once: a MutationObserver
+      // re-asserts the hide on every DOM change, and saving again there would
+      // record the already-zeroed value and collapse the panel for good.
+      if (hidden === true) {
+        if (savedSidePanelsWidth === null) {
+          savedSidePanelsWidth = document.documentElement.style.getPropertyValue(SIDE_PANELS_WIDTH_VAR)
+        }
+        setSidePanelsSqueeze(false)
+      } else setSidePanelsSqueeze(true)
     }
     // The Synapse iframe only exists while the map tab is active, so the
     // in-canvas sidebar is hidden unconditionally — there is no host state to
@@ -361,7 +1225,7 @@ window.__ModuleLoader__.load({
       '.dsh-codex-sidechat-empty-panel { flex:1;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px }',
       '.dsh-codex-sidechat-empty-panel p { margin:0 }',
       '.dsh-codex-sidechat-transcript-wrap { position:relative;flex:1;min-height:0;display:flex;flex-direction:column }',
-      '.dsh-codex-sidechat-transcript { flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px;container-type:inline-size }',
+      '.dsh-codex-sidechat-transcript { flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:16px;container-type:inline-size;overflow-anchor:none;scrollbar-gutter:stable }',
       '/* User bubble — one-to-one with the main chat\\\'s gdEzaW_bubble. */ .dsh-codex-sidechat-user { flex-direction:column;align-items:flex-end;gap:6px;display:flex }',
       '.dsh-codex-sidechat-user-bubble { background:var(--dsw-specific-bubble);max-width:min(525px,82%);color:var(--dsw-alias-label-primary);border-radius:22px;padding:10px 16px;font-size:16px;line-height:24px;white-space:pre-wrap;word-break:break-word }',
       '/* Assistant markdown — Sxvs8a: 16/28, 16px stack gap. */ .dsh-codex-sidechat-md { color:var(--dsw-alias-label-primary);flex-direction:column;font-size:16px;line-height:28px;display:flex }',
@@ -402,7 +1266,15 @@ window.__ModuleLoader__.load({
       '.dsh-codex-sidechat-toolrow-title, .dsh-codex-sidechat-think-title { flex:none; color:var(--dsw-alias-label-primary) }',
       '.dsh-synapse-turn-view { display:flex; flex-direction:column; min-height:0; height:100% }',
       '.dsh-synapse-turn-view .detail-head { flex:none }',
-      '.dsh-synapse-turn-view .dsh-codex-sidechat-user-bubble { white-space:pre-wrap; word-break:break-word }'
+      '.dsh-synapse-turn-view .dsh-codex-sidechat-user-bubble { white-space:pre-wrap; word-break:break-word }',
+      '.dsh-codex-sidechat-sources { list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:10px }',
+      '.dsh-codex-sidechat-source { display:flex; flex-direction:column; gap:2px; min-width:0 }',
+      '.dsh-codex-sidechat-source-title { color:var(--dsw-alias-label-primary); font-size:14px; line-height:22px; word-break:break-word }',
+      '.dsh-codex-sidechat-source-link { color:var(--dsw-alias-label-secondary); font-size:12px; line-height:18px; word-break:break-all }',
+      '.dsh-codex-sidechat-source-snippet { color:var(--dsw-alias-label-tertiary); font-size:13px; line-height:20px }',
+      '.dsh-codex-sidechat-toolresult, .dsh-codex-sidechat-terminal, .dsh-codex-sidechat-code { min-width:0; margin-top:6px }',
+      '.dsh-codex-sidechat-toolresult-caption { color:var(--dsw-alias-label-secondary); font-size:13px; line-height:20px }',
+      '.dsh-codex-sidechat-subcalls { display:flex; flex-direction:column; gap:8px; margin-top:8px; padding-left:8px }',
     ].join('\n')
     const CANVAS_TWEAKS_SCRIPT = `
 (function () {
@@ -557,29 +1429,6 @@ window.__ModuleLoader__.load({
     }
   }, true)
 
-  // Show only the current DSH conversation's cards. conversationCards is a
-  // top-level function declaration, so re-binding it here is picked up by the
-  // app's own call sites without patching upstream source.
-  var originalConversationCards = window.conversationCards
-  if (typeof originalConversationCards === 'function') {
-    window.conversationCards = function (threads) {
-      // Resolved here rather than through currentDshThread(): that helper
-      // returns undefined whenever the current-session id is missing, and a
-      // fallback to "all threads" here would leak every conversation back onto
-      // the canvas (seen when 整理/定位 re-rendered).
-      try {
-        var list = state?.workspace?.threads ?? threads
-        var currentId = state?.currentDsh?.id ?? state?.activeId
-        if (typeof currentId !== 'string' || currentId === '') return []
-        var current = list.find(function (thread) {
-          return thread?.dshSessionId === currentId || thread?.id === currentId
-        })
-        if (current === undefined) return []
-        return originalConversationCards([current])
-      } catch (error) { return [] }
-    }
-  }
-
   // User-facing copy: DSH's product name reads as 会话 in this UI. Rewritten
   // in the DOM (not in upstream source) so upstream updates stay clean. Only
   // text and label attributes are touched, and script/style contents are
@@ -679,6 +1528,7 @@ window.__ModuleLoader__.load({
     event.preventDefault()
     event.stopPropagation()
     var origin = { x: event.clientX, y: event.clientY, camera: { x: state.canvasCamera.x, y: state.canvasCamera.y } }
+    state.canvasGesture = true
     setSpaceDrag(true)
     var move = function (moveEvent) {
       state.canvasCamera = {
@@ -693,6 +1543,8 @@ window.__ModuleLoader__.load({
       window.removeEventListener('pointerup', stop, true)
       window.removeEventListener('pointercancel', stop, true)
       setSpaceDrag(false)
+      state.canvasGesture = false
+      if (typeof scheduleLiveCardUpdate === 'function') scheduleLiveCardUpdate()
       if (typeof deferCanvasRefresh === 'function') deferCanvasRefresh()
     }
     window.addEventListener('pointermove', move, true)
@@ -742,6 +1594,7 @@ window.__ModuleLoader__.load({
 
     module.exports.inject = ['sessions', 'workspaces', 'slots']
     module.exports.apply = ctx => {
+      const runOperation = createOperationRunner()
       // The live iframe element, present only while the map view is mounted.
       let frame = null
       // Loading veil: the canvas is revealed only once it reports ready, so the
@@ -762,19 +1615,25 @@ window.__ModuleLoader__.load({
       }
       const style = document.createElement('style')
       style.textContent = [
-        '.dsh-synapse-view{position:relative;display:flex;width:100%;height:100%;max-height:100%;min-height:0;overflow:hidden;background:var(--dsw-alias-bg-base,#f5f7fa)}',
-        '.dsh-synapse-frame{display:block;flex:1;min-width:0;min-height:0;height:100%;border:0;-webkit-app-region:no-drag}',
+        '.dsh-synapse-view{position:relative;display:flex;flex:1 1 auto;width:100%;height:100%;max-height:100%;min-width:0;min-height:0;overflow:hidden;background:var(--dsw-alias-bg-base,#f5f7fa)}',
+        // Reserve the sidebar width without replacing the mounted iframe.
+        '.dsh-synapse-frame{display:block;flex:1 1 auto;min-width:0;min-height:0;width:100%;height:100%;border:0;-webkit-app-region:no-drag}',
+        '.dsh-synapse-view.has-turn-pane .dsh-synapse-frame{flex:none;width:calc(100% - min(460px,42%));margin-right:min(460px,42%)}',
         '.dsh-synapse-veil{position:absolute;inset:0;z-index:2;background:var(--dsw-alias-bg-base,#f5f7fa);transition:opacity .2s ease}',
         '.dsh-synapse-view.has-turn-pane .dsh-synapse-veil{right:min(460px,42%)}',
         '.dsh-synapse-veil.dsh-synapse-veil-hidden{opacity:0;pointer-events:none}',
         '.dsh-synapse-tab-gate{display:none !important}',
         '.dsh-synapse-chrome-hidden{visibility:hidden !important;pointer-events:none !important}',
+        'body:has(.dsh-synapse-view) [data-width-handle]{visibility:hidden !important;pointer-events:none !important}',
         '.dsh-synapse-composer-hidden{display:none !important}',
-        '.dsh-synapse-view.has-turn-pane .dsh-synapse-frame{margin-right:min(460px,42%)}',
-        '.dsh-synapse-turn-pane{position:absolute;top:0;right:0;bottom:0;z-index:3;display:flex;flex-direction:column;width:min(460px,42%);min-width:320px;min-height:0;max-height:100%;overflow:hidden;border-left:1px solid var(--dsw-alias-border-l2,#e7edf3);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#172033)}',
+        '.dsh-synapse-turn-pane{--dsh-chat-content-width:100%;--dsh-composer-side-clearance:0px;position:absolute;inset:0 0 0 auto;z-index:3;display:flex;flex-direction:column;width:min(460px,42%);height:100%;min-width:320px;min-height:0;max-height:none;overflow:hidden;border-left:1px solid var(--dsw-alias-border-l2,#e7edf3);background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#172033)}',
         '.dsh-synapse-turn-pane .dsh-codex-sidechat-transcript-wrap{flex:1;min-height:0;overflow:hidden}',
-        '.dsh-synapse-turn-pane .dsh-codex-sidechat-transcript{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}',
+        '.dsh-synapse-turn-pane .dsh-codex-sidechat-transcript{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;overflow-anchor:none;scrollbar-gutter:stable}',
         '.dsh-synapse-turn-pane .dsh-codex-sidechat-empty-panel{flex:1;min-height:0}',
+        '.dsh-synapse-turn-flow{flex:1;min-height:0;overflow-y:auto;padding:16px;overscroll-behavior:contain;overflow-anchor:none;scrollbar-gutter:stable}',
+        '.dsh-synapse-turn-column{min-width:0;display:flex;flex-direction:column;gap:16px}',
+        '.dsh-synapse-turn-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--dsw-alias-border-l2,#e7edf3);color:var(--dsw-alias-label-secondary,#687383);font-size:12px}',
+        '.dsh-synapse-turn-node{min-width:0}',
         '.dsh-synapse-turn-pane-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;padding:12px 14px;border-bottom:1px solid var(--dsw-alias-border-l2,#e7edf3)}',
         '.dsh-synapse-turn-pane-meta{display:flex;align-items:center;gap:8px;min-width:0}',
         '.dsh-synapse-turn-pane-badge{display:inline-flex;align-items:center;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover,#eaf0fa);padding:2px 8px;color:var(--dsw-alias-state-business-primary,#3b6fd4);font-size:11px;font-weight:700}',
@@ -790,7 +1649,6 @@ window.__ModuleLoader__.load({
         '.dsh-codex-sidechat-md-fallback{white-space:pre-wrap;word-break:break-word}',
         SIDECHAT_TURN_CSS,
       ].join('\n')
-      document.head.append(style)
       const send = (type, payload) => { frame?.contentWindow?.postMessage({ source: 'dsh-synapse', type, ...payload }, location.origin) }
       let syncQueued = false
       let knownSessionIds = new Set()
@@ -805,10 +1663,12 @@ window.__ModuleLoader__.load({
           const publish = () => {
             if (frame === null) return
             const state = session.getSnapshot()
-            const text = state.partial?.blocks.filter(block => block.kind === 'text').map(block => block.text).join('\n') ?? ''
-            send('synapse:live-reply', { sessionId: id, running: state.running, text })
+            const chat = chatTargetOf(ctx, id)?.getSnapshot() ?? state.chat
+            const text = replyTextOfSnapshot({ ...state, chat })
+            const user = nodeOfChat(chat, visibleUserKeys(chat).at(-1))
+            send('synapse:live-reply', { sessionId: id, running: state.running, text, seq: seqOf(user), question: textOfContent(user?.data?.content) })
           }
-          liveUnsubscribers.set(id, session.subscribe(publish))
+          liveUnsubscribers.set(id, subscribeLiveTurn(ctx, id, publish))
           publish()
         }
         for (const [id, unsubscribe] of liveUnsubscribers) if (!snapshot.ids.includes(id)) { unsubscribe(); liveUnsubscribers.delete(id) }
@@ -836,6 +1696,10 @@ window.__ModuleLoader__.load({
         if (frame !== null) {
           send('synapse:workspaces', { workspaces: workspaceSnapshot(ctx) })
           send('synapse:current-session', { session: currentSession(ctx) })
+          // Card state machine: the host's own running / needs-input / done
+          // signals per session. Sent on every list change so a card reflects
+          // approvals, questions and completions as they happen.
+          send('synapse:session-status', { statuses: sessionSnapshot(ctx) })
         }
       }
       const switchToDialogTab = () => {
@@ -887,16 +1751,25 @@ window.__ModuleLoader__.load({
             turnWatch.set(null)
             return
           }
-          try { ctx.sessions.open(sessionId) } catch {
-            send('synapse:bridge-error', { message: '关联的会话已不可用' })
-            return
-          }
-          turnWatch.set({
+          const watch = {
             sessionId,
             seq: Number.isInteger(event.data.seq) ? event.data.seq : undefined,
             turnIndex: Number.isInteger(event.data.turnIndex) ? event.data.turnIndex : undefined,
             cardId: typeof event.data.cardId === 'string' ? event.data.cardId : undefined,
-          })
+            reference: typeof event.data.reference?.question === 'string' ? {
+              question: event.data.reference.question,
+              messageId: typeof event.data.reference.messageId === 'string' ? event.data.reference.messageId : undefined,
+              root: event.data.reference.root === true,
+              unique: event.data.reference.unique === true,
+            } : undefined,
+            preview: typeof event.data.preview?.question === 'string' ? {
+              question: event.data.preview.question,
+              answer: typeof event.data.preview.answer === 'string' ? event.data.preview.answer : null,
+              error: typeof event.data.preview.error === 'string' ? event.data.preview.error : null,
+              completed: event.data.preview.completed === true,
+            } : undefined,
+          }
+          turnWatch.set(watch)
           // The in-canvas inspector shares the right rail; opening this pane
           // dismisses it so the two never sit side by side.
           send('synapse:close-inspector')
@@ -910,27 +1783,19 @@ window.__ModuleLoader__.load({
           return
         }
         if (event.data.type === 'synapse:fork-session') {
-          const atSeq = Number.isInteger(event.data.atSeq) ? event.data.atSeq : undefined
-          // Keep the inherited title: a branch is a child of the source, not a
-          // peer session that needs its own incrementing workspace name.
-          ctx.sessions.fork({ sessionId: event.data.sessionId, atSeq, increaseTitle: false }).then(id => {
-            const snapshot = ctx.sessions.list.getSnapshot()
-            send('synapse:forked-session', { requestId: event.data.requestId, session: { id, title: snapshot.byId[id]?.displayTitle ?? '会话分支', parentId: snapshot.byId[id]?.parentId ?? event.data.sessionId } })
-          }).catch(() => { send('synapse:bridge-error', { message: '会话分支创建失败，请确认源会话已经完成当前轮次' }) })
-          return
-        }
-        if (event.data.type === 'synapse:archive-session') {
-          const sessionId = typeof event.data.sessionId === 'string' ? event.data.sessionId : ''
-          if (sessionId === '') return send('synapse:bridge-error', { requestId: event.data.requestId, message: '缺少要删除的会话' })
-          ctx.workspaces.archiveSession(sessionId).then(() => {
-            send('synapse:archived-session', { requestId: event.data.requestId, sessionId })
-          }).catch(() => { send('synapse:bridge-error', { requestId: event.data.requestId, message: '分支会话删除失败' }) })
+          runOperation('fork', event.data.operationId, async () => {
+            const session = await requestCardFork(event.data)
+            await waitForForkSession(ctx.sessions, session.id)
+            return session
+          }).then(session => {
+            send('synapse:forked-session', { requestId: event.data.requestId, session })
+          }).catch(error => { send('synapse:bridge-error', { requestId: event.data.requestId, message: '会话分支创建失败：' + (error instanceof Error ? error.message : '请刷新后重试') }) })
           return
         }
         if (event.data.type === 'synapse:send-message') {
           const text = typeof event.data.text === 'string' ? event.data.text.trim() : ''
           if (text === '') return send('synapse:bridge-error', { requestId: event.data.requestId, message: '消息不能为空' })
-          prompt(event.data.sessionId, text).then(() => {
+          runOperation('send', event.data.operationId, () => prompt(event.data.sessionId, text)).then(() => {
             send('synapse:message-sent', { requestId: event.data.requestId, sessionId: event.data.sessionId })
           }).catch(error => {
             send('synapse:bridge-error', { requestId: event.data.requestId, message: error instanceof Error ? error.message : '会话消息发送失败' })
@@ -940,11 +1805,33 @@ window.__ModuleLoader__.load({
         if (event.data.type === 'synapse:create-session') {
           const workspaceId = typeof event.data.workspaceId === 'string' && event.data.workspaceId !== '' && event.data.workspaceId !== 'dsh-ungrouped' ? event.data.workspaceId : undefined
           const cwd = typeof event.data.cwd === 'string' && event.data.cwd !== '' ? event.data.cwd : undefined
-          const create = workspaceId === undefined ? ctx.sessions.create(cwd === undefined ? {} : { cwd }) : ctx.sessions.create({ workspaceId })
+          const create = runOperation('create', event.data.operationId, () => workspaceId === undefined ? ctx.sessions.create(cwd === undefined ? {} : { cwd }) : ctx.sessions.create({ workspaceId }))
           create.then(id => {
             const snapshot = ctx.sessions.list.getSnapshot()
             send('synapse:created-session', { requestId: event.data.requestId, session: { id, title: snapshot.byId[id]?.displayTitle ?? '新会话', cwd: snapshot.byId[id]?.cwd ?? cwd ?? null } })
           }).catch(() => { send('synapse:bridge-error', { requestId: event.data.requestId, message: '会话创建失败，请先选择工作目录' }) })
+          return
+        }
+        if (event.data.type === 'synapse:add-to-notes') {
+          const requestId = event.data.requestId
+          const body = typeof event.data.body === 'string' ? event.data.body : ''
+          const tags = Array.isArray(event.data.tags) ? event.data.tags.filter(tag => typeof tag === 'string') : ['会话地图']
+          if (body.trim() === '') return send('synapse:bridge-error', { requestId, message: '笔记内容为空' })
+          fetch('/quick-notes/note', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'create', body, tags }),
+          }).then(async response => {
+            if (!response.ok) throw new Error('添加笔记失败')
+            const snapshot = await response.json()
+            const createdId = typeof snapshot?.createdId === 'string' ? snapshot.createdId : ''
+            if (createdId !== '' && snapshot != null) {
+              window.dispatchEvent(new CustomEvent('dsh-quick-notes:import', { detail: { createdId, snapshot } }))
+            }
+            send('synapse:note-saved', { requestId, createdId })
+          }).catch(error => {
+            send('synapse:bridge-error', { requestId, message: error instanceof Error ? error.message : '添加笔记失败' })
+          })
         }
       }
       const onKeyDown = event => {
@@ -976,20 +1863,37 @@ window.__ModuleLoader__.load({
       const themeObserver = typeof MutationObserver === 'undefined'
         ? null
         : new MutationObserver(() => syncTheme())
-      if (themeObserver !== null && document.body) {
-        themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+      function installMapBridge() {
+        document.head.append(style)
+        if (themeObserver !== null && document.body) {
+          themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
+        }
+        const unsubscribeSessions = ctx.sessions.list.subscribe(syncCurrentSession)
+        const unsubscribeWorkspaces = ctx.workspaces.list.subscribe(syncCurrentSession)
+        window.addEventListener('message', onMessage)
+        window.addEventListener('keydown', onKeyDown)
+        window.addEventListener('keydown', onSpaceDown)
+        window.addEventListener('keyup', onSpaceUp)
+        if (frame !== null) syncCurrentSession()
+        return () => {
+          window.removeEventListener('message', onMessage)
+          window.removeEventListener('keydown', onKeyDown)
+          window.removeEventListener('keydown', onSpaceDown)
+          window.removeEventListener('keyup', onSpaceUp)
+          themeObserver?.disconnect()
+          unsubscribeSessions()
+          unsubscribeWorkspaces()
+          for (const unsubscribe of liveUnsubscribers.values()) unsubscribe()
+          liveUnsubscribers.clear()
+          style.remove()
+        }
       }
-      const unsubscribeSessions = ctx.sessions.list.subscribe(syncCurrentSession)
-      const unsubscribeWorkspaces = ctx.workspaces.list.subscribe(syncCurrentSession)
-      window.addEventListener('message', onMessage)
-      window.addEventListener('keydown', onKeyDown)
-      window.addEventListener('keydown', onSpaceDown)
-      window.addEventListener('keyup', onSpaceUp)
 
       // The map view: the Synapse canvas in an iframe filling the session body.
-      function SynapseMapView() {
+      function SynapseMapView(props) {
         const ref = React.useRef(null)
         const veilRef = React.useRef(null)
+        const [frameReady, setFrameReady] = React.useState(false)
         const watch = React.useSyncExternalStore(listener => turnWatch.subscribe(listener), () => turnWatch.get())
         React.useEffect(() => {
           frame = ref.current
@@ -1046,6 +1950,11 @@ window.__ModuleLoader__.load({
             onLoad: event => {
               const element = event.currentTarget
               injectCanvasStyle(element?.contentDocument)
+              // Keep the veil state declarative. The watch-turn update causes
+              // this component to render again; an imperative-only class on
+              // the veil would otherwise be removed by React and cover the
+              // already-rendered map.
+              setFrameReady(true)
               syncCurrentSession()
               // Sent from the element, not the `frame` binding: a cached frame
               // can finish loading before this effect has run.
@@ -1055,13 +1964,28 @@ window.__ModuleLoader__.load({
               )
             },
           }),
-          h('div', { ref: veilRef, className: 'dsh-synapse-veil' }),
-          watch ? h(SynapseTurnPane, {
+          h('div', { ref: veilRef, className: `dsh-synapse-veil${frameReady ? ' dsh-synapse-veil-hidden' : ''}` }),
+          watch ? h(TurnPaneErrorBoundary, {
+            key: `${watch.sessionId}:${watch.seq ?? ''}:${watch.turnIndex ?? ''}`,
+            onClose: () => turnWatch.set(null),
+          }, h(SynapseTurnPane, {
             watch,
             ctx,
             onClose: () => turnWatch.set(null),
             onOpenInDialog: openTurnInDialog,
-          }) : null,
+            useChat: props.useChat,
+            useChatNode: props.useChatNode,
+            useSession: props.useSession,
+            useSessions: props.useSessions,
+            renderSlot: props.renderSlot,
+            sessionId: props.sessionId,
+            openFile: props.openFile,
+            forkAt: props.forkAt,
+            fileMentions: props.fileMentions,
+            loadImage: props.loadImage,
+            loadThrough: props.loadThrough,
+            uiConversation: props.uiConversation,
+          })) : null,
         )
       }
 
@@ -1103,17 +2027,7 @@ window.__ModuleLoader__.load({
         order: 1000,
       }, SynapseTabGate)), 'synapse: tab placement')
 
-      ctx.effect(() => () => {
-        window.removeEventListener('message', onMessage)
-        window.removeEventListener('keydown', onKeyDown)
-        window.removeEventListener('keydown', onSpaceDown)
-        window.removeEventListener('keyup', onSpaceUp)
-        themeObserver?.disconnect()
-        unsubscribeSessions()
-        unsubscribeWorkspaces()
-        for (const unsubscribe of liveUnsubscribers.values()) unsubscribe()
-        style.remove()
-      }, 'synapse: web workspace switch')
+      ctx.effect(installMapBridge, 'synapse: web workspace switch')
     }
     return module.exports
   },

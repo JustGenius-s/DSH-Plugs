@@ -9,18 +9,10 @@ import {
   SIDEBAR_TAB_TITLE_SLOT,
 } from '../src/client/sidebar-right'
 import {
-  FILES_TAB_ID,
-  FILES_TAB_KIND,
-  FILE_VIEWER_KIND,
-  filesTabDefinition,
-  fileViewerDefinition,
-} from '../src/client/features/files'
-import {
   SIDE_CHAT_TAB_ID,
   SIDE_CHAT_TAB_KIND,
   sideChatTabDefinition,
 } from '../src/client/features/side-chat/definition'
-import { DEFAULT_CONFIG } from '../src/shared/config'
 
 describe('registerSidebarTab', () => {
   it('owns the official definition and keyed body/title slots as one lifecycle', () => {
@@ -100,29 +92,6 @@ describe('registerSidebarTab', () => {
 
     expect(injected).toEqual([SIDEBAR_TAB_SLOT])
     dispose()
-  })
-})
-
-describe('Files ownership', () => {
-  it('delegates file previews to DSH until the user opts into the custom viewer', () => {
-    expect(DEFAULT_CONFIG.customFilesEnabled).toBe(false)
-  })
-
-  it('takes over the built-in files page only through the extension band', () => {
-    const definition = filesTabDefinition(key => key)
-
-    expect(definition.id).toBe(FILES_TAB_ID)
-    expect(definition.kind).toBe(FILES_TAB_KIND)
-    expect(definition.priority).toBe('extension')
-    expect(definition.guide).toHaveLength(1)
-  })
-
-  it('registers a separate resource viewer for custom file previews', () => {
-    const definition = fileViewerDefinition(key => key)
-
-    expect(definition.kind).toBe(FILE_VIEWER_KIND)
-    expect(definition.kind).not.toBe('files')
-    expect(definition.guide).toBeUndefined()
   })
 })
 

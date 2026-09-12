@@ -4,7 +4,7 @@ import {
   FILE_VIEWER_KIND,
   OFFICIAL_FILE_VIEWER_KIND,
   switchActiveFileViewer,
-} from '../src/client/features/files'
+} from '../src/client/features/files/file-viewer'
 
 function sidebarWithActive(kind: string, contentId = 'dsh-resource://file/session/s1/src/a.ts') {
   const openResource = vi.fn()
@@ -41,6 +41,43 @@ describe('switchActiveFileViewer', () => {
         revealIfOpened: false,
       },
     )
+  })
+
+  it('keeps an official HTML preview instead of stealing it for the custom viewer', () => {
+    const { sidebar, openResource } = sidebarWithActive(
+      OFFICIAL_FILE_VIEWER_KIND,
+      'dsh-resource://file/session/s1/out/demo.html',
+    )
+
+    expect(switchActiveFileViewer(sidebar, true)).toBe(false)
+    expect(openResource).not.toHaveBeenCalled()
+  })
+
+  it('hands a leftover custom HTML tab back to the official preview', () => {
+    const { sidebar, openResource } = sidebarWithActive(
+      FILE_VIEWER_KIND,
+      'dsh-resource://file/session/s1/icon.svg',
+    )
+
+    expect(switchActiveFileViewer(sidebar, true)).toBe(true)
+    expect(openResource).toHaveBeenCalledWith(
+      'dsh-resource://file/session/s1/icon.svg',
+      {
+        kind: OFFICIAL_FILE_VIEWER_KIND,
+        replaceTab: 'tab-1',
+        revealIfOpened: false,
+      },
+    )
+  })
+
+  it('keeps an official Markdown preview instead of stealing it', () => {
+    const { sidebar, openResource } = sidebarWithActive(
+      OFFICIAL_FILE_VIEWER_KIND,
+      'dsh-resource://file/session/s1/README.md',
+    )
+
+    expect(switchActiveFileViewer(sidebar, true)).toBe(false)
+    expect(openResource).not.toHaveBeenCalled()
   })
 
   it('leaves unrelated and already-correct tabs alone', () => {

@@ -1,6 +1,6 @@
 /** Side chat as a first-class DSH 0.1.5+ right-Sidebar tab. */
 
-import { createElement, useSyncExternalStore } from 'react'
+import { createElement, useEffect, useSyncExternalStore } from 'react'
 import type {
   ClientContext,
   SettingsScope,
@@ -28,11 +28,17 @@ import {
   remoteSessionApiOf,
   uiConversationOf,
 } from './connection'
+import {
+  isSideChatResourceAddress,
+  sideChatResourceAddressForTab,
+} from './contract'
 import { sideChatTabDefinition } from './definition'
 import { modelDirectoriesOf } from './model-directory'
 import { SideChatPanel, type SideChatSessionsFace } from './panel'
+import { pendingInteractionsOf } from './pending'
 import {
   createSideChatTabStateRegistry,
+  sideChatTabCaption,
   type SideChatTabState,
   type SideChatTabStateHandle,
 } from './tab-state'
@@ -66,6 +72,10 @@ export function createSideChatFeature(
       const imageApi = remoteSessionApiOf(ctx) ?? api
       const uiConversation = uiConversationOf(ctx)
       const conversation = conversationAttachmentsOf(ctx)
+      // DSH 0.1.5 answers approvals and questions through a session-keyed store
+      // on `uiSession`. Resolved once here because the panel has no context of
+      // its own, and the composer subscribes to the live store.
+      const pendingInteractions = pendingInteractionsOf(ctx)
 
       return bindEnabledSlot(
         scope,
@@ -77,7 +87,32 @@ export function createSideChatFeature(
           const SideChatTab = (props: SidebarTabProps) => {
             const { tab } = props.useTabInfo()
             const key = sidebarTabOccurrenceKey(props.sessionId, tab.id)
-            const state = tabStates.acquire(key, tab.signal)?.getSnapshot()
+            // A tab opened from the guide holds the PAGE address, and the store
+            // allows one page per pane — so without this conversion a second
+            // side chat could never exist. Mint the occurrence's own resource
+            // address (derived from its own tab id, so a remount re-opens the
+            // same one instead of multiplying tabs) and move the record onto it.
+            const resourceAddress = sideChatResourceAddressForTab(
+              tab.navigation.address,
+              tab.id,
+            )
+            const isResource = isSideChatResourceAddress(tab.navigation.address)
+            // Only a real window joins the numbering sequence. The guide's
+            // page tab is an invisible holder replaced by its own resource tab
+            // one commit later, so ranking it would shift every real window's
+            // number up by one — captioning the sole side chat "侧聊 1".
+            const numbering = isResource ? { sessionId: props.sessionId } : undefined
+            const state = tabStates.acquire(key, tab.signal, numbering)?.getSnapshot()
+
+            useEffect(() => {
+              if (isResource) return
+              tab.actions.openResource(resourceAddress, {
+                replaceTab: true,
+                revealIfOpened: false,
+              })
+            }, [isResource, resourceAddress, tab.actions])
+
+            if (!isResource) return null
 
             return createElement(SidebarTabKeepAliveMount, {
               registry: retainedTabs,
@@ -97,6 +132,7 @@ export function createSideChatFeature(
                   uiConversation,
                   modelDirectories,
                   conversation,
+                  pendingInteractions,
                   t: props.t,
                   updateTabState: tabStates.update,
                 }),
@@ -110,16 +146,24 @@ export function createSideChatFeature(
           const SideChatTitle = (props: SidebarTabProps) => {
             const { tab } = props.useTabInfo()
             const key = sidebarTabOccurrenceKey(props.sessionId, tab.id)
-            const state = useSideChatTabState(tabStates.acquire(key, tab.signal))
+            // Numbered by the SAME rule the body uses, so the two seats agree
+            // on which occurrences hold a number. Both read one tab record, so
+            // they cannot disagree about whether it is a resource.
+            const numbering = isSideChatResourceAddress(tab.navigation.address)
+              ? { sessionId: props.sessionId }
+              : undefined
+            const state = useSideChatTabState(
+              tabStates.acquire(key, tab.signal, numbering),
+            )
             return sidebarTabTitle(
               IconSideChatColor16,
-              state.title ?? props.t('view.sideChat'),
+              sideChatTabCaption(state, props.t),
             )
           }
 
           const disposeRegistration = registerSidebarTab(
             ctx,
-            sideChatTabDefinition(t),
+            sideChatTabDefinition(t, IconSideChatColor16),
             SideChatTab,
             { locale: NS, title: SideChatTitle },
           )
@@ -139,7 +183,12 @@ export function createSideChatFeature(
 
 export { SideChatPanel }
 export {
+  SIDE_CHAT_RESOURCE_PATTERN,
   SIDE_CHAT_TAB_ID,
   SIDE_CHAT_TAB_KIND,
-  sideChatTabDefinition,
-} from './definition'
+  isSideChatResourceAddress,
+  sideChatResourceAddress,
+  sideChatResourceAddressForTab,
+} from './contract'
+export { sideChatTabDefinition } from './definition'
+export { sideChatTabCaption, type SideChatNumberingScope } from './tab-state'
