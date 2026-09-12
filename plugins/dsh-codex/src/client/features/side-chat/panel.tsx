@@ -24,6 +24,7 @@ import type {
   UiConversationFace,
 } from './connection'
 import { SideChatComposer } from './composer'
+import type { PendingInteractionsFace } from './pending'
 import { SideChatTranscript } from './transcript'
 import { describeError, type ErrorDetail } from '../../error-boundary'
 import type { SideChatContextState } from '../../../shared/side-chat'
@@ -102,6 +103,12 @@ export interface SideChatPanelProps {
   modelDirectories?: unknown
   /** The validated `ctx.conversation` draft-attachment face. */
   conversation?: SideChatConversationFace
+  /**
+   * The session-keyed pending-interaction store (`uiSession.pendingInteractions`).
+   * DSH 0.1.5 answers approvals and questions through this store instead of a
+   * `snapshot.pending` array, so a side chat without it never takes over.
+   */
+  pendingInteractions?: PendingInteractionsFace | undefined
   t: (key: string) => string
   /** Stable metadata channel shared with the separately-mounted official title. */
   updateTabState: (key: string, patch: { title?: string; sideSessionId?: string }) => void
@@ -121,6 +128,7 @@ export function SideChatPanel({
   uiConversation,
   modelDirectories,
   conversation,
+  pendingInteractions,
   t,
   updateTabState,
 }: SideChatPanelProps) {
@@ -314,6 +322,7 @@ export function SideChatPanel({
             chat={chatSnapshot}
             t={t}
             sessionId={sideSessionId ?? undefined}
+            pendingInteractions={pendingInteractions}
             api={api as ImageApi | undefined}
             uiConversation={uiConversation as UiConversationFace | undefined}
             contextState={contextState ?? undefined}
@@ -327,8 +336,8 @@ export function SideChatPanel({
               projections: session.projections,
             }}
             running={running}
-            pending={snapshot?.pending}
-            runningCalls={snapshot?.runningCalls}
+            pendingInteractions={pendingInteractions}
+            chat={chatSnapshot}
             modelDirectories={modelDirectories as import('./model-directory').ModelDirectoryResolverFace | undefined}
             conversation={conversation}
             onError={handleError}

@@ -35,6 +35,7 @@ import {
 import { sideChatTabDefinition } from './definition'
 import { modelDirectoriesOf } from './model-directory'
 import { SideChatPanel, type SideChatSessionsFace } from './panel'
+import { pendingInteractionsOf } from './pending'
 import {
   createSideChatTabStateRegistry,
   sideChatTabCaption,
@@ -71,6 +72,10 @@ export function createSideChatFeature(
       const imageApi = remoteSessionApiOf(ctx) ?? api
       const uiConversation = uiConversationOf(ctx)
       const conversation = conversationAttachmentsOf(ctx)
+      // DSH 0.1.5 answers approvals and questions through a session-keyed store
+      // on `uiSession`. Resolved once here because the panel has no context of
+      // its own, and the composer subscribes to the live store.
+      const pendingInteractions = pendingInteractionsOf(ctx)
 
       return bindEnabledSlot(
         scope,
@@ -127,6 +132,7 @@ export function createSideChatFeature(
                   uiConversation,
                   modelDirectories,
                   conversation,
+                  pendingInteractions,
                   t: props.t,
                   updateTabState: tabStates.update,
                 }),

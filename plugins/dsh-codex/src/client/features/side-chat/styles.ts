@@ -168,6 +168,7 @@ ${CONTENT_SCOPE} pre{white-space:pre-wrap}
 .dsh-codex-sidechat-empty-icon{color:var(--dsw-alias-label-tertiary);flex:none;margin-bottom:4px}
 .dsh-codex-sidechat-empty-title{margin:0;color:var(--dsw-alias-label-primary);font-size:20px;font-weight:600;line-height:28px}
 .dsh-codex-sidechat-empty-hint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;font-weight:400;line-height:20px}
+
 /* Inherited-context rows under the empty hero. Centered to match the hero, and
    capped to the hero's width so the block reads as one grouped unit rather than
    a full-width band stretching past the centered copy. */

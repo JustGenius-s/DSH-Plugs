@@ -15,7 +15,14 @@
  * behave like the main conversation.
  */
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from 'react'
 import {
   IconCheckOutline16,
   IconChevronDownOutline14,
@@ -25,10 +32,6 @@ import {
   IconStopFill16,
   Tooltip,
 } from '@just-genius/dsh-plugin-ui'
-import type {
-  PendingInteraction,
-  RunningToolCall,
-} from '@just-genius/dsh-plugin-runtime/client'
 import {
   draftPreviewsOf,
   imageFilesOf,
@@ -48,7 +51,12 @@ import {
   SideChatPermissionSelect,
   type PermissionProjectionFace,
 } from './permission-select'
-import { pickSideChatWait, SideChatInterrupt } from './interrupts'
+import { SideChatInterrupt, type ChatLike } from './interrupts'
+import {
+  rawPendingOf,
+  recognizeWait,
+  type PendingInteractionsFace,
+} from './pending'
 
 /** The composer's session verbs (structural subset of SessionFace). */
 export interface SideChatComposerSession {
@@ -64,10 +72,14 @@ export interface SideChatComposerSession {
 export interface SideChatComposerProps {
   session: SideChatComposerSession
   running: boolean
-  /** Host-owned approval / question waits that take over this composer. */
-  pending?: readonly PendingInteraction[] | undefined
-  /** Running tool calls used to pair an approval with its bash command. */
-  runningCalls?: readonly RunningToolCall[] | undefined
+  /**
+   * The session-keyed pending-interaction store. DSH 0.1.5 answers approvals
+   * and questions through this store rather than a `snapshot.pending` array,
+   * so without it a side chat never sees a wait and never takes over.
+   */
+  pendingInteractions?: PendingInteractionsFace | undefined
+  /** Chat content rows, used to pair an approval with the command it asks about. */
+  chat?: ChatLike | undefined
   /**
    * The `ctx.modelDirectories` resolver for the model directory / selection.
    * DSH 0.1.2 route; see ./model-directory for why the old api face is gone.
@@ -94,14 +106,24 @@ type ModelState =
 export function SideChatComposer({
   session,
   running,
-  pending,
-  runningCalls,
+  pendingInteractions,
+  chat,
   modelDirectories,
   conversation,
   onError,
   t,
 }: SideChatComposerProps) {
-  const wait = pickSideChatWait(pending)
+  // The pending store is an observable indexed by session: subscribe so a wait
+  // that arrives while this panel is mounted takes over the composer.
+  // The snapshot reads the RAW carrier — the store's own object identity — so
+  // it stays referentially stable between updates; recognition runs in a memo
+  // below, because building a view object inside getSnapshot would make uSES
+  // re-render forever.
+  const carrier = useSyncExternalStore(
+    (fn) => (pendingInteractions === undefined ? () => {} : pendingInteractions.subscribe(fn)),
+    () => rawPendingOf(pendingInteractions, session.sessionId),
+  )
+  const wait = useMemo(() => recognizeWait(carrier), [carrier])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [models, setModels] = useState<ModelState>({ status: 'loading' })
@@ -317,7 +339,7 @@ export function SideChatComposer({
   if (wait !== undefined) {
     return (
       <div className="dsh-codex-sidechat-composer">
-        <SideChatInterrupt wait={wait} runningCalls={runningCalls} t={t} />
+        <SideChatInterrupt wait={wait} chat={chat} t={t} />
       </div>
     )
   }
