@@ -54,6 +54,14 @@ Click a `dsh-notification` system banner to focus the window and open that sessi
 
 **Settings → 插件管理** in one tab for two kinds: Cordis npm plugins (awesome-dsh-plugin marketplace + profile inventory) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis plugins still need restart. Replaces the official read-only Plugin list.
 
+### [@just-genius/dsh-quick-notes](plugins/dsh-quick-notes)
+
+随手笔记: floating sticky-note cards over the shell, with a search overlay (**Mod+Shift+F**; **Mod+Shift+N** opens a new note). Cards are WYSIWYG — `# ` becomes a heading as you type, `- [ ]` a real checkbox, a GFM table stays an editable table — while the note on disk stays plain Markdown. A model round mints a title and up to 3 tags; renaming by hand freezes further AI overwrites. **Settings → 随手笔记** manages the library (search, tags, pin / archive / delete, bulk actions). Notes are global rather than per-workspace, under `$DSH_HOME/quick-notes`, and every write is atomic (temp file + rename).
+
+### [dsh-synapse](plugins/dsh-synapse)
+
+A visual, non-linear conversation workspace (vendored from [liangmianya/dsh-synapse](https://github.com/liangmianya/dsh-synapse) 0.4.1): the sessions, follow-ups, and forks of one workspace drawn as a draggable, zoomable map, reached from the top-level **会话地图** switch and served at `/synapse`. DSH's session log stays the single source of truth — Synapse projects committed events only, connects cards by the real fork edges instead of building a second history, and keeps its canvas layout in `$DSH_HOME/synapse/`, so deleting that directory never deletes a session. A card can also save its answer into a 随手笔记 note. Web profile only, reusing the existing DSH server. It is the one plugin that is plain root-level JS (`index.js` / `client.js` / `app.js`, built with `node --check`) — no `@just-genius` scope, no shared runtime, no `typecheck`.
+
 ### [@just-genius/dsh-whale-girl](plugins/dsh-whale-girl)
 
 Desktop pet (whale-girl). In a plain browser it is the in-page companion; in DSH-Desktop it opens a transparent always-on-top overlay via `window.dshDesktop.overlays` so the pet sits on the OS desktop.
