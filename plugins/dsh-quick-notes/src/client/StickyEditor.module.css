@@ -183,6 +183,103 @@
   border-top: 1px solid var(--dsw-alias-border-l2);
 }
 
+.surface [data-md-table='1'] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  grid-template-rows: auto 22px;
+  max-width: 100%;
+  margin: 0 0 0.6em;
+  gap: 4px;
+}
+
+.surface [data-md-table-scroll='1'] {
+  grid-column: 1;
+  grid-row: 1;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.surface [data-md-table-edge='col'] {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: 4px;
+}
+
+.surface [data-md-table-edge='row'] {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.surface [data-md-table-add],
+.surface [data-md-table-remove] {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.surface [data-md-table-add]:hover,
+.surface [data-md-table-remove]:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.surface table {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.surface th,
+.surface td {
+  min-width: 2.5em;
+  padding: 4px 7px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  vertical-align: top;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.surface th {
+  background: var(--dsw-alias-bg-module-platform);
+  font-weight: 640;
+}
+
+.surface [data-align='center'] {
+  text-align: center;
+}
+
+.surface [data-align='right'] {
+  text-align: right;
+}
+
+.surface th:focus-within,
+.surface td:focus-within {
+  outline: 1px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -1px;
+}
+
+.surface small {
+  font-size: 0.85em;
+}
+
 .upload {
   flex: 0 0 auto;
   padding: 4px 8px;

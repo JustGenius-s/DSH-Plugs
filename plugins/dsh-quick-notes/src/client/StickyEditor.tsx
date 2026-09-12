@@ -3,10 +3,25 @@
 // It is WYSIWYG — `# ` becomes a heading as you type, `- [ ]` becomes a real
 // checkbox — while `htmlToMarkdown` keeps the note on disk plain Markdown.
 // Pasting an image uploads it to the Host and inserts a reference; pasting
-// anything richer is flattened to text so no stray HTML reaches storage.
+// a table or a phrasing tag becomes real elements so the note stays editable.
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { htmlToMarkdown, imageMarkdown, markdownToHtml } from './markdown.ts'
+import {
+  EMPTY_TABLE_MARKDOWN,
+  htmlToMarkdown,
+  looksLikeTableLine,
+  markdownFromPaste,
+  markdownToHtml,
+  typedTableFromLines,
+  pastedMarkdownLooksRich,
+  tableAddControlsHtml,
+  tableChromeCommand,
+  tableGrowAction,
+  tableInsertBodyIndex,
+  tableKeyAction,
+  tableShrinkAction,
+  type TableKeyAction,
+} from './markdown.ts'
 import { IMAGE_MEDIA_TYPES, MAX_IMAGE_BYTES } from '../shared.ts'
 import styles from './StickyEditor.module.css'
 
@@ -71,6 +86,7 @@ export function StickyEditor(props: StickyEditorProps): JSX.Element {
     if (node === null) return
     const html = markdownToHtml(props.markdown)
     if (node.innerHTML !== html) node.innerHTML = html
+    ensureTableControls(node)
     lastEmitted.current = props.markdown
     if (props.autoFocus === true) {
       node.focus()
@@ -86,7 +102,7 @@ export function StickyEditor(props: StickyEditorProps): JSX.Element {
     placeCaretAtEnd(node)
   }, [props.focusTick])
 
-  const command = useCallback((name: 'bold' | 'italic' | 'strike' | 'code' | 'h1' | 'h2' | 'quote' | 'ul' | 'ol' | 'task') => {
+  const command = useCallback((name: 'bold' | 'italic' | 'strike' | 'code' | 'h1' | 'h2' | 'quote' | 'ul' | 'ol' | 'task' | 'table' | 'table-row' | 'table-col' | 'table-del-row' | 'table-del-col') => {
     const node = surface.current
     if (node === null) return
     node.focus()
@@ -104,6 +120,14 @@ export function StickyEditor(props: StickyEditorProps): JSX.Element {
       emit()
       props.onSaveNow()
       return
+    }
+
+    if (event.key === 'Tab' || event.key === 'Enter' || event.key === 'Backspace') {
+      if (handleTableKey(node, event.nativeEvent)) {
+        event.preventDefault()
+        emit()
+        return
+      }
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -151,17 +175,30 @@ export function StickyEditor(props: StickyEditorProps): JSX.Element {
     const node = surface.current
     if (node === null) return
     applyInputRules(node)
+    promoteTypedTable(node)
+    ensureTableControls(node)
     emit()
   }, [emit])
 
   const onPaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+    const node = surface.current
     const images = Array.from(event.clipboardData.files).filter(item => item.type.startsWith('image/'))
     if (images.length === 0) {
       // Plain text keeps the surface clean: no foreign HTML, no styles.
+      // A table or a phrasing tag is the exception — those become real
+      // elements so the note is editable as what it looks like.
       const text = event.clipboardData.getData('text/plain')
       if (text !== '') {
         event.preventDefault()
-        document.execCommand('insertText', false, text)
+        const insideCell = node !== null && currentTableCell(node) !== null
+        if (node !== null && !insideCell && pastedMarkdownLooksRich(text)) {
+          document.execCommand('insertHTML', false, markdownToHtml(markdownFromPaste(text)))
+          promoteTypedTable(node)
+          ensureTableControls(node)
+        } else {
+          document.execCommand('insertText', false, text)
+        }
+        emit()
       }
       return
     }
@@ -194,6 +231,11 @@ export function StickyEditor(props: StickyEditorProps): JSX.Element {
       <button type="button" className={styles.tool} title="无序列表" onClick={() => command('ul')}>•</button>
       <button type="button" className={styles.tool} title="有序列表" onClick={() => command('ol')}>1.</button>
       <button type="button" className={styles.tool} title="待办" onClick={() => command('task')}>☑</button>
+      <button type="button" className={styles.tool} title="表格" onClick={() => command('table')}>表</button>
+      <button type="button" className={styles.tool} title="添加行" onClick={() => command('table-row')}>行</button>
+      <button type="button" className={styles.tool} title="添加列" onClick={() => command('table-col')}>列</button>
+      <button type="button" className={styles.tool} title="删除行" onClick={() => command('table-del-row')}>−行</button>
+      <button type="button" className={styles.tool} title="删除列" onClick={() => command('table-del-col')}>−列</button>
     </div>
   ), [command, styles])
 
@@ -214,7 +256,14 @@ export function StickyEditor(props: StickyEditorProps): JSX.Element {
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         onBlur={() => { emit(); props.onSaveNow() }}
-        onClick={handleTaskClick}
+        onMouseDown={(event) => {
+          const target = event.target instanceof Element ? event.target : null
+          if (target?.closest('[data-md-table-add], [data-md-table-remove]') != null) event.preventDefault()
+        }}
+        onClick={(event) => {
+          handleTaskClick(event)
+          if (handleTableAddClick(event)) emit()
+        }}
       />
       <label className={styles.upload}>
         <input
@@ -282,6 +331,7 @@ function escapeAttribute(value: string): string {
 function applyInputRules(root: HTMLElement): void {
   const block = currentBlock(root)
   if (block === null) return
+  if (block.closest('table') !== null) return
   const text = block.textContent ?? ''
   const rule = INPUT_RULES.find(candidate => candidate.pattern.test(text))
   if (rule === undefined) return
@@ -321,7 +371,7 @@ function currentBlock(root: HTMLElement): HTMLElement | null {
     if (node.nodeType === 1) {
       const element = node as HTMLElement
       const tag = element.tagName.toLowerCase()
-      if (tag === 'p' || tag === 'li' || /^h[1-6]$/.test(tag) || tag === 'blockquote' || tag === 'pre') return element
+      if (tag === 'td' || tag === 'th' || tag === 'p' || tag === 'li' || /^h[1-6]$/.test(tag) || tag === 'blockquote' || tag === 'pre') return element
     }
     node = node.parentNode
   }
@@ -329,6 +379,8 @@ function currentBlock(root: HTMLElement): HTMLElement | null {
 }
 
 function applyCommand(root: HTMLElement, name: string): void {
+  const blockLevel = name === 'h1' || name === 'h2' || name === 'quote' || name === 'ul' || name === 'ol' || name === 'task'
+  if (blockLevel && currentTableCell(root) !== null) return
   switch (name) {
     case 'bold':
     case 'italic':
@@ -380,6 +432,21 @@ function applyCommand(root: HTMLElement, name: string): void {
       placeCaretAtEnd(task.querySelector('[data-task-text]') ?? task)
       return
     }
+    case 'table':
+      insertEmptyTable(root)
+      return
+    case 'table-row':
+      growTable(root, 'row')
+      return
+    case 'table-col':
+      growTable(root, 'col')
+      return
+    case 'table-del-row':
+      shrinkTable(root, 'row')
+      return
+    case 'table-del-col':
+      shrinkTable(root, 'col')
+      return
   }
 }
 
@@ -438,6 +505,278 @@ function handleTaskClick(event: React.MouseEvent<HTMLDivElement>): void {
   const checked = paragraph.getAttribute('data-checked') !== 'true'
   paragraph.setAttribute('data-checked', checked ? 'true' : 'false')
   box.setAttribute('aria-checked', checked ? 'true' : 'false')
+}
+
+function currentTableCell(root: HTMLElement): HTMLTableCellElement | null {
+  const selection = window.getSelection()
+  if (selection === null || selection.rangeCount === 0) return null
+  let node: Node | null = selection.getRangeAt(0).startContainer
+  if (node.nodeType === 3) node = node.parentNode
+  if (node !== null && node.nodeType !== 1) node = node.parentNode
+  if (!(node instanceof Element)) return null
+  const cell = node.closest('th,td')
+  if (cell === null || !root.contains(cell)) return null
+  return cell as HTMLTableCellElement
+}
+
+function tableCellPosition(cell: HTMLTableCellElement): {
+  table: HTMLTableElement
+  rowIndex: number
+  colIndex: number
+  rowCount: number
+  colCount: number
+} | null {
+  const table = cell.closest('table')
+  const row = cell.closest('tr')
+  if (!(table instanceof HTMLTableElement) || !(row instanceof HTMLTableRowElement)) return null
+  const rows = Array.from(table.rows)
+  const rowIndex = rows.indexOf(row)
+  if (rowIndex < 0) return null
+  const colIndex = Array.from(row.cells).indexOf(cell)
+  const colCount = rows[0]?.cells.length ?? cell.cellIndex + 1
+  return { table, rowIndex, colIndex, rowCount: rows.length, colCount }
+}
+
+function cellAt(table: HTMLTableElement, row: number, col: number): HTMLTableCellElement | null {
+  return table.rows[row]?.cells[col] ?? null
+}
+
+function insertBodyRow(table: HTMLTableElement, afterRow: number): HTMLTableRowElement {
+  const colCount = table.rows[0]?.cells.length ?? 2
+  const body = table.tBodies[0] ?? table.createTBody()
+  const headerCount = table.tHead?.rows.length ?? 0
+  const row = body.insertRow(tableInsertBodyIndex(afterRow, headerCount, body.rows.length))
+  for (let index = 0; index < colCount; index++) {
+    const cell = row.insertCell()
+    cell.innerHTML = '<br>'
+    const align = table.rows[0]?.cells[index]?.getAttribute('data-align')
+    if (align !== null && align !== '') cell.setAttribute('data-align', align)
+  }
+  return row
+}
+
+function insertTableColumn(table: HTMLTableElement, afterCol: number): number {
+  const at = afterCol + 1
+  for (const row of Array.from(table.rows)) {
+    const inHead = row.parentElement?.tagName.toLowerCase() === 'thead'
+    const cell = document.createElement(inHead ? 'th' : 'td')
+    cell.innerHTML = '<br>'
+    const ref = row.cells[at]
+    if (ref === undefined) row.append(cell)
+    else row.insertBefore(cell, ref)
+  }
+  return at
+}
+
+function applyTableAction(table: HTMLTableElement, action: TableKeyAction): void {
+  if (action.type === 'move') {
+    const cell = cellAt(table, action.row, action.col)
+    if (cell !== null) placeCaretAtEnd(cell)
+    return
+  }
+  if (action.type === 'insert-row') {
+    const row = insertBodyRow(table, action.afterRow)
+    const cell = row.cells[action.focusCol] ?? row.cells[0]
+    if (cell !== undefined) placeCaretAtEnd(cell)
+    return
+  }
+  if (action.type === 'insert-col') {
+    const col = insertTableColumn(table, action.afterCol)
+    const cell = cellAt(table, action.focusRow, col) ?? cellAt(table, 0, col)
+    if (cell !== null) placeCaretAtEnd(cell)
+    return
+  }
+  if (action.type === 'remove-row') {
+    if (action.row > 0 && table.rows[action.row] !== undefined) table.deleteRow(action.row)
+    const cell = cellAt(table, action.focusRow, action.focusCol) ?? cellAt(table, action.focusRow, 0)
+    if (cell !== null) placeCaretAtEnd(cell)
+    return
+  }
+  if (action.type === 'remove-col') {
+    if ((table.rows[0]?.cells.length ?? 0) > 1) {
+      for (const row of Array.from(table.rows)) {
+        if (row.cells[action.col] !== undefined) row.deleteCell(action.col)
+      }
+    }
+    const cell = cellAt(table, action.focusRow, action.focusCol) ?? cellAt(table, action.focusRow, 0)
+    if (cell !== null) placeCaretAtEnd(cell)
+    return
+  }
+  if (action.type === 'leave') {
+    const wrap = table.closest('[data-md-table]') ?? table
+    const sibling = action.direction === -1 ? wrap.previousElementSibling : wrap.nextElementSibling
+    if (sibling instanceof HTMLElement) placeCaretAtEnd(sibling)
+    return
+  }
+}
+
+function isCaretAtStart(cell: HTMLElement): boolean {
+  const selection = window.getSelection()
+  if (selection === null || selection.rangeCount === 0) return false
+  const range = selection.getRangeAt(0)
+  if (!range.collapsed) return false
+  const prefix = document.createRange()
+  prefix.selectNodeContents(cell)
+  prefix.setEnd(range.startContainer, range.startOffset)
+  return prefix.toString() === ''
+}
+
+function handleTableKey(root: HTMLElement, event: KeyboardEvent): boolean {
+  const cell = currentTableCell(root)
+  if (cell === null) return false
+  const position = tableCellPosition(cell)
+  if (position === null) return false
+  const action = tableKeyAction({
+    key: event.key,
+    shiftKey: event.shiftKey,
+    rowIndex: position.rowIndex,
+    colIndex: position.colIndex,
+    rowCount: position.rowCount,
+    colCount: position.colCount,
+    cellEmpty: (cell.textContent ?? '').trim() === '',
+    caretAtStart: isCaretAtStart(cell),
+    columnEmpty: columnCellsEmpty(position.table, position.colIndex),
+  })
+  if (action === null) return false
+  if (action.type === 'break') {
+    document.execCommand('insertHTML', false, '<br>')
+    return true
+  }
+  applyTableAction(position.table, action)
+  return true
+}
+
+function paragraphLine(block: HTMLElement): string {
+  return (block.innerText ?? block.textContent ?? '').replace(/\u00a0/g, ' ').replace(/[ \t]+$/g, '')
+}
+
+function isPipeParagraph(node: Element | null): node is HTMLElement {
+  if (!(node instanceof HTMLElement) || node.tagName.toLowerCase() !== 'p') return false
+  return looksLikeTableLine(paragraphLine(node))
+}
+
+function promoteTypedTable(root: HTMLElement): void {
+  const block = currentBlock(root)
+  if (block === null) return
+  if (block.closest('table') !== null) return
+  if (block.tagName.toLowerCase() !== 'p') return
+  if (!looksLikeTableLine(paragraphLine(block))) return
+
+  // Enter splits a typed table into sibling paragraphs. Collect the run so
+  // the delimiter row can promote the whole table without rewriting later
+  // keystrokes (that would dump the caret).
+  const run: HTMLElement[] = [block]
+  let previous = block.previousElementSibling
+  while (isPipeParagraph(previous)) {
+    run.unshift(previous)
+    previous = previous.previousElementSibling
+  }
+  let next = block.nextElementSibling
+  while (isPipeParagraph(next)) {
+    run.push(next)
+    next = next.nextElementSibling
+  }
+
+  const markdown = typedTableFromLines(run.map(paragraphLine))
+  if (markdown === null) return
+  const wrap = document.createElement('div')
+  wrap.innerHTML = markdownToHtml(markdown)
+  const node = wrap.firstElementChild
+  if (node === null) return
+  run[0]?.replaceWith(node)
+  for (const extra of run.slice(1)) extra.remove()
+  ensureTableControls(root)
+  const last = node.querySelector('td:last-child, th:last-child')
+  if (last instanceof HTMLElement) placeCaretAtEnd(last)
+}
+
+function columnCellsEmpty(table: HTMLTableElement, col: number): boolean {
+  return Array.from(table.rows).every(row => (row.cells[col]?.textContent ?? '').trim() === '')
+}
+
+function growTable(root: HTMLElement, kind: 'row' | 'col'): void {
+  const cell = currentTableCell(root)
+  if (cell === null) {
+    insertEmptyTable(root)
+    return
+  }
+  const position = tableCellPosition(cell)
+  if (position === null) {
+    insertEmptyTable(root)
+    return
+  }
+  applyTableAction(position.table, tableGrowAction(kind, position))
+}
+
+function shrinkTable(root: HTMLElement, kind: 'row' | 'col'): void {
+  const cell = currentTableCell(root)
+  if (cell === null) return
+  const position = tableCellPosition(cell)
+  if (position === null) return
+  const action = tableShrinkAction(kind, position)
+  if (action !== null) applyTableAction(position.table, action)
+}
+
+function handleTableAddClick(event: React.MouseEvent<HTMLDivElement>): boolean {
+  const target = event.target instanceof Element ? event.target : null
+  const button = target?.closest('[data-md-table-add], [data-md-table-remove]') as HTMLElement | null
+  if (button === null) return false
+  event.preventDefault()
+  const command = tableChromeCommand(button)
+  const wrap = button.closest('[data-md-table]')
+  const table = wrap?.querySelector('table')
+  if (command === null || !(table instanceof HTMLTableElement)) return false
+  const lastRow = Math.max(0, table.rows.length - 1)
+  const lastCol = Math.max(0, (table.rows[0]?.cells.length ?? 1) - 1)
+  const at = {
+    rowIndex: command.kind === 'row' ? lastRow : 0,
+    colIndex: lastCol,
+    rowCount: table.rows.length,
+    colCount: table.rows[0]?.cells.length ?? 0,
+  }
+  const action = command.op === 'add' ? tableGrowAction(command.kind, at) : tableShrinkAction(command.kind, at)
+  if (action !== null) applyTableAction(table, action)
+  return true
+}
+
+function ensureTableControls(root: HTMLElement): void {
+  for (const wrap of root.querySelectorAll('[data-md-table="1"]')) {
+    if (!(wrap instanceof HTMLElement)) continue
+    const table = wrap.querySelector('table')
+    if (table !== null && table.parentElement === wrap) {
+      const scroll = document.createElement('div')
+      scroll.setAttribute('data-md-table-scroll', '1')
+      table.replaceWith(scroll)
+      scroll.append(table)
+    }
+    if (wrap.querySelector('[data-md-table-remove="row"]') === null) {
+      for (const extra of wrap.querySelectorAll('[data-md-table-add], [data-md-table-remove], [data-md-table-edge]')) extra.remove()
+      wrap.insertAdjacentHTML('beforeend', tableAddControlsHtml())
+    }
+  }
+}
+
+function insertEmptyTable(root: HTMLElement): void {
+  const wrap = document.createElement('div')
+  wrap.innerHTML = markdownToHtml(EMPTY_TABLE_MARKDOWN)
+  const node = wrap.firstElementChild
+  if (node === null) return
+  const cell = currentTableCell(root)
+  if (cell !== null) {
+    const host = cell.closest('[data-md-table]') ?? cell.closest('table')
+    if (host !== null) {
+      host.after(node)
+      const first = node.querySelector('th')
+      if (first instanceof HTMLElement) placeCaretAtEnd(first)
+      return
+    }
+  }
+  const block = currentBlock(root)
+  if (block !== null && (block.textContent ?? '').trim() === '') block.replaceWith(node)
+  else if (block !== null) block.after(node)
+  else root.append(node)
+  const first = node.querySelector('th')
+  if (first instanceof HTMLElement) placeCaretAtEnd(first)
 }
 
 function placeCaretAtEnd(node: Node): void {

@@ -199,3 +199,68 @@ test('runaway blank lines are collapsed', () => {
   assert.doesNotMatch(out, /\n{3,}/, 'no more than one blank line in a row')
   assert.match(out, /一[\s\S]*二/)
 })
+
+test('table add-row and add-col controls do not leak into Markdown', () => {
+  const table = el('DIV', { 'data-md-table': '1' }, [
+    el('DIV', { 'data-md-table-scroll': '1' }, [
+      el('TABLE', {}, [
+        el('THEAD', {}, [el('TR', {}, [el('TH', {}, [text('A')]), el('TH', {}, [text('B')])])]),
+      ]),
+    ]),
+    el('BUTTON', { 'data-md-table-add': 'col' }, [text('+')]),
+    el('BUTTON', { 'data-md-table-remove': 'col' }, [text('−')]),
+    el('BUTTON', { 'data-md-table-add': 'row' }, [text('+')]),
+    el('BUTTON', { 'data-md-table-remove': 'row' }, [text('−')]),
+  ])
+  assert.equal(serialize([table]), '| A | B |\n| --- | --- |')
+})
+
+test('a table serializes back to a GFM table, not a pipe paragraph', () => {
+  const table = el('DIV', { 'data-md-table': '1' }, [
+    el('TABLE', {}, [
+      el('THEAD', {}, [el('TR', {}, [el('TH', {}, [text('维度')]), el('TH', {}, [text('当前最高')])])]),
+      el('TBODY', {}, [el('TR', {}, [el('TD', {}, [text('SWE-bench')]), el('TD', {}, [text('96%')])])]),
+    ]),
+  ])
+  assert.equal(serialize([table]), '| 维度 | 当前最高 |\n| --- | --- |\n| SWE-bench | 96% |')
+})
+
+test('table alignment is written back onto the delimiter row', () => {
+  const table = el('TABLE', {}, [
+    el('THEAD', {}, [el('TR', {}, [
+      el('TH', {}, [text('来源')]),
+      el('TH', { 'data-align': 'center' }, [text('工作区')]),
+      el('TH', { 'data-align': 'right' }, [text('会话')]),
+    ])]),
+    el('TBODY', {}, [el('TR', {}, [
+      el('TD', {}, [text('会话地图')]),
+      el('TD', {}, [text('DSH-Plugs')]),
+      el('TD', {}, [text('随手笔记')]),
+    ])]),
+  ])
+  assert.equal(
+    serialize([table]),
+    '| 来源 | 工作区 | 会话 |\n| --- | :---: | ---: |\n| 会话地图 | DSH-Plugs | 随手笔记 |',
+  )
+})
+
+test('a small tag survives the round trip instead of becoming plain text', () => {
+  const p = el('P', {}, [
+    el('SMALL', {}, [text('ARC-AGI-3 分数有出入')]),
+  ])
+  assert.equal(serialize([p]), '<small>ARC-AGI-3 分数有出入</small>')
+})
+
+test('an empty cell with a caret break serializes as an empty cell', () => {
+  const table = el('TABLE', {}, [
+    el('THEAD', {}, [el('TR', {}, [el('TH', {}, [el('BR')]), el('TH', {}, [text('B')])])]),
+  ])
+  assert.equal(serialize([table]), '|  | B |\n| --- | --- |')
+})
+
+test('a small tag inside a table cell serializes as HTML in that cell', () => {
+  const table = el('TABLE', {}, [
+    el('THEAD', {}, [el('TR', {}, [el('TH', {}, [text('A')]), el('TH', {}, [el('SMALL', {}, [text('注')])])])]),
+  ])
+  assert.equal(serialize([table]), '| A | <small>注</small> |\n| --- | --- |')
+})

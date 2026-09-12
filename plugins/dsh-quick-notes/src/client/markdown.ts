@@ -6,13 +6,23 @@
 //
 // The supported set is deliberately the one that survives a round trip
 // unchanged: paragraphs, ATX headings, bullet and ordered lists, task lists,
-// blockquotes, fenced code, thematic breaks, links, images, and inline bold /
-// italic / strike / inline code. Anything else a paste brings in is downgraded
-// to text rather than smuggled into a note as HTML.
+// blockquotes, fenced code, thematic breaks, GFM tables, links, images, a
+// tight allowlist of phrasing HTML (`<small>`, `<br>`, `<sup>`…), and
+// inline bold / italic / strike / inline code. Anything else a paste brings
+// in is downgraded to text rather than smuggled into a note as HTML.
 
 import { attachmentRef } from '../shared.ts'
 
 /** One block in the parsed document. */
+type Alignment = 'left' | 'center' | 'right'
+
+type TableBlock = {
+  kind: 'table'
+  headers: string[]
+  alignments: Alignment[]
+  rows: string[][]
+}
+
 type Block =
   | { kind: 'p'; lines: string[]; task?: { checked: boolean; text: string } }
   | { kind: 'h'; level: number; text: string }
@@ -20,8 +30,14 @@ type Block =
   | { kind: 'code'; lang: string; text: string }
   | { kind: 'ul'; items: string[]; ordered: false }
   | { kind: 'ol'; items: string[]; ordered: true; start: number }
+  | TableBlock
   | { kind: 'hr' }
   | { kind: 'blank' }
+
+const SAFE_PHRASING = new Set([
+  'small', 'sub', 'sup', 'mark', 'kbd', 'cite', 'q', 'dfn', 'samp', 'var', 'abbr',
+])
+const VOID_PHRASING = new Set(['br', 'wbr'])
 
 const ESCAPE_HTML = /[&<>"']/g
 
@@ -63,11 +79,71 @@ function blockToHtml(block: Block): string {
       const start = block.ordered && block.start !== 1 ? ` start="${String(block.start)}"` : ''
       return `<${tag}${start}>${block.items.map(item => `<li>${inlineToHtml(item)}</li>`).join('')}</${tag}>`
     }
+    case 'table':
+      return tableToHtml(block)
     case 'hr':
       return '<hr>'
     case 'blank':
       return ''
   }
+}
+
+function tableToHtml(block: TableBlock): string {
+  const alignAttr = (index: number): string => {
+    const align = block.alignments[index] ?? 'left'
+    return align === 'left' ? '' : ` data-align="${align}"`
+  }
+  const cell = (text: string, tag: 'th' | 'td', index: number): string => (
+    `<${tag}${alignAttr(index)}>${inlineToHtml(text)}</${tag}>`
+  )
+  const head = block.headers.map((text, index) => cell(text, 'th', index)).join('')
+  const body = block.rows.map(row => (
+    `<tr>${row.map((text, index) => cell(text, 'td', index)).join('')}</tr>`
+  )).join('')
+  return `<div data-md-table="1"><div data-md-table-scroll="1"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${tableAddControlsHtml()}</div>`
+}
+
+/** Edge controls the editor clicks to grow or shrink a live table. */
+export function tableAddControlsHtml(): string {
+  return '<div data-md-table-edge="col">'
+    + '<button type="button" contenteditable="false" data-md-table-add="col" tabindex="-1" aria-label="添加列">+</button>'
+    + '<button type="button" contenteditable="false" data-md-table-remove="col" tabindex="-1" aria-label="删除列">−</button>'
+    + '</div>'
+    + '<div data-md-table-edge="row">'
+    + '<button type="button" contenteditable="false" data-md-table-add="row" tabindex="-1" aria-label="添加行">+</button>'
+    + '<button type="button" contenteditable="false" data-md-table-remove="row" tabindex="-1" aria-label="删除行">−</button>'
+    + '</div>'
+}
+
+/** Map a chrome button to a grow or shrink axis. */
+export function tableChromeKind(value: string | null | undefined): 'row' | 'col' | null {
+  if (value === 'row' || value === 'col') return value
+  return null
+}
+
+export type TableChromeCommand =
+  | { op: 'add'; kind: 'row' | 'col' }
+  | { op: 'remove'; kind: 'row' | 'col' }
+
+/** Read add/remove from a chrome button. */
+export function tableChromeCommand(target: { getAttribute(name: string): string | null }): TableChromeCommand | null {
+  const add = tableChromeKind(target.getAttribute('data-md-table-add'))
+  if (add !== null) return { op: 'add', kind: add }
+  const remove = tableChromeKind(target.getAttribute('data-md-table-remove'))
+  if (remove !== null) return { op: 'remove', kind: remove }
+  return null
+}
+
+/**
+ * Where a new body row lands in `<tbody>`.
+ *
+ * `afterRow` is an index in `table.rows` (header included). Inserting
+ * through `HTMLTableElement.insertRow` can land in `<thead>` and the new
+ * row never shows up as a body cell.
+ */
+export function tableInsertBodyIndex(afterRow: number, headerCount: number, bodyCount: number): number {
+  const afterBody = afterRow - headerCount
+  return Math.min(bodyCount, Math.max(0, afterBody + 1))
 }
 
 /**
@@ -140,10 +216,97 @@ function inlineToHtml(text: string): string {
       continue
     }
 
+    const voidHtml = /^<(br|wbr)\s*\/?>/i.exec(rest)
+    if (voidHtml !== null) {
+      out += `<${(voidHtml[1] ?? 'br').toLowerCase()}>`
+      index += voidHtml[0].length
+      continue
+    }
+
+    // Models wrap footnotes in <small> and drop <sup> into prose. Only a
+    // matching, attributeless pair is restored — `<small onclick>` stays text.
+    const openHtml = /^<(small|sub|sup|mark|kbd|cite|q|dfn|samp|var|abbr)>/i.exec(rest)
+    if (openHtml !== null) {
+      const name = (openHtml[1] ?? '').toLowerCase()
+      const close = `</${name}>`
+      const closeAt = text.toLowerCase().indexOf(close, index + openHtml[0].length)
+      if (closeAt !== -1) {
+        const inner = text.slice(index + openHtml[0].length, closeAt)
+        out += `<${name}>${inner === '' ? '' : inlineToHtml(inner)}</${name}>`
+        index = closeAt + close.length
+        continue
+      }
+    }
+
     out += escapeHtml(text[index] ?? '')
     index += 1
   }
   return out === '' ? '<br>' : out
+}
+
+function tableCells(line: string): string[] {
+  const trimmed = String(line ?? '').trim()
+  if (trimmed === '' || !trimmed.includes('|')) return []
+  return trimmed.replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
+}
+
+function isTableDelimiter(line: string): boolean {
+  const cells = tableCells(line)
+  return cells.length > 0 && cells.every(cell => /^:?-+:?$/.test(cell.replace(/\s+/g, '')))
+}
+
+function tableAlignments(line: string): Alignment[] {
+  return tableCells(line).map(cell => {
+    const mark = cell.replace(/\s+/g, '')
+    const left = mark.startsWith(':')
+    const right = mark.endsWith(':')
+    if (left && right) return 'center'
+    if (right) return 'right'
+    return 'left'
+  })
+}
+
+function isTableRow(line: string): boolean {
+  if (typeof line !== 'string') return false
+  if (/^\s{0,3}#{1,6}\s+/.test(line)) return false
+  if (/^\s{0,3}>\s?/.test(line)) return false
+  if (/^\s{0,3}[-*+]\s+/.test(line)) return false
+  if (/^\s{0,3}\d+[.)]\s+/.test(line)) return false
+  return tableCells(line).length >= 2
+}
+
+function takeTable(lines: string[], index: number): { block: TableBlock; next: number } | null {
+  const line = lines[index] ?? ''
+  if (!isTableRow(line) || index + 1 >= lines.length) return null
+  const next = lines[index + 1] ?? ''
+  if (isTableDelimiter(next) && tableCells(next).length > 0) {
+    const headers = tableCells(line)
+    const alignments = tableAlignments(next)
+    while (alignments.length < headers.length) alignments.push('left')
+    const rows: string[][] = []
+    let cursor = index + 2
+    while (cursor < lines.length && isTableRow(lines[cursor] ?? '') && !isTableDelimiter(lines[cursor] ?? '')) {
+      const cells = tableCells(lines[cursor] ?? '')
+      rows.push(headers.map((_, column) => cells[column] ?? ''))
+      cursor += 1
+    }
+    return { block: { kind: 'table', headers, alignments: alignments.slice(0, headers.length), rows }, next: cursor }
+  }
+  const columns = tableCells(line).length
+  if (!isTableRow(next) || isTableDelimiter(next) || tableCells(next).length !== columns) return null
+  const headers = tableCells(line)
+  const rows: string[][] = [tableCells(next)]
+  let cursor = index + 2
+  while (
+    cursor < lines.length
+    && isTableRow(lines[cursor] ?? '')
+    && !isTableDelimiter(lines[cursor] ?? '')
+    && tableCells(lines[cursor] ?? '').length === columns
+  ) {
+    rows.push(tableCells(lines[cursor] ?? ''))
+    cursor += 1
+  }
+  return { block: { kind: 'table', headers, alignments: headers.map(() => 'left' as const), rows }, next: cursor }
 }
 
 function parseBlocks(source: string): Block[] {
@@ -241,6 +404,13 @@ function parseBlocks(source: string): Block[] {
       continue
     }
 
+    const table = takeTable(lines, index)
+    if (table !== null) {
+      blocks.push(table.block)
+      index = table.next
+      continue
+    }
+
     const paragraph: string[] = []
     while (index < lines.length) {
       const current = lines[index] ?? ''
@@ -251,6 +421,7 @@ function parseBlocks(source: string): Block[] {
       if (/^(\s*)[-*+]\s+/.test(current)) break
       if (/^(\s*)\d+[.)]\s+/.test(current)) break
       if (/^\s{0,3}([-*_])\s*(?:\1\s*){2,}$/.test(current)) break
+      if (takeTable(lines, index) !== null) break
       paragraph.push(current)
       index += 1
     }
@@ -282,6 +453,10 @@ function serializeBlock(node: Element): string {
   const tag = node.tagName.toLowerCase()
 
   if (tag === 'hr') return '---'
+
+  if (tag === 'table' || node.getAttribute('data-md-table') === '1') {
+    return serializeTable(node)
+  }
 
   if (tag === 'blockquote') {
     const inner = Array.from(node.children)
@@ -376,10 +551,221 @@ function inlineToMarkdown(node: Element): string {
       out += `~~${inlineToMarkdown(element).trim()}~~`
       continue
     }
+    if (VOID_PHRASING.has(tag)) {
+      out += tag === 'br' ? '\n' : `<${tag}>`
+      continue
+    }
+    if (SAFE_PHRASING.has(tag)) {
+      out += `<${tag}>${inlineToMarkdown(element)}</${tag}>`
+      continue
+    }
     if (tag === 'span' && element.getAttribute('data-task-box') === '1') continue
     out += inlineToMarkdown(element)
   }
   return out
+}
+
+function tableRowsOf(node: Element): Element[] {
+  const rows: Element[] = []
+  const walk = (element: Element): void => {
+    if (element.tagName.toLowerCase() === 'tr') {
+      rows.push(element)
+      return
+    }
+    for (const child of Array.from(element.children)) walk(child)
+  }
+  walk(node)
+  return rows
+}
+
+function cellChildren(row: Element): Element[] {
+  return Array.from(row.children).filter(child => {
+    const tag = child.tagName.toLowerCase()
+    return tag === 'th' || tag === 'td'
+  })
+}
+
+function alignmentOf(cell: Element): Alignment {
+  const data = cell.getAttribute('data-align')
+  if (data === 'center' || data === 'right' || data === 'left') return data
+  return 'left'
+}
+
+function alignmentMarker(align: Alignment): string {
+  if (align === 'center') return ':---:'
+  if (align === 'right') return '---:'
+  return '---'
+}
+
+function cellToMarkdown(cell: Element): string {
+  const text = inlineToMarkdown(cell).replace(/\n/g, '<br>').trim()
+  return text === '<br>' ? '' : text
+}
+
+function serializeTable(node: Element): string {
+  const rows = tableRowsOf(node)
+  if (rows.length === 0) return ''
+  const headerCells = cellChildren(rows[0] ?? node)
+  const headers = headerCells.map(cellToMarkdown)
+  if (headers.length === 0) return ''
+  const alignments = headerCells.map(alignmentOf)
+  const delimiter = headers.map((_, index) => alignmentMarker(alignments[index] ?? 'left'))
+  const body = rows.slice(1).map(row => {
+    const cells = cellChildren(row).map(cellToMarkdown)
+    while (cells.length < headers.length) cells.push('')
+    return cells.slice(0, headers.length)
+  })
+  const line = (cells: string[]): string => `| ${cells.join(' | ')} |`
+  return [line(headers), line(delimiter), ...body.map(line)].join('\n')
+}
+
+/** True when the whole snippet is one GFM table and nothing else. */
+export function isSingleTableMarkdown(text: string): boolean {
+  const blocks = parseBlocks(String(text ?? '').replace(/\r\n?/g, '\n'))
+  return blocks.length === 1 && blocks[0]?.kind === 'table'
+}
+
+/**
+ * True when a typed paragraph should become a live table.
+ *
+ * The delimiter row is required so two poetic pipe lines are not promoted
+ * mid-keystroke; a finished `| --- |` row is the commit.
+ */
+export function isTypedTableMarkdown(text: string): boolean {
+  if (!isSingleTableMarkdown(text)) return false
+  return String(text ?? '').replace(/\r\n?/g, '\n').split('\n').some(line => isTableDelimiter(line))
+}
+
+/** A 2×2 table the toolbar inserts. Empty cells keep a caret target. */
+export const EMPTY_TABLE_MARKDOWN = '|  |  |\n| --- | --- |\n|  |  |'
+
+/** A single line that can belong to a typed GFM table. */
+export function looksLikeTableLine(text: string): boolean {
+  const line = String(text ?? '').replace(/\u00a0/g, ' ').trim()
+  if (isTableDelimiter(line)) return true
+  return line.startsWith('|') && tableCells(line).length >= 2
+}
+
+/**
+ * Join adjacent typed lines into one table document, or null if they are
+ * not yet a finished GFM table (no delimiter row, or leftover prose).
+ */
+export function typedTableFromLines(lines: string[]): string | null {
+  const text = lines
+    .map(line => String(line ?? '').replace(/\u00a0/g, ' ').replace(/[ \t]+$/g, ''))
+    .join('\n')
+  return isTypedTableMarkdown(text) ? text : null
+}
+
+/**
+ * A copied contenteditable table usually arrives as tab-separated rows.
+ * Turn that back into GFM so a paste stays a live table.
+ */
+export function tsvToTableMarkdown(text: string): string | null {
+  const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n').filter(line => line.trim() !== '')
+  if (lines.length < 2) return null
+  const rows = lines.map(line => line.split('\t').map(cell => cell.trim()))
+  const columns = rows[0]?.length ?? 0
+  if (columns < 2) return null
+  if (rows.some(row => row.length !== columns)) return null
+  const line = (cells: string[]): string => `| ${cells.join(' | ')} |`
+  const delimiter = rows[0]?.map(() => '---') ?? []
+  return [line(rows[0] ?? []), line(delimiter), ...rows.slice(1).map(line)].join('\n')
+}
+
+/** Normalize a paste into Markdown the editor can render as elements. */
+export function markdownFromPaste(text: string): string {
+  return tsvToTableMarkdown(text) ?? String(text ?? '')
+}
+
+export function pastedMarkdownLooksRich(text: string): boolean {
+  const source = String(text ?? '')
+  if (tsvToTableMarkdown(source) !== null) return true
+  if (/<(small|br|wbr|sub|sup|mark|kbd|cite|q|dfn|samp|var|abbr)(\s*\/)?>/i.test(source)) return true
+  const lines = source.replace(/\r\n?/g, '\n').split('\n')
+  for (let index = 0; index < lines.length; index++) {
+    if (takeTable(lines, index) !== null) return true
+  }
+  return false
+}
+
+export type TableKeyAction =
+  | { type: 'move'; row: number; col: number }
+  | { type: 'insert-row'; afterRow: number; focusCol: number }
+  | { type: 'insert-col'; afterCol: number; focusRow: number }
+  | { type: 'remove-row'; row: number; focusRow: number; focusCol: number }
+  | { type: 'remove-col'; col: number; focusRow: number; focusCol: number }
+  | { type: 'leave'; direction: -1 | 1 }
+  | { type: 'break' }
+
+/** Grow the table from a known cell, used by the 行/列 toolbar and the + chrome. */
+export function tableGrowAction(
+  kind: 'row' | 'col',
+  input: { rowIndex: number; colIndex: number },
+): TableKeyAction {
+  if (kind === 'row') return { type: 'insert-row', afterRow: input.rowIndex, focusCol: input.colIndex }
+  return { type: 'insert-col', afterCol: input.colIndex, focusRow: input.rowIndex }
+}
+
+/** Shrink the table from a known cell. The header and the last column stay. */
+export function tableShrinkAction(
+  kind: 'row' | 'col',
+  input: { rowIndex: number; colIndex: number; rowCount: number; colCount: number },
+): TableKeyAction | null {
+  if (kind === 'row') {
+    if (input.rowIndex <= 0) return null
+    const focusRow = input.rowIndex === input.rowCount - 1 ? input.rowIndex - 1 : input.rowIndex
+    return { type: 'remove-row', row: input.rowIndex, focusRow, focusCol: input.colIndex }
+  }
+  if (input.colCount <= 1) return null
+  const focusCol = input.colIndex === input.colCount - 1 ? input.colIndex - 1 : input.colIndex
+  return { type: 'remove-col', col: input.colIndex, focusRow: input.rowIndex, focusCol }
+}
+
+/**
+ * What a key does inside a table cell.
+ *
+ * The surface never rewrites the table's innerHTML on a keystroke — it
+ * applies this action to the live DOM so the caret stays put.
+ */
+export function tableKeyAction(input: {
+  key: string
+  shiftKey: boolean
+  rowIndex: number
+  colIndex: number
+  rowCount: number
+  colCount: number
+  cellEmpty: boolean
+  caretAtStart: boolean
+  columnEmpty?: boolean
+}): TableKeyAction | null {
+  const { key, shiftKey, rowIndex, colIndex, rowCount, colCount, cellEmpty, caretAtStart, columnEmpty } = input
+  if (key === 'Tab') {
+    if (shiftKey) {
+      if (rowIndex === 0 && colIndex === 0) return { type: 'leave', direction: -1 }
+      if (colIndex > 0) return { type: 'move', row: rowIndex, col: colIndex - 1 }
+      return { type: 'move', row: rowIndex - 1, col: colCount - 1 }
+    }
+    if (rowIndex === rowCount - 1 && colIndex === colCount - 1) {
+      return { type: 'insert-row', afterRow: rowIndex, focusCol: 0 }
+    }
+    if (colIndex < colCount - 1) return { type: 'move', row: rowIndex, col: colIndex + 1 }
+    return { type: 'move', row: rowIndex + 1, col: 0 }
+  }
+  if (key === 'Enter') {
+    if (shiftKey) return { type: 'break' }
+    if (rowIndex === rowCount - 1) return { type: 'insert-row', afterRow: rowIndex, focusCol: colIndex }
+    return { type: 'move', row: rowIndex + 1, col: colIndex }
+  }
+  if (key === 'Backspace' && cellEmpty && caretAtStart) {
+    if (rowIndex > 0 && rowIndex === rowCount - 1) {
+      return { type: 'remove-row', row: rowIndex, focusRow: rowIndex - 1, focusCol: colIndex }
+    }
+    if (colIndex === colCount - 1 && colCount > 1 && columnEmpty === true) {
+      return { type: 'remove-col', col: colIndex, focusRow: rowIndex, focusCol: colIndex - 1 }
+    }
+  }
+  return null
 }
 
 /** The Markdown image reference the editor inserts for a stored attachment. */

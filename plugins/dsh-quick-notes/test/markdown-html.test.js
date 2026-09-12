@@ -120,3 +120,82 @@ test('a whole note renders every block in order', () => {
   assert.ok(html.includes('结尾'))
   assert.ok(html.indexOf('结尾') > html.indexOf('<hr>'), 'the tail comes after the rule')
 })
+
+test('a GFM table renders as a real table, not a pipe paragraph', () => {
+  const html = markdownToHtml('| 维度 | 当前最高 |\n| --- | --- |\n| SWE-bench | 96% |')
+  assert.match(html, /data-md-table="1"/)
+  assert.match(html, /data-md-table-scroll="1"/)
+  assert.match(html, /data-md-table-add="row"/)
+  assert.match(html, /data-md-table-add="col"/)
+  assert.match(html, /data-md-table-remove="row"/)
+  assert.match(html, /data-md-table-remove="col"/)
+  assert.match(html, /<table>/)
+  assert.match(html, /<th>维度<\/th>/)
+  assert.match(html, /<th>当前最高<\/th>/)
+  assert.match(html, /<td>SWE-bench<\/td>/)
+  assert.match(html, /<td>96%<\/td>/)
+  assert.doesNotMatch(html, /<p>\| 维度/)
+})
+
+test('a table without outer pipes still renders and honors alignment', () => {
+  const html = markdownToHtml('来源 | 工作区 | 会话\n:--- | :---: | ---:\n会话地图 | DSH-Plugs | 随手笔记')
+  assert.match(html, /<th>来源<\/th>/)
+  assert.match(html, /<th data-align="center">工作区<\/th>/)
+  assert.match(html, /<th data-align="right">会话<\/th>/)
+  assert.match(html, /<td>会话地图<\/td>/)
+})
+
+test('two pipe rows without a delimiter still become a table', () => {
+  const html = markdownToHtml('| 来源 | 工作区 |\n| 会话地图 | DSH-Plugs |')
+  assert.match(html, /<th>来源<\/th>/)
+  assert.match(html, /<td>DSH-Plugs<\/td>/)
+  assert.doesNotMatch(markdownToHtml('只是提到 A | B 这种写法'), /<table>/)
+})
+
+test('a table does not swallow the paragraph above it', () => {
+  const html = markdownToHtml('说明如下\n| A | B |\n| --- | --- |\n| 1 | 2 |')
+  assert.match(html, /<p>说明如下<\/p>/)
+  assert.match(html, /<th>A<\/th>/)
+  assert.ok(html.indexOf('<p>说明如下</p>') < html.indexOf('<table>'))
+})
+
+test('an empty table cell keeps a break so the caret has somewhere to sit', () => {
+  const html = markdownToHtml('| A | B |\n| --- | --- |\n|  | x |')
+  assert.match(html, /<td><br><\/td><td>x<\/td>/)
+})
+
+test('a phrasing tag in the source is restored; everything else stays escaped', () => {
+  const footnote = '<small>*ARC-AGI-3 分数有出入：Engadget 报 98.6%，另一家报 99.9%。这正是我上一轮说的"看口径"的活案例。另外 Epoch AI 的 ECI 综合指数榜首是 GPT-6 Astra。</small>'
+  const html = markdownToHtml(footnote)
+  assert.match(html, /<p><small>\*ARC-AGI-3/)
+  assert.match(html, /<\/small><\/p>/)
+  assert.doesNotMatch(html, /&lt;small/)
+  assert.doesNotMatch(html, /<em>/, 'a lone opening * is a footnote marker')
+
+  assert.match(markdownToHtml('<small>*footnote*</small>'), /<small><em>footnote<\/em><\/small>/)
+  assert.match(markdownToHtml('line<br>break'), /<p>line<br>break<\/p>/)
+  assert.match(markdownToHtml('E = mc<sup>2</sup>'), /<sup>2<\/sup>/)
+
+  assert.match(markdownToHtml('<small onclick="alert(1)">x</small>'), /&lt;small onclick=/)
+  assert.match(markdownToHtml('<script>alert(1)</script>'), /&lt;script&gt;/)
+  assert.doesNotMatch(markdownToHtml('<script>alert(1)</script>'), /<script>/)
+
+  const code = markdownToHtml('`<small>x</small>`')
+  assert.match(code, /<code>&lt;small&gt;x&lt;\/small&gt;<\/code>/)
+  const fence = markdownToHtml('```\n<small>x</small>\n```')
+  assert.match(fence, /<code>&lt;small&gt;x&lt;\/small&gt;<\/code>/)
+})
+
+test('a session-map style note keeps the table and the small footnote', () => {
+  const html = markdownToHtml('| 维度 | 当前最高 |\n| --- | --- |\n| SWE-bench | 96% |\n\n<small>*ARC-AGI-3 分数有出入。</small>')
+  assert.match(html, /data-md-table="1"/)
+  assert.match(html, /<td>SWE-bench<\/td>/)
+  assert.match(html, /<p><small>\*ARC-AGI-3/)
+  assert.ok(html.indexOf('<table>') < html.indexOf('<small>'))
+})
+
+test('a table cell can hold inline marks and a small tag', () => {
+  const html = markdownToHtml('| **粗** | <small>注</small> |\n| --- | --- |')
+  assert.match(html, /<th><strong>粗<\/strong><\/th>/)
+  assert.match(html, /<th><small>注<\/small><\/th>/)
+})
