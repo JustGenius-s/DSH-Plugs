@@ -401,6 +401,8 @@ export const CLIENT_SERVICES = {
   conversationEvents: 'conversationEvents',
   /** Conversation registries (`events` / `views`) since DSH 0.1.2. */
   uiConversation: 'uiConversation',
+  /** Session-scoped UI state, including the 0.1.5 pending-interaction store. */
+  uiSession: 'uiSession',
   inputTriggers: 'inputTriggers',
   locale: 'locale',
   modelDirectories: 'modelDirectories',
