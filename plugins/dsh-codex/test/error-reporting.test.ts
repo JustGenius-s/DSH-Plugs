@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { describeError } from '../src/client/features/side-panels/error-boundary'
+import { describeError } from '../src/client/error-boundary'
 import { hostStackOf } from '../src/client/features/side-chat/api'
 
 describe('describeError', () => {
