@@ -18,13 +18,11 @@ Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the
 
 Leader-plans / subagent-executes orchestration, **off until you run `/flow`**. Once on, the main agent only plans — it lays work out as a DAG with `flow.plan`, each node is dispatched to its own child agent, and it reshapes the graph mid-flight with `flow.patch` (retry with a revised prompt, skip, insert a corrective step) as results land. Execution tools (`edit`/`write`/`bash`) are genuinely removed from the Leader while the mode is on; read-only tools stay. A dedicated **Flow** tab beside Chat draws the live graph with React Flow: node colour = status, edges = dependencies, click a node for its brief, result, and failure reason. Leave with `/flow off` (which also cancels running children).
 
-### [@just-genius/dsh-multi-repo](plugins/dsh-multi-repo)
-
-Multi-folder workspaces (Codex-style, no git scan): add folders one by one, pick one as the **primary** — the official workspace, session cwd, and workspace-write scope — while the rest stay readable and coordinatable. Bindings live in `~/.dsh/multi-repo/projects.json` and are injected into the system prompt.
-
 ### [@just-genius/dsh-workspace-plus](plugins/dsh-workspace-plus)
 
-Workspace enhancement that supersedes installing `dsh-multi-repo` plus a row-menu plugin together: attach multiple folders to one workspace (primary folder is the official cwd / workspace-write scope), and add double-click / right-click menus on workspace and session rows — pin, rename, unread, archive, fork, open folder. Bindings live in `~/.dsh/workspace-plus/bindings.json`. Session menus do not offer permanent delete.
+Workspace enhancement. **Multi-folder workspaces** (Codex-style, no git scan): add folders one by one, pick one as the **primary** — the official workspace, session cwd, and workspace-write scope — while the rest stay readable and coordinatable, with the folder list injected into the system prompt. Plus double-click / right-click menus on workspace and session rows — pin, rename, unread, archive, fork, open folder. Bindings live in `~/.dsh/workspace-plus/bindings.json`. Session menus do not offer permanent delete.
+
+Supersedes the former `dsh-multi-repo`, which was renamed into this plugin; that package name is gone, and a first load still copies `~/.dsh/multi-repo/projects.json` forward when `bindings.json` is missing.
 
 ### [@just-genius/dsh-memory](plugins/dsh-memory)
 
