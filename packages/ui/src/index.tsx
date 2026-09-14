@@ -95,7 +95,6 @@ import {
   CodeBlock,
   DiffBlock,
   JsonBlock,
-  MessageText,
   ReadBlock,
   SearchBlock,
   TerminalBlock,
@@ -104,7 +103,6 @@ export {
   CodeBlock,
   DiffBlock,
   JsonBlock,
-  MessageText,
   ReadBlock,
   SearchBlock,
   TerminalBlock,
@@ -146,10 +144,6 @@ export {
   ensurePrimitivesFitStyles,
   fitRulesFor,
 } from './primitives-fit'
-// `JsonBlock` / `MessageText` do not publish named prop types, so derive them
-// from the components themselves.
-
-// `JsonBlock` / `MessageText` do not publish named prop types, so derive them
-// from the already-exported components.
+// `JsonBlock` does not publish a named prop type, so derive it from the
+// already-exported component.
 export type JsonBlockProps = ComponentProps<typeof JsonBlock>
-export type MessageTextProps = ComponentProps<typeof MessageText>

@@ -60,9 +60,24 @@ async function discoverManifests(root) {
   const paths = []
   const entries = await readdir(new URL(`../${root}/`, import.meta.url), { withFileTypes: true })
   for (const entry of entries) {
-    if (entry.isDirectory()) paths.push(`${root}/${entry.name}/package.json`)
+    if (!entry.isDirectory()) continue
+    // Only real workspace packages are contract-checked. A directory here
+    // without a manifest is not a package (stale build residue, a worktree
+    // leftover, or a scratch folder), so it must not crash the gate.
+    const manifest = new URL(`../${root}/${entry.name}/package.json`, import.meta.url)
+    if (!await exists(manifest)) continue
+    paths.push(`${root}/${entry.name}/package.json`)
   }
   return paths
+}
+
+async function exists(url) {
+  try {
+    await readFile(url, 'utf8')
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function discoverSourceFiles(root) {
