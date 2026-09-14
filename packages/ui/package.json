@@ -17,6 +17,11 @@
       "types": "./lib/css-modules.d.ts",
       "import": "./lib/css-modules.js"
     },
+    "./client-bundle-deps": {
+      "types": "./client-bundle-deps.ts",
+      "import": "./client-bundle-deps.mjs",
+      "default": "./client-bundle-deps.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -35,6 +40,7 @@
     "react-dom": ">=18.2.0"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.8",
     "clsx": "^2.1.1",
     "dompurify": "^3.2.4",
     "lightningcss": "^1.29.2",

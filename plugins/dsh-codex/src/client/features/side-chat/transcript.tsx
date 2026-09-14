@@ -5,7 +5,14 @@
  * compact: no details panel, no turn-tail actions, no queue chrome.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
 // Attachment reads live in the pure module so they can be tested without the
 // CSS-importing component graph this file pulls in.
 import {
@@ -74,6 +81,11 @@ import {
   type ToolVariant,
 } from './tool-presentation'
 import type { SideChatContextState } from '../../../shared/side-chat'
+import {
+  rawPendingOf,
+  recognizeWait,
+  type PendingInteractionsFace,
+} from './pending'
 import {
   DIFF_LABELS,
   MARKDOWN_LABELS,
@@ -982,6 +994,7 @@ export function SideChatTranscript({
   chat,
   t,
   sessionId,
+  pendingInteractions,
   api,
   uiConversation,
   contextState,
@@ -997,6 +1010,11 @@ export function SideChatTranscript({
   t: (key: string) => string
   /** Session id used to authorize durable image reads. */
   sessionId?: string
+  /**
+   * The session-keyed pending-interaction store. A pending approval or question
+   * counts as content, so the empty hero does not replace a live wait.
+   */
+  pendingInteractions?: PendingInteractionsFace | undefined
   /** The `IApiClient` face, for session-authorized image loading. */
   api?: ImageApi
   /** The `ctx.uiConversation` face: the main transcript's own image reads. */
@@ -1010,6 +1028,13 @@ export function SideChatTranscript({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
+  // A pending wait is content: subscribe to the same store the composer reads,
+  // so the hero yields to a live approval or question.
+  const carrier = useSyncExternalStore(
+    (fn) => (pendingInteractions === undefined ? () => {} : pendingInteractions.subscribe(fn)),
+    () => rawPendingOf(pendingInteractions, sessionId),
+  )
+  const wait = useMemo(() => recognizeWait(carrier), [carrier])
 
   // Runtime probe: record what BOTH sources carry on each update, so the
   // failing half (control face vs chat content) is read from the trace.
@@ -1040,10 +1065,14 @@ export function SideChatTranscript({
 
   // Content rows come from the chat target (order/nodes); control state
   // (running/queue) from the control snapshot. A side chat renders content the
-  // moment EITHER carries any.
+  // moment EITHER carries any. A PENDING interaction counts too: an approval or
+  // question is a live turn the user must answer, and the empty hero would
+  // otherwise replace it — the wait lives on `uiSession`, so it is read from
+  // the store the panel passes down rather than the control snapshot (DSH 0.1.5
+  // removed `snapshot.pending`).
   const chatRows = chatRowsOf<ChatConversationViewNode>(chat)
   const hasChat = (chat !== undefined && hasVisibleContent(chat)) || snapshot?.running === true
-    || (snapshot?.pending?.length ?? 0) > 0 || hasQueuedWork(snapshot)
+    || wait !== undefined || hasQueuedWork(snapshot)
 
   // Empty state: keep the hero, but render any context rows beneath it. A
   // freshly opened side chat's only node IS its inherited parent context, and

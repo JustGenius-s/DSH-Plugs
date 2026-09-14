@@ -211,6 +211,9 @@ function SettingsBody(props: CodexSettingsInjected) {
       {snapshot.status === 'unavailable' ? <p style={{ color: 'var(--dsw-alias-label-secondary)' }}>{t('statusUnavailable')}</p> : null}
 
       <Group title={t('groupConversation')}>
+        <FieldRow label={t('longMessageCollapseEnabled')}>
+          <Switch label={t('longMessageCollapseEnabled')} checked={value.longMessageCollapseEnabled} onChange={next => set('longMessageCollapseEnabled', next)} />
+        </FieldRow>
         <FieldRow label={t('stickyUserBubbleEnabled')}>
           <Switch label={t('stickyUserBubbleEnabled')} checked={value.stickyUserBubbleEnabled} onChange={next => set('stickyUserBubbleEnabled', next)} />
         </FieldRow>

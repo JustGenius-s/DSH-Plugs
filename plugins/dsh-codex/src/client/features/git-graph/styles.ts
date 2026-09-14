@@ -6,7 +6,7 @@ const GRAPH_CSS = `
 .dsh-git-graph-filter-wrap{display:inline-flex;width:fit-content;max-width:min(220px,100%)}
 .dsh-git-graph-filter-trigger{width:auto;max-width:100%;justify-content:flex-start;gap:6px}
 .dsh-git-graph-filter-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:18px}
-.dsh-git-graph-filter-pop{position:fixed;z-index:80;box-sizing:border-box;display:flex;flex-direction:column;min-width:220px;max-height:min(420px,70vh);padding:4px;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3)}
+.dsh-git-graph-filter-pop{position:fixed;z-index:80;box-sizing:border-box;display:flex;flex-direction:column;min-width:220px;max-height:min(420px,70vh);padding:4px;border:1px solid var(--dsw-alias-border-inverted);border-radius:12px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);-webkit-app-region:no-drag;app-region:no-drag}
 .dsh-git-graph-filter-search{flex:none;padding:4px 4px 6px}
 .dsh-git-graph-filter-query{display:flex;width:100%;box-sizing:border-box}
 .dsh-git-graph-filter-query input{width:100%;min-width:0;height:28px;font-size:13px}

@@ -4,6 +4,11 @@
   left: 50%;
   z-index: 1100;
   pointer-events: none;
+  /* Portaled to document.body, so the shell's top drag band may pass under it
+     (see Modal.module.css for the occluding-rect contract) — a toast carries
+     no interactive controls anyway, but it must not become a window grip. */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
   display: flex;
   align-items: center;
   gap: 10px;

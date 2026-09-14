@@ -1,18 +1,6 @@
-/**
- * Side-chat takeover for host-owned interrupts.
- *
- * The main conversation answers these through the composer chain
- * (`ApprovalPanel` / `QuestionComposer`). Side chat owns its own input bar,
- * so it has to consume `snapshot.pending` itself: approvals first, then
- * `ask_user_question` (including the plan-review presentation).
- */
+/** Cards answering one pending host interaction in a side chat. */
 
 import { useMemo, useState, type KeyboardEvent } from 'react'
-import type {
-  PendingInteraction,
-  PendingWait,
-  RunningToolCall,
-} from '@just-genius/dsh-plugin-runtime/client'
 import {
   Button,
   IconCheckOutline14,
@@ -24,61 +12,61 @@ import {
   IconEditOutline16,
   MarkdownText,
 } from '@just-genius/dsh-plugin-ui'
+import type { SideChatWait, WaitQuestionItem } from './pending'
 
 export interface SideChatInterruptProps {
-  wait: PendingInteraction
-  runningCalls?: readonly RunningToolCall[] | undefined
+  wait: SideChatWait
+  /** Chat content rows, used to pair an approval with the command it is asking about. */
+  chat?: ChatLike | undefined
   t: (key: string) => string
 }
 
-/** Pick the interrupt that should occupy the side-chat composer. */
-export function pickSideChatWait(
-  pending: readonly PendingInteraction[] | undefined,
-): PendingInteraction | undefined {
-  if (pending === undefined) return undefined
-  return pending.find(item => item.kind === 'approval')
-    ?? pending.find(item => item.kind === 'question')
+/** The slice of the chat content snapshot this card searches for a tool call. */
+export interface ChatLike {
+  order?: readonly string[]
+  nodes?: { get(key: string): unknown; values?(): readonly unknown[] }
 }
 
-/** Render the pending approval or question in place of the composer. */
-export function SideChatInterrupt({ wait, runningCalls, t }: SideChatInterruptProps) {
+/** Render the pending approval, plan review, or question in place of the composer. */
+export function SideChatInterrupt({ wait, chat, t }: SideChatInterruptProps) {
   if (wait.kind === 'approval') {
-    return <ApprovalCard wait={wait} runningCalls={runningCalls} t={t} />
+    return <ApprovalCard wait={wait} chat={chat} t={t} />
   }
   return <QuestionCard wait={wait} t={t} />
 }
 
+/**
+ * Deliver the user's decision for an approval.
+ *
+ * The carrier owns the wire encoding: `answer` resolves the host waterfall, so
+ * a caller never mints an outcome envelope (DSH 0.1.5 replaced the old
+ * `respond({ ok, value })` payload with this verb). A rejection is the
+ * carrier's own way of reporting a failed delivery.
+ */
+async function decide(wait: SideChatWait, outcome: 'allowed-once' | 'rejected'): Promise<void> {
+  const answer = wait.wait.answer as (value: unknown) => Promise<void>
+  await answer.call(wait.wait, outcome)
+}
+
 function ApprovalCard({
   wait,
-  runningCalls,
+  chat,
   t,
 }: {
-  wait: PendingWait<'approval'>
-  runningCalls?: readonly RunningToolCall[] | undefined
+  wait: SideChatWait
+  chat?: ChatLike | undefined
   t: (key: string) => string
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const command = commandOf(runningCalls, wait.payload.callId)
-  const headline = wait.payload.reason
-    ?? t('sideChat.approvalEscalation').replace('{toolName}', String(wait.payload.toolName ?? ''))
+  const command = commandOf(chat, wait.callId)
+  const headline = wait.reason
+    ?? t('sideChat.approvalEscalation').replace('{toolName}', String(wait.toolName ?? ''))
 
   const answer = (outcome: 'allowed-once' | 'rejected'): void => {
     setBusy(true)
     setError(null)
-    void wait.respond({
-      ok: true,
-      value: {
-        sessionId: wait.sessionId,
-        approvalId: wait.payload.approvalId,
-        outcome,
-      },
-    }).then((receipt) => {
-      if (!receipt.accepted) {
-        setBusy(false)
-        setError(receipt.reason ?? t('sideChat.interruptFailed'))
-      }
-    }).catch((cause) => {
+    void decide(wait, outcome).catch((cause) => {
       setBusy(false)
       setError(cause instanceof Error ? cause.message : t('sideChat.interruptFailed'))
     })
@@ -113,10 +101,10 @@ function QuestionCard({
   wait,
   t,
 }: {
-  wait: PendingWait<'question'>
+  wait: SideChatWait
   t: (key: string) => string
 }) {
-  const questions: readonly QuestionItem[] = (wait.payload.questions ?? []) as readonly QuestionItem[]
+  const questions = wait.questions
   const review = useMemo(() => planReviewOf(questions), [questions])
   if (review !== undefined) {
     return <PlanReviewCard wait={wait} review={review} t={t} />
@@ -158,7 +146,7 @@ function PlanReviewCard({
   review,
   t,
 }: {
-  wait: PendingWait<'question'>
+  wait: SideChatWait
   review: PlanReview
   t: (key: string) => string
 }) {
@@ -174,7 +162,7 @@ function PlanReviewCard({
     })
   }
 
-  const decide = (label: string): void => {
+  const decideLabel = (label: string): void => {
     settle(() => answerQuestion(wait, { answers: [{ id: review.id, selected: [label] }] }))
   }
 
@@ -207,7 +195,7 @@ function PlanReviewCard({
             onClick={() => {
               const decline = review.decline
               if (decline === undefined) return
-              decide(decline.label)
+              decideLabel(decline.label)
             }}
           >
             {t('sideChat.planDecline')}
@@ -218,7 +206,7 @@ function PlanReviewCard({
           size="sm"
           disabled={busy}
           title={review.approve.description}
-          onClick={() => decide(review.approve.label)}
+          onClick={() => decideLabel(review.approve.label)}
         >
           {t('sideChat.planApprove')}
         </Button>
@@ -232,8 +220,8 @@ function QuestionFlow({
   questions,
   t,
 }: {
-  wait: PendingWait<'question'>
-  questions: readonly QuestionItem[]
+  wait: SideChatWait
+  questions: readonly WaitQuestionItem[]
   t: (key: string) => string
 }) {
   const [index, setIndex] = useState(0)
@@ -246,9 +234,10 @@ function QuestionFlow({
   const [error, setError] = useState<string | null>(null)
   const [minimized, setMinimized] = useState(false)
 
-  const question = questions[index]
+  const raw = questions[index]
   const draft = drafts[index]
-  if (question === undefined || draft === undefined) return null
+  if (raw === undefined || draft === undefined) return null
+  const question = itemView(raw, index)
   const hasOptions = (question.options?.length ?? 0) > 0
 
   const updateDraft = (update: (current: Draft) => Draft): void => {
@@ -284,10 +273,11 @@ function QuestionFlow({
     const answer = {
       answers: questions.map((item, itemIndex) => {
         const value = values[itemIndex] ?? { selected: [], custom: '', skipped: true }
-        if (value.skipped) return { id: item.id, selected: [] as string[] }
+        const id = typeof item.id === 'string' ? item.id : String(itemIndex)
+        if (value.skipped) return { id, selected: [] as string[] }
         const custom = value.custom.trim()
         return {
-          id: item.id,
+          id,
           selected: custom === '' || item.multiSelect === true ? value.selected : [],
           ...(custom === '' ? {} : { custom }),
         }
@@ -339,14 +329,14 @@ function QuestionFlow({
         ? 'dsh-codex-sidechat-irq dsh-codex-sidechat-irq-min'
         : 'dsh-codex-sidechat-irq'}
       data-question-key={wait.key}
-      aria-labelledby={`sidechat-q-${wait.key}-${String(index)}`}
+      aria-labelledby={'sidechat-q-' + wait.key + '-' + String(index)}
     >
       <header className="dsh-codex-sidechat-irq-header">
         <div className="dsh-codex-sidechat-irq-heading">
           {question.header !== undefined && question.header.length > 0 && (
             <div className="dsh-codex-sidechat-irq-eyebrow">{question.header}</div>
           )}
-          <h2 className="dsh-codex-sidechat-irq-title" id={`sidechat-q-${wait.key}-${String(index)}`}>
+          <h2 className="dsh-codex-sidechat-irq-title" id={'sidechat-q-' + wait.key + '-' + String(index)}>
             {question.question}
           </h2>
         </div>
@@ -396,7 +386,7 @@ function QuestionFlow({
                 const display = parseRecommendedLabel(option.label)
                 return (
                   <button
-                    key={`${option.label}-${String(optionIndex)}`}
+                    key={option.label + '-' + String(optionIndex)}
                     type="button"
                     className={selected && question.multiSelect !== true
                       ? 'dsh-codex-sidechat-irq-option is-selected'
@@ -522,35 +512,69 @@ function QuestionFlow({
   )
 }
 
+/**
+ * Deliver the whole answer batch for one question request.
+ *
+ * The carrier resolves the host waterfall with the batch — a side chat never
+ * mints a result envelope. One ask is one answer: the batch must cover every
+ * question, which is why skipped questions are sent as empty selections
+ * instead of being omitted.
+ */
 async function answerQuestion(
-  wait: PendingWait<'question'>,
+  wait: SideChatWait,
   answer: { answers: readonly { id: string; selected: readonly string[]; custom?: string }[] },
 ): Promise<void> {
-  const receipt = await wait.respond({
-    ok: true,
-    value: { sessionId: wait.sessionId, answer },
-  })
-  if (!receipt.accepted) throw new Error(receipt.reason ?? 'question response rejected')
+  const send = wait.wait.answer as (value: unknown) => Promise<void>
+  await send.call(wait.wait, answer)
 }
 
-async function cancelQuestion(wait: PendingWait<'question'>): Promise<void> {
-  const receipt = await wait.respond({
-    ok: false,
-    error: {
-      code: 'cancelled',
-      message: 'the user closed this question request',
-      details: {},
-    },
-  })
-  if (!receipt.accepted) throw new Error(receipt.reason ?? 'question cancellation rejected')
+/** Close a question the user does not want to answer. */
+async function cancelQuestion(wait: SideChatWait): Promise<void> {
+  const cancel = wait.wait.cancel as () => Promise<void>
+  await cancel.call(wait.wait)
 }
 
-function commandOf(
-  runningCalls: readonly RunningToolCall[] | undefined,
-  callId: string | undefined,
-): string | undefined {
-  if (callId === undefined || runningCalls === undefined) return undefined
-  const call = findCall(runningCalls, callId)
+/**
+ * Normalize one loosely-typed question into what the cards render.
+ *
+ * The official item is an exact object type read across a plugin boundary, so
+ * every field is narrowed here rather than cast at each use site: a malformed
+ * question degrades to an empty prompt instead of rendering "undefined".
+ */
+function itemView(item: WaitQuestionItem, index: number): QuestionItem {
+  const options = Array.isArray(item.options) ? item.options : []
+  return {
+    id: typeof item.id === 'string' ? item.id : String(index),
+    question: typeof item.question === 'string' ? item.question : '',
+    ...(typeof item.detail === 'string' ? { detail: item.detail } : {}),
+    ...(typeof item.header === 'string' ? { header: item.header } : {}),
+    ...(item.multiSelect === true ? { multiSelect: true } : {}),
+    options: options.map(option => ({
+      label: typeof option?.label === 'string' ? option.label : '',
+      ...(typeof option?.description === 'string' ? { description: option.description } : {}),
+    })),
+    ...(intentView(item.intent) ?? {}),
+  }
+}
+
+function intentView(value: unknown): QuestionItem['intent'] | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const intent = value as { kind?: unknown; approve?: unknown }
+  if (intent.kind !== 'plan-review' || typeof intent.approve !== 'string') return undefined
+  return { kind: 'plan-review', approve: intent.approve }
+}
+
+/**
+ * The shell command an approval is asking about, when the call is in the window.
+ *
+ * Read off the CHAT content rows rather than the old `runningCalls` array: DSH
+ * 0.1.5 dropped that control-face field, and the tool lifecycle now lives only
+ * in the chat target's `tool-call` nodes — the same place the main
+ * conversation's approval panel reads it.
+ */
+function commandOf(chat: ChatLike | undefined, callId: string | undefined): string | undefined {
+  if (callId === undefined || callId === '' || chat === undefined) return undefined
+  const call = findCall(chat, callId)
   if (call === undefined) return undefined
   try {
     const args = JSON.parse(call.argsRaw) as { command?: unknown }
@@ -560,23 +584,53 @@ function commandOf(
   }
 }
 
-function findCall(blocks: readonly unknown[], callId: string): { argsRaw: string } | undefined {
-  for (const block of blocks) {
-    if (typeof block !== 'object' || block === null) continue
-    const rec = block as { callId?: unknown; argsRaw?: unknown; subCalls?: unknown }
-    if (rec.callId === callId && typeof rec.argsRaw === 'string') return { argsRaw: rec.argsRaw }
-    if (Array.isArray(rec.subCalls)) {
-      const found = findCall(rec.subCalls, callId)
-      if (found !== undefined) return found
-    }
+/** Find a root or nested tool call by id, walking the chat window's tool nodes. */
+function findCall(chat: ChatLike, callId: string): { argsRaw: string } | undefined {
+  const nodes = chat.nodes
+  if (nodes === undefined) return undefined
+  const rows = typeof nodes.values === 'function'
+    ? [...nodes.values()]
+    : (chat.order ?? []).map(key => nodes.get(key))
+  for (const row of rows) {
+    const root = toolRootOf(row)
+    if (root === undefined) continue
+    const found = visitCall(root, callId)
+    if (found !== undefined) return found
   }
   return undefined
 }
 
-function planReviewOf(questions: readonly QuestionItem[]): PlanReview | undefined {
+function toolRootOf(row: unknown): CallBlock | undefined {
+  if (row === null || typeof row !== 'object') return undefined
+  const node = row as { kind?: unknown; data?: unknown }
+  if (node.kind !== 'tool-call') return undefined
+  const data = node.data as { root?: unknown } | undefined
+  const root = data?.root
+  return root !== null && typeof root === 'object' ? root as CallBlock : undefined
+}
+
+interface CallBlock {
+  callId?: unknown
+  argsRaw?: unknown
+  subCalls?: unknown
+}
+
+function visitCall(block: CallBlock, callId: string): { argsRaw: string } | undefined {
+  if (block.callId === callId && typeof block.argsRaw === 'string') {
+    return { argsRaw: block.argsRaw }
+  }
+  if (!Array.isArray(block.subCalls)) return undefined
+  for (const child of block.subCalls) {
+    if (child === null || typeof child !== 'object') continue
+    const found = visitCall(child as CallBlock, callId)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+function planReviewOf(questions: readonly WaitQuestionItem[]): PlanReview | undefined {
   if (questions.length !== 1) return undefined
-  const question = questions[0]
-  if (question === undefined) return undefined
+  const question = itemView(questions[0] as WaitQuestionItem, 0)
   const intent = question.intent
   if (intent?.kind !== 'plan-review' || question.detail === undefined) return undefined
   if (question.multiSelect === true) return undefined

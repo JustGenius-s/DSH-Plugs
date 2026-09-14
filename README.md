@@ -22,6 +22,10 @@ Leader-plans / subagent-executes orchestration, **off until you run `/flow`**. O
 
 Multi-folder workspaces (Codex-style, no git scan): add folders one by one, pick one as the **primary** — the official workspace, session cwd, and workspace-write scope — while the rest stay readable and coordinatable. Bindings live in `~/.dsh/multi-repo/projects.json` and are injected into the system prompt.
 
+### [@just-genius/dsh-workspace-plus](plugins/dsh-workspace-plus)
+
+Workspace enhancement that supersedes installing `dsh-multi-repo` plus a row-menu plugin together: attach multiple folders to one workspace (primary folder is the official cwd / workspace-write scope), and add double-click / right-click menus on workspace and session rows — pin, rename, unread, archive, fork, open folder. Bindings live in `~/.dsh/workspace-plus/bindings.json`. Session menus do not offer permanent delete.
+
 ### [@just-genius/dsh-memory](plugins/dsh-memory)
 
 Global markdown memory: **Settings → Memory** for manual CRUD, `memory_propose` for AI writes that wait for user confirmation, and enabled entries injected into the system prompt. Stored under `~/.dsh/memory/` as `index.json` + `entries/*.md`.
@@ -49,6 +53,14 @@ Click a `dsh-notification` system banner to focus the window and open that sessi
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
 **Settings → 插件管理** in one tab for two kinds: Cordis npm plugins (awesome-dsh-plugin marketplace + profile inventory) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis plugins still need restart. Replaces the official read-only Plugin list.
+
+### [@just-genius/dsh-quick-notes](plugins/dsh-quick-notes)
+
+随手笔记: floating sticky-note cards over the shell, with a search overlay (**Mod+Shift+F**; **Mod+Shift+N** opens a new note). Cards are WYSIWYG — `# ` becomes a heading as you type, `- [ ]` a real checkbox, a GFM table stays an editable table — while the note on disk stays plain Markdown. A model round mints a title and up to 3 tags; renaming by hand freezes further AI overwrites. **Settings → 随手笔记** manages the library (search, tags, pin / archive / delete, bulk actions). Notes are global rather than per-workspace, under `$DSH_HOME/quick-notes`, and every write is atomic (temp file + rename).
+
+### [dsh-synapse](plugins/dsh-synapse)
+
+A visual, non-linear conversation workspace (vendored from [liangmianya/dsh-synapse](https://github.com/liangmianya/dsh-synapse) 0.4.1): the sessions, follow-ups, and forks of one workspace drawn as a draggable, zoomable map, reached from the top-level **会话地图** switch and served at `/synapse`. DSH's session log stays the single source of truth — Synapse projects committed events only, connects cards by the real fork edges instead of building a second history, and keeps its canvas layout in `$DSH_HOME/synapse/`, so deleting that directory never deletes a session. A card can also save its answer into a 随手笔记 note. Web profile only, reusing the existing DSH server. It is the one plugin that is plain root-level JS (`index.js` / `client.js` / `app.js`, built with `node --check`) — no `@just-genius` scope, no shared runtime, no `typecheck`.
 
 ### [@just-genius/dsh-whale-girl](plugins/dsh-whale-girl)
 

@@ -66,6 +66,29 @@ mounted official title seat. Switching tabs only detaches its DOM; aborting the
 official `tab.signal` unmounts the retained panel and closes the temporary Host
 session.
 
+## Prose file mentions
+
+An assistant's closing prose carries inline-code file mentions, rendered by DSH's
+markdown sheet as `<code><button title="<path>">token</button></code>`. DSH owns
+the vocabulary (`chatFileMentions`, provided by `ui-deliverables`), and a plugin
+cannot re-register it: Cordis throws on a second `provide` for a name. What it
+routes to is also inconsistent — a tool-produced path opens the right Sidebar,
+while a path declared only through `present` POSTs to a native "open in the
+default application" route instead.
+
+`features/file-mentions/` therefore adopts the **click**, not the vocabulary. It
+listens on `document` in the CAPTURE phase, which runs before React's
+root-container listener, so one `stopPropagation()` keeps the host's own handler
+from also running. The rules are in `model.ts`:
+`mentionPathFromFacts` claims only a button inside `<code>` (every other button in
+the transcript — cards, tool rows, the action strip — has a different parent) and
+reads the path from its `title`; a modified click is deliberately NOT adopted,
+which is what keeps the host's default-application action reachable. An open that
+cannot work — no current Session, or a path outside the workspace, which becomes
+an `absolute` address the official preview declines — returns `false` and leaves
+the event untouched, so the failure mode is the product's own behavior rather
+than a dead chip.
+
 ## Error reporting
 
 `error-boundary.tsx` is shared, cross-feature client infrastructure — it sits

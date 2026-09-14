@@ -19,6 +19,11 @@ export default defineConfig({
   alias: {
     '@just-genius/dsh-plugin-runtime/client': sharedRuntimeClient,
   },
+  // DSH registers one client module factory per plugin entry. Any relative
+  // chunk emitted by Rolldown is not a separately registered module.
+  outputOptions: {
+    codeSplitting: false,
+  },
   // alwaysBundle inlines the shared UI package (never a runtime dep) beside
   // the terminal/shiki stacks. markdown-it is a production dependency, which
   // tsdown externalizes by default — so it must be inlined here too. Only the

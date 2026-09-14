@@ -34,7 +34,9 @@ import type {
   ConversationNodeDefinition,
   ISessions,
   IWorkspaces,
+  SessionId,
   SnapshotStore,
+  WorkspaceId,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   SessionEvent as CoreSessionEvent,
@@ -164,6 +166,16 @@ export interface PluginSlotMap {}
 /** Plugin-owned conversation node payloads bridged into the chat renderer. */
 export interface PluginChatNodeDataMap {}
 
+/** DSH 0.1.2 split directory/navigation commands out of `workspaces`. */
+export interface UiWorkspaceFace {
+  openWorkspace?: (workspaceId: WorkspaceId) => Promise<void>
+  openSession?: (sessionId: SessionId) => void
+  forkSession?: (sessionId: SessionId) => Promise<void>
+  startSession?: (workspaceId?: WorkspaceId) => void
+  archiveSession?: (sessionId: SessionId) => Promise<void>
+  pickDirectory: () => Promise<string | null>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context extends PluginClientContext {}
 }
@@ -219,6 +231,28 @@ export type {
   ReferenceInsert,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 export type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+/**
+ * Chat-target selector hook, surfaced to slot components as `useChat`.
+ *
+ * This is the only hook that carries chat rows (`order` / `nodes`):
+ * `useSession` exposes Session LIFECYCLE facts and `useConversation` exposes
+ * the target-keyed `views` store, so reading rows off either of those yields
+ * `undefined`. That is the 0.1.2 shape change that silently emptied features
+ * written against the old flat `snapshot.chat`.
+ *
+ * Declared structurally rather than re-exported from dsh-client-ui-chat: that
+ * package resolves a second cordis instance here, which breaks dts bundling.
+ * Types only — no runtime dependency is added.
+ */
+export type UseChat = <S>(
+  selector: (snapshot: {
+    readonly order: readonly string[]
+    readonly nodes: {
+      get(key: string): { kind?: string; data?: unknown } | undefined
+    }
+  }) => S,
+  isEqual?: (a: S, b: S) => boolean,
+) => S
 export type {
   InjectFace,
   PropsLocale,
@@ -367,6 +401,8 @@ export const CLIENT_SERVICES = {
   conversationEvents: 'conversationEvents',
   /** Conversation registries (`events` / `views`) since DSH 0.1.2. */
   uiConversation: 'uiConversation',
+  /** Session-scoped UI state, including the 0.1.5 pending-interaction store. */
+  uiSession: 'uiSession',
   inputTriggers: 'inputTriggers',
   locale: 'locale',
   modelDirectories: 'modelDirectories',
@@ -386,6 +422,7 @@ export const CLIENT_SERVICES = {
   slots: 'slots',
   settingsScope: 'settingsScope',
   settingsSchema: 'settingsSchema',
+  uiWorkspace: 'uiWorkspace',
   workspaces: 'workspaces',
 } as const
 
@@ -410,7 +447,7 @@ export function getConversationEventRegistry(
 }
 
 export function getConnection(ctx: ClientContext): ConnectionHandle {
-  return ctx.get('connection') as ConnectionHandle
+  return ctx.get('connection') as unknown as ConnectionHandle
 }
 
 export function getRemote(ctx: ClientContext): ClientRemote {
@@ -423,6 +460,13 @@ export function getSessions(ctx: ClientContext): ISessions {
 
 export function getWorkspaces(ctx: ClientContext): IWorkspaces {
   return ctx.workspaces
+}
+
+/** Resolve the Workspace UI service introduced by the 0.1.2 service split. */
+export function getUiWorkspace(ctx: ClientContext): UiWorkspaceFace {
+  const service = ctx.get(CLIENT_SERVICES.uiWorkspace) as UiWorkspaceFace | undefined
+  if (service === undefined) throw new Error('uiWorkspace service is unavailable')
+  return service
 }
 
 export function getSettingsScope(ctx: ClientContext): SettingsScopeBinder {
@@ -494,4 +538,99 @@ export function postResult<T>(path: string, body: unknown): Promise<T> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+export interface SessionModelCatalogModel {
+  id: string
+  name: string
+}
+
+export interface SessionModelCatalogGroup {
+  id: string
+  name: string
+  models: readonly SessionModelCatalogModel[]
+}
+
+export interface SessionModelCatalogFailure {
+  id: string
+  name: string
+  message: string
+}
+
+export interface SessionModelCatalog {
+  current?: { provider: string; model: string }
+  groups: readonly SessionModelCatalogGroup[]
+  failures: readonly SessionModelCatalogFailure[]
+}
+
+interface SessionModelRemote {
+  modelCatalog?: () => Promise<{ ok?: boolean; value?: unknown }>
+}
+
+function modelRemoteOf(ctx: { get(name: string): unknown }): SessionModelRemote | undefined {
+  try {
+    const remote = ctx.get(CLIENT_SERVICES.remoteSession)
+    return remote == null || typeof remote !== 'object' ? undefined : remote as SessionModelRemote
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeSessionModelCatalog(raw: unknown): SessionModelCatalog | undefined {
+  if (raw == null || typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  const groups = (Array.isArray(record.groups) ? record.groups : [])
+    .filter((group): group is SessionModelCatalogGroup => (
+      group != null
+      && typeof group === 'object'
+      && Array.isArray((group as SessionModelCatalogGroup).models)
+      && (group as SessionModelCatalogGroup).models.length > 0
+    ))
+  const failures = Array.isArray(record.failures) ? record.failures as SessionModelCatalogFailure[] : []
+  const selected = record.default
+  const current = selected != null && typeof selected === 'object'
+    ? selected as { provider: string; model: string }
+    : undefined
+  return { current, groups, failures }
+}
+
+/** One-shot read of the session model directory. Missing remotes degrade to undefined. */
+export async function readSessionModelCatalog(
+  ctx: { get(name: string): unknown },
+): Promise<SessionModelCatalog | undefined> {
+  try {
+    const remote = modelRemoteOf(ctx)
+    if (remote === undefined || typeof remote.modelCatalog !== 'function') return undefined
+    const result = await remote.modelCatalog()
+    if (result == null || result.ok === false) return undefined
+    return normalizeSessionModelCatalog(result.value)
+  } catch {
+    return undefined
+  }
+}
+
+export interface SessionModelCatalogWaitOptions {
+  timeoutMs?: number
+  intervalMs?: number
+}
+
+/**
+ * Wait until `remote.session` is mounted, then read the model directory.
+ *
+ * `dsh-api-remotes` attaches namespaces asynchronously. A single read on
+ * mount can miss the catalog and leave a picker disabled for the session.
+ */
+export async function readSessionModelCatalogWhenReady(
+  ctx: { get(name: string): unknown },
+  options: SessionModelCatalogWaitOptions = {},
+): Promise<SessionModelCatalog | undefined> {
+  const timeoutMs = options.timeoutMs ?? 8_000
+  const intervalMs = options.intervalMs ?? 50
+  const started = Date.now()
+  while (true) {
+    const catalog = await readSessionModelCatalog(ctx)
+    if (catalog !== undefined) return catalog
+    if (Date.now() - started >= timeoutMs) return undefined
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+  }
 }

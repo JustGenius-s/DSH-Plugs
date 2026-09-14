@@ -17,6 +17,9 @@ export const CODEX_CLIENT_INJECT = [
   CLIENT_SERVICES.conversation,
   // Durable image reads, matching the main transcript.
   CLIENT_SERVICES.uiConversation,
+  // Session-scoped UI state: the 0.1.5 pending-interaction store that carries
+  // approvals and questions into the side chat's composer.
+  CLIENT_SERVICES.uiSession,
   CLIENT_SERVICES.sessions,
   // DSH 0.1.5+ owns the right-Sidebar shell; this plugin contributes tab types.
   CLIENT_SERVICES.sidebarRight,

@@ -8,18 +8,21 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-title'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-workspace'
 
 // Preserve service declaration merging in the public host declaration file.
 export type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -27,37 +30,55 @@ export type {} from '@deepseek-ai/dsh-agent'
 export type {} from '@deepseek-ai/dsh-agent-default-model'
 export type {} from '@deepseek-ai/dsh-agent-presets'
 export type {} from '@deepseek-ai/dsh-commands'
+export type {} from '@deepseek-ai/dsh-client-connection'
 export type {} from '@deepseek-ai/dsh-credentials'
 export type {} from '@deepseek-ai/dsh-fs'
 export type {} from '@deepseek-ai/dsh-host-webserver'
 export type {} from '@deepseek-ai/dsh-jobs'
 export type {} from '@deepseek-ai/dsh-llm'
 export type {} from '@deepseek-ai/dsh-session'
+export type {} from '@deepseek-ai/dsh-session-persistence'
 export type {} from '@deepseek-ai/dsh-session-title'
 export type {} from '@deepseek-ai/dsh-settings'
 export type {} from '@deepseek-ai/dsh-storage-domain'
 export type {} from '@deepseek-ai/dsh-subprocess'
 export type {} from '@deepseek-ai/dsh-system-prompt'
 export type {} from '@deepseek-ai/dsh-tools'
+export type {} from '@deepseek-ai/dsh-workspace'
 
 export { symbols } from '@deepseek-ai/cordis'
 export type { Context } from '@deepseek-ai/cordis'
 export type { Entry } from '@deepseek-ai/cordis-plugin-loader'
 export { default as Schema } from '@deepseek-ai/schemastery'
 export type { Agent, AgentRegistry } from '@deepseek-ai/dsh-agent'
-export { resolveSessionPreset } from '@deepseek-ai/dsh-agent-presets'
+/**
+ * Preset resolution that survives a session with no readable log.
+ *
+ * Upstream's `resolveSessionPreset` indexes `session.events.length` directly,
+ * and a Session whose `events` getter has not resolved yet reads undefined —
+ * which threw
+ *   TypeError: Cannot read properties of undefined (reading 'length')
+ * from inside dsh-agent-presets and failed the whole side-chat open request,
+ * with no handler able to describe it. The local re-export keeps the same
+ * contract but treats a missing log as "header value only" (see
+ * session-preset.ts) instead of crashing.
+ */
+export { resolveSessionPreset } from './session-preset.ts'
+export type { PresetBearingSession } from './session-preset.ts'
+export { sessionEventsOf } from './session-events.ts'
 export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
+export { fallbackSessionTitle } from '@deepseek-ai/dsh-session-title'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
 export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 export { SessionId } from '@deepseek-ai/dsh-session'
-export type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
+export type { Session, SessionEvent, SessionHeader, UserMessage } from '@deepseek-ai/dsh-session'
 /**
  * Context handed to every `systemPrompt` provider at assembly time.
  *
- * Declaration-merged by the agent layer (`agent`), so prompt providers read the
- * running agent's session through it.
+ * Declaration-merged by the agent layer (`agent`), so prompt providers read
+ * the running agent's session through it.
  */
 export type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 export { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
@@ -76,6 +97,7 @@ export const HOST_SERVICES = {
   agentDefaultModel: 'agentDefaultModel',
   agentPresets: 'agentPresets',
   commands: 'commands',
+  connection: 'connection',
   credentials: 'credentials',
   fs: 'fs',
   jobs: 'jobs',
@@ -84,12 +106,14 @@ export const HOST_SERVICES = {
   pluginProfile: 'pluginProfile',
   sessionTitle: 'sessionTitle',
   sessions: 'sessions',
+  sessionPersistence: 'sessionPersistence',
   settings: 'settings',
   storageDomain: 'storageDomain',
   subprocess: 'subprocess',
   systemPrompt: 'systemPrompt',
   tools: 'tools',
   webServer: 'webServer',
+  workspaceRegistry: 'workspaceRegistry',
 } as const
 
 export class HttpInputError extends Error {
