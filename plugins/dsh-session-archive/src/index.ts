@@ -223,9 +223,14 @@ function iterableEvents(events: unknown): SessionEvent[] | null {
   }
 }
 
+// The runtime hands over a `SessionPersistence` whose ids are the branded
+// `SessionId`, so this reader must accept that brand rather than a bare string
+// — otherwise the call site cannot pass `ctx.sessionPersistence` at all. The
+// `never` parameter makes the id bivariant: any id type is accepted while the
+// structural shape of the returned inspection stays checked.
 interface PersistenceReader {
-  inspect?: (id: string) => Promise<{ events?: unknown; meta?: { createdAt?: number } }>
-  open?: (id: string, access: 'read' | 'write') => Promise<{
+  inspect?: (id: never, signal?: AbortSignal) => Promise<{ events?: unknown; meta?: { createdAt?: number } }>
+  open?: (id: never, access: 'read' | 'write') => Promise<{
     header?: { createdAt?: number }
     read: () => Promise<{ events?: unknown }>
     close?: () => Promise<void>
@@ -233,9 +238,10 @@ interface PersistenceReader {
 }
 
 async function readPersistedEvents(persistence: PersistenceReader, sessionId: string): Promise<{ events: SessionEvent[]; createdAt?: number } | null> {
+  const id = sessionId as never
   if (typeof persistence.inspect === 'function') {
     try {
-      const inspection = await persistence.inspect(sessionId)
+      const inspection = await persistence.inspect(id)
       const events = iterableEvents(inspection?.events)
       if (events !== null) return { events, createdAt: inspection?.meta?.createdAt }
       if (inspection?.meta?.createdAt !== undefined) return { events: [], createdAt: inspection.meta.createdAt }
@@ -246,7 +252,7 @@ async function readPersistedEvents(persistence: PersistenceReader, sessionId: st
   if (typeof persistence.open !== 'function') return null
   let handle: Awaited<ReturnType<NonNullable<PersistenceReader['open']>>> | undefined
   try {
-    handle = await persistence.open(sessionId, 'read')
+    handle = await persistence.open(id, 'read')
     const result = await handle.read()
     const events = iterableEvents(result?.events) ?? []
     return { events, createdAt: handle.header?.createdAt }
