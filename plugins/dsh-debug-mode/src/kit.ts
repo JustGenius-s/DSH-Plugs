@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Session } from '@just-genius/dsh-plugin-runtime/host'
-import { LOG_CJS, LOG_MJS, LOG_PY, LOG_SH } from './helpers.ts'
+import { LOG_CJS, LOG_MJS, LOG_PY, LOG_SH, LOG_UNLOAD, renderBrowserLogHelper } from './helpers.ts'
 import {
   DEBUG_KIT_DIR,
   DEBUG_LOG_FILE,
@@ -54,6 +54,8 @@ function writeDebugKit(cwd: string, sink: IngestSink): DebugKit {
   writeFileSync(join(dir, 'log.cjs'), LOG_CJS, 'utf8')
   writeFileSync(join(dir, 'log.py'), LOG_PY, 'utf8')
   writeFileSync(join(dir, 'log.sh'), LOG_SH, 'utf8')
+  writeFileSync(join(dir, 'log.browser.js'), renderBrowserLogHelper(sink), 'utf8')
+  writeFileSync(join(dir, 'unload.mjs'), LOG_UNLOAD, 'utf8')
   const payload: SinkFile = {
     url: sink.url,
     sessionId: sink.sessionId,
@@ -86,6 +88,26 @@ export function clearLogFile(kit: DebugKit | null): void {
   }
 }
 
+/** Copy the live JSONL onto \`debug.<runId>.log\`, then empty the live file. */
+export function archiveLogFile(kit: DebugKit | null, runId: string): string | null {
+  if (kit === null || !existsSync(kit.logFile)) return null
+  const safe = runId.replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80)
+  if (safe === '') return null
+  const dest = join(dirname(kit.logFile), `debug.${safe}.log`)
+  try {
+    const text = readFileSync(kit.logFile, 'utf8')
+    if (text.trim() === '') {
+      writeFileSync(kit.logFile, '', 'utf8')
+      return null
+    }
+    appendFileSync(dest, text.endsWith('\n') ? text : `${text}\n`)
+    writeFileSync(kit.logFile, '', 'utf8')
+    return dest
+  } catch {
+    return null
+  }
+}
+
 export function loadLogFile(kit: DebugKit | null): DebugLogEntry[] {
   if (kit === null || !existsSync(kit.logFile)) return []
   try {
@@ -112,12 +134,26 @@ function parseLogLine(line: string): DebugLogEntry | null {
     if (typeof raw.text !== 'string') return null
     const text = raw.text.trim()
     if (text === '') return null
-    return {
+    const entry: DebugLogEntry = {
       id: typeof raw.id === 'string' ? raw.id : mintDebugId('log'),
       at: typeof raw.at === 'number' ? raw.at : Date.now(),
       source: asSource(raw.source),
       text: text.length > MAX_INGEST_LINE ? text.slice(0, MAX_INGEST_LINE) : text,
     }
+    if (typeof raw.hypothesisId === 'string' && raw.hypothesisId.trim() !== '') {
+      entry.hypothesisId = raw.hypothesisId.trim()
+    }
+    if (typeof raw.location === 'string' && raw.location.trim() !== '') {
+      entry.location = raw.location.trim()
+    }
+    if (typeof raw.runId === 'string' && raw.runId.trim() !== '') {
+      entry.runId = raw.runId.trim()
+    }
+    if (typeof raw.count === 'number' && Number.isFinite(raw.count) && raw.count > 1) {
+      entry.count = Math.floor(raw.count)
+    }
+    if (raw.data !== undefined) entry.data = raw.data
+    return entry
   } catch {
     return {
       id: mintDebugId('log'),

@@ -11,6 +11,9 @@ const EMPTY: DebugProjection = {
   wait: null,
   logs: [],
   logFile: null,
+  runId: null,
+  runs: [],
+  hypotheses: [],
 }
 
 /** Poll the host-only debug projection for one session (state is not persisted). */
@@ -26,7 +29,14 @@ export function useDebugState(sessionId: string): DebugProjection {
       try {
         const value = await getResult<DebugProjection>(`${STATE_PATH}?sessionId=${encodeURIComponent(sessionId)}`)
         if (!aliveRef.current) return
-        setState(value)
+        setState({
+          ...EMPTY,
+          ...value,
+          logs: value.logs ?? EMPTY.logs,
+          runId: value.runId ?? null,
+          runs: value.runs ?? EMPTY.runs,
+          hypotheses: value.hypotheses ?? EMPTY.hypotheses,
+        })
       } catch {
         // Keep the last good snapshot; the next tick retries.
       }

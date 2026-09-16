@@ -9,19 +9,34 @@ import { DEBUG_POLICY } from './policy.ts'
 import { sessionEvents } from './session-events.ts'
 import {
   appendLogFile,
+  archiveLogFile,
   clearLogFile,
   installDebugKit,
   loadLogFile,
   type DebugKit,
 } from './kit.ts'
+import { collectIngestLines } from './ingest.ts'
+import { foldDuplicateLog } from './dedup.ts'
+import { parseHypothesisStatus, upsertHypothesis, type DebugHypothesis } from './hypotheses.ts'
+import { formatCompareLogs, lastArchivedRun, startRun, type DebugRun } from './runs.ts'
+import { resolveIngestSessionId } from './resolve.ts'
+import { effectiveDebugOn } from './view.ts'
+import { corsHeaders } from './cors.ts'
+import { browserIngestUrl, startIngestSidecar } from './ingest-server.ts'
+import {
+  appendDebugMode,
+  foldDebugActive,
+  sessionCanPersistDebug,
+  type IgnorableAppendSession,
+} from './persist.ts'
 import {
   CLEAR_PATH,
+  COMMAND_PATH,
+  DEBUG_BROWSER_LOG,
   DEBUG_KIT_DIR,
   DEBUG_LOG,
   DEBUG_LOG_FILE,
   LOGS_PATH,
-  MAX_INGEST_BATCH,
-  MAX_INGEST_LINE,
   REPRO_PATH,
   STATE_PATH,
   WAIT_FOR_REPRO,
@@ -37,10 +52,11 @@ import {
 import type { DebugProjection } from './types.ts'
 
 export type { DebugProjection } from './types.ts'
-export { CLEAR_PATH, DEBUG_LOG, LOGS_PATH, REPRO_PATH, STATE_PATH, WAIT_FOR_REPRO } from './shared.ts'
+export { CLEAR_PATH, COMMAND_PATH, DEBUG_LOG, LOGS_PATH, REPRO_PATH, STATE_PATH, WAIT_FOR_REPRO } from './shared.ts'
 
 export const name = 'dsh-debug-mode'
 export const inject = [
+  HOST_SERVICES.agents,
   HOST_SERVICES.tools,
   HOST_SERVICES.systemPrompt,
   HOST_SERVICES.sessions,
@@ -49,9 +65,8 @@ export const inject = [
 
 /**
  * Live debug collaboration state for one session.
- * Kept in process memory only — writing `debug/*` into the durable session log
- * would poison reload, because those types are outside KNOWN_SESSION_EVENT_TYPES
- * and Session.append cannot mark them `ignorable`.
+ * Mode stance may persist as ignorable `debug/mode` on 0.1.6+.
+ * Runs, hypotheses, and the open wait stay process-local.
  */
 interface SessionDebugState {
   active: boolean
@@ -59,6 +74,9 @@ interface SessionDebugState {
   wanted: boolean | null
   wait: DebugReproWait | null
   logs: DebugLogEntry[]
+  runId: string | null
+  runs: DebugRun[]
+  hypotheses: DebugHypothesis[]
   /** Workspace kit written on /debug; null when the session has no cwd. */
   kit: DebugKit | null
   /** Last mode value narrated into the model context for this process lifetime. */
@@ -76,11 +94,15 @@ interface ReproResult {
   verdict: DebugReproVerdict
   notes: string
   logs: string
+  previousLogs: string
+  runId: string
+  previousRunId: string
 }
 
 const WAIT_DESCRIPTION = 'Debug mode only. Markdown starting with # Reproduction Steps, then a numbered list. '
   + 'Remind the user to restart anything that must load new probes. Do not ask them to type done. '
-  + 'Call this and stop. After Proceed/fixed, read verdict/notes/logs and continue from evidence.'
+  + 'Archives the live dock as the previous run (pre-fix stays on disk). Optional runId: pre-fix or post-fix. '
+  + 'Call this and stop. After Proceed/fixed, read verdict/notes/logs/previousLogs and continue from evidence.'
 
 const EMPTY_VIEW: DebugProjection = {
   active: false,
@@ -88,6 +110,9 @@ const EMPTY_VIEW: DebugProjection = {
   wait: null,
   logs: [],
   logFile: null,
+  runId: null,
+  runs: [],
+  hypotheses: [],
 }
 
 export function apply(ctx: Context): void {
@@ -108,11 +133,13 @@ export function apply(ctx: Context): void {
     const decision = await next()
     if (decision.kind === 'reject' || signal.aborted) return decision
     const sessionId = String(agent.session.id)
+    const session = agent.session
+    hydrate(store, session, ingestSink(ctx, sessionId))
     const state = store.get(sessionId)
     if (state === undefined || state.wanted === null) return decision
     const target = state.wanted
     const narration = narrationFor(state, target, ingestSink(ctx, sessionId))
-    commitWanted(state)
+    commitWanted(state, session)
     return narration === undefined
       ? decision
       : { ...decision, messages: [...decision.messages, narration] }
@@ -123,9 +150,10 @@ export function apply(ctx: Context): void {
     order: 51,
     text: (context) => {
       if (context.agent === undefined) return ''
-      const state = store.get(String(context.agent.session.id))
-      if (state === undefined) return ''
-      const on = state.wanted ?? state.active
+      const session = context.agent.session
+      const sessionId = String(session.id)
+      const state = hydrate(store, session, ingestSink(ctx, sessionId))
+      const on = state.wanted ?? loggedActive(session, state)
       return on ? DEBUG_POLICY : ''
     },
   })
@@ -135,50 +163,20 @@ export function apply(ctx: Context): void {
     order: 52,
     text: (context) => {
       if (context.agent === undefined) return ''
-      const sessionId = String(context.agent.session.id)
-      const state = store.get(sessionId)
-      if (state === undefined) return ''
-      const on = state.wanted ?? state.active
-      return on ? formatIngestBlock(ingestSink(ctx, sessionId), state.kit) : ''
+      const session = context.agent.session
+      const sessionId = String(session.id)
+      const sink = ingestSink(ctx, sessionId)
+      const state = hydrate(store, session, sink)
+      const on = state.wanted ?? loggedActive(session, state)
+      return on ? formatIngestBlock(sink, state.kit) : ''
     },
   })
 
-  ctx.inject([HOST_SERVICES.commands], (commandCtx) => {
-    commandCtx.commands.register({
-      name: 'debug',
-      description: 'Enter or leave debug mode',
-      input: { hint: '[off|message]' },
-      handler: ({ agent, rawInput }) => {
-        const message = rawInput.trim()
-        const sink = ingestSink(ctx, String(agent.session.id))
-        if (message === 'off') {
-          cancelWait(waits, String(agent.session.id), new Error('The user left debug mode.'))
-          closeOpenWait(store, agent.session)
-          switch (setDebugMode(store, agent, false, sink)) {
-            case 'committed':
-              return { kind: 'success', text: 'Debug mode off.' }
-            case 'queued':
-              return { kind: 'success', text: 'Leaving debug mode (applies from the next step).' }
-            case 'cancelled':
-              return { kind: 'success', text: 'Debug mode entry cancelled.' }
-            case 'noop':
-              return isActive(store, agent.session)
-                ? { kind: 'success', text: 'Leaving debug mode (applies from the next step).' }
-                : { kind: 'success', text: 'Debug mode is already inactive.' }
-          }
-        }
-        const outcome = setDebugMode(store, agent, true, sink)
-        attachKit(store, agent.session, sink)
-        if (message !== '') {
-          agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
-        }
-        return {
-          kind: 'success',
-          text: formatDebugOnCommand(outcome, store.get(String(agent.session.id))?.kit ?? null),
-        }
-      },
-    })
-  })
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: COMMAND_PATH,
+    handler: (req, res) => handleCommand(ctx, store, waits, req, res),
+  }), 'dsh-debug-mode: command route')
 
   ctx.tools.register(defineTool({
     name: WAIT_FOR_REPRO,
@@ -189,6 +187,10 @@ export function apply(ctx: Context): void {
         required: true,
         description: 'The complete reproduction steps, as markdown, starting with a # heading that names them.',
       },
+      runId: {
+        type: 'string',
+        description: 'Optional run bucket. First wait defaults to pre-fix; the next to post-fix.',
+      },
     },
     output: {
       schema: {
@@ -198,6 +200,9 @@ export function apply(ctx: Context): void {
           verdict: { type: 'string', required: true },
           notes: { type: 'string', required: true },
           logs: { type: 'string', required: true },
+          previousLogs: { type: 'string', required: true },
+          runId: { type: 'string', required: true },
+          previousRunId: { type: 'string', required: true },
         },
       },
       render: (_args, value) => [{ type: 'text', text: renderReproResult(value as ReproResult) }],
@@ -208,14 +213,17 @@ export function apply(ctx: Context): void {
       if (!isActive(store, agent.session)) {
         throw new Error(`${WAIT_FOR_REPRO} is only available in debug mode`)
       }
-      if (!/^#\s+\S/.test(args.steps.trim())) {
+      const steps = toolString(args.steps)
+      if (!/^#\s+\S/.test(steps.trim())) {
         throw new Error(`${WAIT_FOR_REPRO} requires markdown steps starting with a # heading`)
       }
       if (disposed) throw new Error('debug mode was reloaded; present the steps again')
 
       const sessionId = String(agent.session.id)
+      const requestedRun = toolString(args.runId).trim()
+      beginRun(store, agent.session, requestedRun === '' ? undefined : requestedRun)
       cancelWait(waits, sessionId, new Error('A newer reproduction wait replaced this one.'))
-      const wait: DebugReproWait = { id: mintDebugId('repro'), steps: args.steps, waiting: true }
+      const wait: DebugReproWait = { id: mintDebugId('repro'), steps, waiting: true }
       ensureState(store, sessionId).wait = wait
 
       return await new Promise<ReproResult>((resolve, reject) => {
@@ -246,9 +254,9 @@ export function apply(ctx: Context): void {
     },
     presentCall: args => ({
       card: 'generic',
-      title: firstHeading(args.steps) ?? 'Reproduction Steps',
+      title: firstHeading(toolString(args.steps)) ?? 'Reproduction Steps',
       kind: 'other',
-      content: [{ type: 'text', text: args.steps }],
+      content: [{ type: 'text', text: toolString(args.steps) }],
     }),
     presentResult: (_args, result) => ({
       card: 'generic',
@@ -260,12 +268,20 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: DEBUG_LOG,
-    description: 'One-line note in the Debug Logs dock. Your hypotheses only — program evidence must go through the .dsh/debug helper.',
+    description: 'Register or score a hypothesis, or leave a note. Runtime evidence still goes through ingest. Pass hypothesisId and optional status (open|confirmed|rejected|inconclusive).',
     parameters: {
       message: {
         type: 'string',
         required: true,
-        description: 'One log line to show in the Debug Logs dock.',
+        description: 'Hypothesis statement, or a one-line note in the dock.',
+      },
+      hypothesisId: {
+        type: 'string',
+        description: 'Stable hypothesis letter or id (A, H-C, …).',
+      },
+      status: {
+        type: 'string',
+        description: 'open | confirmed | rejected | inconclusive',
       },
     },
     output: {
@@ -284,21 +300,33 @@ export function apply(ctx: Context): void {
       if (!isActive(store, agent.session)) {
         throw new Error(`${DEBUG_LOG} is only available in debug mode`)
       }
-      appendLog(store, agent.session, 'agent', args.message)
+      const message = toolString(args.message)
+      const hypothesisId = toolString(args.hypothesisId).trim()
+      const status = parseHypothesisStatus(args.status)
+      if (hypothesisId !== '') {
+        const state = ensureState(store, String(agent.session.id))
+        state.hypotheses = upsertHypothesis(state.hypotheses, hypothesisId, {
+          statement: message,
+          status,
+        })
+      }
+      appendLog(store, agent.session, 'agent', message, {
+        hypothesisId: hypothesisId === '' ? undefined : hypothesisId,
+      })
       return { recorded: true as const }
     },
     presentCall: args => ({
       card: 'generic',
       title: 'Debug log',
       kind: 'other',
-      content: [{ type: 'text', text: args.message }],
+      content: [{ type: 'text', text: toolString(args.message) }],
     }),
   }))
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: STATE_PATH,
-    handler: (req, res) => handleState(store, req, res),
+    handler: (req, res) => handleState(ctx, store, req, res),
   }), 'dsh-debug-mode: state route')
 
   ctx.effect(() => ctx.webServer.register({
@@ -306,6 +334,11 @@ export function apply(ctx: Context): void {
     path: LOGS_PATH,
     handler: (req, res) => handleLogs(ctx, store, req, res),
   }), 'dsh-debug-mode: logs route')
+
+  ctx.effect(() => {
+    const sidecar = startIngestSidecar((req, res) => handleLogs(ctx, store, req, res))
+    return () => sidecar.close()
+  }, 'dsh-debug-mode: ingest sidecar')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
@@ -328,6 +361,9 @@ function ensureState(store: Map<string, SessionDebugState>, sessionId: string): 
     wanted: null,
     wait: null,
     logs: [],
+    runId: null,
+    runs: [],
+    hypotheses: [],
     kit: null,
     toldActive: undefined,
   }
@@ -335,21 +371,51 @@ function ensureState(store: Map<string, SessionDebugState>, sessionId: string): 
   return fresh
 }
 
-function viewState(state: SessionDebugState | undefined): DebugProjection {
-  if (state === undefined) return EMPTY_VIEW
+function hydrate(
+  store: Map<string, SessionDebugState>,
+  session: Session,
+  sink: IngestSink,
+): SessionDebugState {
+  const state = ensureState(store, String(session.id))
+  if (sessionCanPersistDebug(session) && foldDebugActive(sessionEvents(session))) {
+    state.active = true
+  }
+  if (state.active && state.kit === null) attachKit(store, session, sink)
+  return state
+}
+
+function loggedActive(session: Session, state: SessionDebugState): boolean {
+  if (state.active) return true
+  return sessionCanPersistDebug(session) && foldDebugActive(sessionEvents(session))
+}
+
+function viewOf(state: SessionDebugState, session?: Session): DebugProjection {
+  const logged = session === undefined ? state.active : loggedActive(session, state)
+  const active = effectiveDebugOn(state.wanted, logged)
   return {
-    active: state.active,
-    pending: state.wanted !== null && state.wanted !== state.active,
+    active,
+    pending: state.wanted !== null && state.wanted !== logged,
     wait: state.wait?.waiting === true ? state.wait : null,
     logs: state.logs,
     logFile: state.kit?.relLogFile ?? null,
+    runId: state.runId,
+    runs: state.runs.map(run => ({
+      id: run.id,
+      endedAt: run.endedAt,
+      logCount: run.logs.length,
+    })),
+    hypotheses: state.hypotheses,
   }
 }
 
 function isActive(store: Map<string, SessionDebugState>, session: Session): boolean {
   const state = store.get(String(session.id))
-  if (state === undefined) return false
-  return state.wanted ?? state.active
+  const wanted = state?.wanted
+  if (wanted !== null && wanted !== undefined) return wanted
+  if (state === undefined) {
+    return sessionCanPersistDebug(session) && foldDebugActive(sessionEvents(session))
+  }
+  return loggedActive(session, state)
 }
 
 function hasOpenTurn(events: readonly SessionEvent[]): boolean {
@@ -368,19 +434,19 @@ function setDebugMode(
   sink: IngestSink,
 ): 'committed' | 'queued' | 'cancelled' | 'noop' {
   const session = agent.session
-  const state = ensureState(store, String(session.id))
-  const target = state.wanted ?? state.active
+  const state = hydrate(store, session, sink)
+  const logged = loggedActive(session, state)
+  const target = state.wanted ?? logged
   if (active === target) return 'noop'
   if (hasOpenTurn(sessionEvents(session))) {
     state.wanted = active
-    return state.active === active ? 'cancelled' : 'queued'
+    return logged === active ? 'cancelled' : 'queued'
   }
-  if (active === state.active) {
+  if (active === logged) {
     state.wanted = null
     return 'cancelled'
   }
-  state.active = active
-  state.wanted = null
+  commitMode(session, state, active)
   if (active) attachKit(store, session, sink)
   const narration = narrationFor(state, active, sink)
   if (narration !== undefined) {
@@ -390,6 +456,49 @@ function setDebugMode(
     state.toldActive = active
   }
   return 'committed'
+}
+
+function runDebugSlash(
+  ctx: Context,
+  store: Map<string, SessionDebugState>,
+  waits: Map<string, LiveWait>,
+  agent: Agent,
+  rawInput: string,
+): { kind: 'success'; text: string } {
+  const message = rawInput.trim()
+  const sink = ingestSink(ctx, String(agent.session.id))
+  if (message === 'off') {
+    cancelWait(waits, String(agent.session.id), new Error('The user left debug mode.'))
+    closeOpenWait(store, agent.session)
+    switch (setDebugMode(store, agent, false, sink)) {
+      case 'committed':
+        return { kind: 'success', text: 'Debug mode off.' }
+      case 'queued':
+        return { kind: 'success', text: 'Leaving debug mode (applies from the next step).' }
+      case 'cancelled':
+        return { kind: 'success', text: 'Debug mode entry cancelled.' }
+      case 'noop':
+        return isActive(store, agent.session)
+          ? { kind: 'success', text: 'Leaving debug mode (applies from the next step).' }
+          : { kind: 'success', text: 'Debug mode is already inactive.' }
+    }
+  }
+  const outcome = setDebugMode(store, agent, true, sink)
+  attachKit(store, agent.session, sink)
+  if (message !== '') {
+    agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
+  }
+  return {
+    kind: 'success',
+    text: formatDebugOnCommand(outcome, store.get(String(agent.session.id))?.kit ?? null),
+  }
+}
+
+function commitMode(session: Session, state: SessionDebugState, active: boolean): void {
+  if (sessionCanPersistDebug(session)) {
+    appendDebugMode(session as unknown as IgnorableAppendSession, active)
+  }
+  state.active = active
 }
 
 function attachKit(
@@ -406,13 +515,14 @@ function attachKit(
   return kit
 }
 
-function commitWanted(state: SessionDebugState): void {
+function commitWanted(state: SessionDebugState, session: Session): void {
   if (state.wanted === null) return
-  if (state.wanted === state.active) {
+  const logged = loggedActive(session, state)
+  if (state.wanted === logged) {
     state.wanted = null
     return
   }
-  state.active = state.wanted
+  commitMode(session, state, state.wanted)
   state.wanted = null
   state.toldActive = state.active
 }
@@ -439,27 +549,31 @@ function narrationFor(state: SessionDebugState, target: boolean, sink: IngestSin
   })
 }
 
-function ingestSink(ctx: Context, sessionId: string): IngestSink {
-  const host = ctx.webServer.host === '0.0.0.0' ? '127.0.0.1' : ctx.webServer.host
-  const port = ctx.webServer.port
+function ingestSink(_ctx: Context, sessionId: string): IngestSink {
   return {
-    url: `http://${host}:${port}${LOGS_PATH}`,
+    url: browserIngestUrl(),
     sessionId,
   }
 }
 
 function formatIngestBlock(sink: IngestSink, kit: DebugKit | null): string {
   const logFile = kit?.relLogFile ?? DEBUG_LOG_FILE
+  const fetchLine = `fetch('${sink.url}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:'…',hypothesisId:'A',location:'file.ts:1',data:{},timestamp:Date.now()})}).catch((e)=>console.warn('[dsh-debug]',e))`
   const lines = [
-    'Debug logging for this session (use the kit, do not write HTTP):',
-    `  endpoint: ${sink.url}`,
-    `  sessionId: ${sink.sessionId}`,
-    `  logFile: ${logFile}`,
-    "  JS/TS: import { debugLog } from '<relative>/.dsh/debug/log.mjs'",
-    '  CLI: node .dsh/debug/log.mjs "text"',
+    'Debug logging for this session:',
+    `  endpoint: ${sink.url}  (stable sidecar; does not change when Desktop restarts)`,
+    '  sessionId: omit when exactly one debug session is live; otherwise pass it.',
+    '  Do not POST to the Desktop GUI port (that number moves on every restart).',
+    `  logFile: ${logFile} (live). Archived runs: .dsh/debug/debug.<runId>.log`,
+    `  Vite / bundled apps: do not import ${DEBUG_BROWSER_LOG}. Paste the inline fetch inside \`// #region agent log\`, then delete the region on cleanup.`,
+    `  inline: ${fetchLine}`,
+    "  Node JS/TS: import { debugLog } from '<relative>/.dsh/debug/log.mjs'",
+    '  Unload probes: node .dsh/debug/unload.mjs <file>…',
+    "  Call shape: debugLog('message', { hypothesisId, location, data, runId, edge }). Identical (location, hypothesisId, payload) is dropped unless { edge: false }.",
+    '  Flash / first-frame bugs: probe the gate first paint or an immediate watch transition — not fetch in/out, not every computed tick.',
   ]
   if (kit === null) {
-    lines.push(`Kit missing (no cwd). Last resort POST ${sink.url} {"sessionId","text","source":"ingest"}`)
+    lines.push('Kit missing (no cwd). Last resort: the inline fetch above.')
   }
   return lines.join('\n')
 }
@@ -486,6 +600,7 @@ function appendLog(
   session: Session,
   source: DebugLogSource,
   text: string,
+  extras: Partial<Pick<DebugLogEntry, 'hypothesisId' | 'location' | 'data' | 'runId'>> = {},
 ): DebugLogEntry {
   const state = ensureState(store, String(session.id))
   const entry: DebugLogEntry = {
@@ -493,8 +608,13 @@ function appendLog(
     at: Date.now(),
     source,
     text: text.trim(),
+    ...extras,
   }
-  state.logs = capLogs([...state.logs, entry])
+  if (entry.runId === undefined && state.runId !== null) entry.runId = state.runId
+  if (entry.hypothesisId !== undefined) {
+    state.hypotheses = upsertHypothesis(state.hypotheses, entry.hypothesisId)
+  }
+  state.logs = capLogs(foldDuplicateLog(state.logs, entry))
   appendLogFile(state.kit, entry)
   return entry
 }
@@ -505,6 +625,30 @@ function clearLogs(store: Map<string, SessionDebugState>, session: Session): num
   state.logs = []
   clearLogFile(state.kit)
   return cleared
+}
+
+function beginRun(
+  store: Map<string, SessionDebugState>,
+  session: Session,
+  runId?: string,
+): string {
+  const state = ensureState(store, String(session.id))
+  const previousId = state.runId
+  const next = startRun(state, runId)
+  if (previousId !== null) archiveLogFile(state.kit, previousId)
+  return next
+}
+
+function activeDebugSessionIds(
+  ctx: Context,
+  store: Map<string, SessionDebugState>,
+): string[] {
+  const ids: string[] = []
+  for (const [sessionId] of store) {
+    const session = ctx.sessions.get(sessionId as never)
+    if (session !== undefined && isActive(store, session)) ids.push(sessionId)
+  }
+  return ids
 }
 
 function closeOpenWait(store: Map<string, SessionDebugState>, session: Session): void {
@@ -519,6 +663,10 @@ function cancelWait(waits: Map<string, LiveWait>, sessionId: string, error: Erro
   wait.reject(error)
 }
 
+function toolString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 function firstHeading(text: string): string | undefined {
   for (const line of text.split('\n')) {
     const match = /^#{1,6}\s+(.+?)\s*$/.exec(line)
@@ -530,37 +678,14 @@ function firstHeading(text: string): string | undefined {
 function renderReproResult(value: ReproResult): string {
   const notes = value.notes.trim() === '' ? '(none)' : value.notes.trim()
   const logs = value.logs.trim() === '' ? '(no log entries)' : value.logs.trim()
-  return `verdict: ${value.verdict}\nnotes: ${notes}\nlogs:\n${logs}`
-}
-
-function formatLogs(logs: readonly DebugLogEntry[]): string {
-  if (logs.length === 0) return ''
-  return logs.map((entry) => {
-    const time = new Date(entry.at).toISOString()
-    return `[${time}] [${entry.source}] ${entry.text}`
-  }).join('\n')
-}
-
-function collectIngestLines(body: object): string[] {
-  const value = body as { text?: unknown; lines?: unknown }
-  const lines: string[] = []
-  if (typeof value.text === 'string') {
-    const text = value.text.trim()
-    if (text !== '') lines.push(text)
-  }
-  if (Array.isArray(value.lines)) {
-    for (const item of value.lines) {
-      if (typeof item !== 'string') continue
-      const text = item.trim()
-      if (text !== '') lines.push(text)
-    }
-  }
-  return lines.slice(0, MAX_INGEST_BATCH).map((line) => (
-    line.length > MAX_INGEST_LINE ? line.slice(0, MAX_INGEST_LINE) : line
-  ))
+  const previous = value.previousLogs.trim() === '' ? '(none)' : value.previousLogs.trim()
+  const run = value.runId === '' ? '(none)' : value.runId
+  const previousRun = value.previousRunId === '' ? '(none)' : value.previousRunId
+  return `verdict: ${value.verdict}\nrun: ${run}\npreviousRun: ${previousRun}\nnotes: ${notes}\nlogs:\n${logs}\npreviousLogs:\n${previous}`
 }
 
 function handleState(
+  ctx: Context,
   store: Map<string, SessionDebugState>,
   req: IncomingMessage,
   res: ServerResponse,
@@ -575,12 +700,95 @@ function handleState(
     json(res, 400, { ok: false, message: 'sessionId is required' })
     return
   }
-  json(res, 200, { ok: true, value: viewState(store.get(sessionId)) })
+  const session = ctx.sessions.get(sessionId as never)
+  if (session === undefined) {
+    const state = store.get(sessionId)
+    json(res, 200, { ok: true, value: state === undefined ? EMPTY_VIEW : viewOf(state) })
+    return
+  }
+  const state = hydrate(store, session, ingestSink(ctx, sessionId))
+  json(res, 200, { ok: true, value: viewOf(state, session) })
+}
+
+function logsJson(
+  req: IncomingMessage,
+  res: ServerResponse,
+  status: number,
+  value: unknown,
+): void {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
+  json(res, status, value, corsHeaders(origin))
 }
 
 async function handleLogs(
   ctx: Context,
   store: Map<string, SessionDebugState>,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
+  const activeIds = activeDebugSessionIds(ctx, store)
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, corsHeaders(origin))
+    res.end()
+    return
+  }
+  if (req.method !== 'POST') {
+    logsJson(req, res, 405, { ok: false, message: 'method not allowed' })
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    logsJson(req, res, 400, { ok: false, message: errorMessage(error) })
+    return
+  }
+  if (body === null || typeof body !== 'object') {
+    logsJson(req, res, 400, { ok: false, message: 'invalid body' })
+    return
+  }
+  const value = body as { sessionId?: unknown }
+  const requested = typeof value.sessionId === 'string' ? value.sessionId.trim() : ''
+  const lines = collectIngestLines(body)
+  if (lines.length === 0) {
+    logsJson(req, res, 400, { ok: false, message: 'message, text, or lines are required' })
+    return
+  }
+  const resolved = resolveIngestSessionId(requested, activeIds)
+  if (!resolved.ok) {
+    logsJson(req, res, 409, {
+      ok: false,
+      message: resolved.reason === 'ambiguous'
+        ? 'multiple debug sessions; pass sessionId'
+        : 'sessionId is required (no live debug session)',
+    })
+    return
+  }
+  const sessionId = resolved.sessionId
+  const session = ctx.sessions.get(sessionId as never)
+  if (session === undefined) {
+    logsJson(req, res, 404, { ok: false, message: 'session not found' })
+    return
+  }
+  hydrate(store, session, ingestSink(ctx, sessionId))
+  if (!isActive(store, session)) {
+    logsJson(req, res, 409, { ok: false, message: 'debug mode is not active' })
+    return
+  }
+  const entries = lines.map(line => appendLog(store, session, 'ingest', line.text, {
+    hypothesisId: line.hypothesisId,
+    location: line.location,
+    data: line.data,
+    runId: line.runId,
+  }))
+  logsJson(req, res, 200, { ok: true, value: { recorded: entries.length, entries } })
+}
+
+async function handleCommand(
+  ctx: Context,
+  store: Map<string, SessionDebugState>,
+  waits: Map<string, LiveWait>,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -599,24 +807,19 @@ async function handleLogs(
     json(res, 400, { ok: false, message: 'invalid body' })
     return
   }
-  const value = body as { sessionId?: unknown }
-  const sessionId = typeof value.sessionId === 'string' ? value.sessionId : ''
-  const lines = collectIngestLines(body)
-  if (sessionId === '' || lines.length === 0) {
-    json(res, 400, { ok: false, message: 'sessionId and text or lines are required' })
+  const value = body as { sessionId?: unknown; rawInput?: unknown }
+  const sessionId = typeof value.sessionId === 'string' ? value.sessionId.trim() : ''
+  const rawInput = typeof value.rawInput === 'string' ? value.rawInput : ''
+  if (sessionId === '') {
+    json(res, 400, { ok: false, message: 'sessionId is required' })
     return
   }
-  const session = ctx.sessions.get(sessionId as never)
-  if (session === undefined) {
+  const agent = ctx.agents.get(sessionId as never)
+  if (agent === undefined) {
     json(res, 404, { ok: false, message: 'session not found' })
     return
   }
-  if (!isActive(store, session)) {
-    json(res, 409, { ok: false, message: 'debug mode is not active' })
-    return
-  }
-  const entries = lines.map(line => appendLog(store, session, 'ingest', line))
-  json(res, 200, { ok: true, value: { recorded: entries.length, entries } })
+  json(res, 200, { ok: true, value: runDebugSlash(ctx, store, waits, agent, rawInput).text })
 }
 
 async function handleClear(
@@ -652,6 +855,7 @@ async function handleClear(
     json(res, 404, { ok: false, message: 'session not found' })
     return
   }
+  hydrate(store, session, ingestSink(ctx, sessionId))
   if (!isActive(store, session)) {
     json(res, 409, { ok: false, message: 'debug mode is not active' })
     return
@@ -707,10 +911,14 @@ async function handleRepro(
     return
   }
   const state = store.get(sessionId)
+  const compare = formatCompareLogs(state?.logs ?? [], state === undefined ? null : lastArchivedRun(state))
   const result: ReproResult = {
     verdict: action,
     notes,
-    logs: formatLogs(state?.logs ?? []),
+    logs: compare.logs,
+    previousLogs: compare.previousLogs,
+    runId: state?.runId ?? '',
+    previousRunId: compare.previousRunId,
   }
   live.resolve(result)
   json(res, 200, { ok: true, value: result })

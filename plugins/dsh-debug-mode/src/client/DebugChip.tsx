@@ -26,7 +26,8 @@ export function DebugChip({ sessionId, exitDebugMode, t }: DebugChipProps) {
     }
   }, [])
 
-  if (!(debug.pending ? !debug.active : debug.active)) return null
+  const on = debug.active
+  if (!on) return null
 
   const off = () => {
     setLeaving(true)

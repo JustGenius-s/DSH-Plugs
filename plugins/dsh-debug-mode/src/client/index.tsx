@@ -1,9 +1,10 @@
 import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
-import { CLIENT_SERVICES, getRemote } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES } from '@just-genius/dsh-plugin-runtime/client'
 import { DebugChip } from './DebugChip.tsx'
 import { DebugDock } from './DebugDock.tsx'
+import { IconDebugOutline16 } from './DebugIcon.tsx'
 import { en, zh, type DebugKey } from './locales.ts'
-import { CLEAR_PATH, REPRO_PATH, type DebugReproAction } from '../shared.ts'
+import { CLEAR_PATH, COMMAND_PATH, REPRO_PATH, type DebugReproAction } from '../shared.ts'
 import { postResult } from '@just-genius/dsh-plugin-runtime/client'
 
 declare module '@just-genius/dsh-plugin-runtime/client' {
@@ -18,12 +19,39 @@ export const inject = [
   CLIENT_SERVICES.slots,
   CLIENT_SERVICES.locale,
   CLIENT_SERVICES.remote,
-  CLIENT_SERVICES.remoteCommands,
+  'commandUi',
 ] as const
+
+interface CommandUiFace {
+  register(contribution: {
+    name: string
+    label?: () => string
+    description?: () => string
+    icon?: unknown
+    available: (session: { sessionId: string }) => boolean
+    ui: { kind: 'action'; run: (session: { sessionId: string }) => void }
+  }): () => void
+}
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-debug-mode: dictionaries')
-  const remote = getRemote(ctx)
+  const t = ctx.locale.bind(NS)
+  const commandUi = ctx.get('commandUi') as CommandUiFace | undefined
+  if (commandUi !== undefined) {
+    ctx.effect(() => commandUi.register({
+      name: 'debug',
+      label: () => t('command.label'),
+      description: () => t('command.description'),
+      icon: IconDebugOutline16,
+      available: () => true,
+      ui: {
+        kind: 'action',
+        run: (session) => {
+          void postJson(COMMAND_PATH, { sessionId: String(session.sessionId) })
+        },
+      },
+    }), 'dsh-debug-mode: command row')
+  }
 
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
     name: 'conversation.input.left',
@@ -33,10 +61,7 @@ export function apply(ctx: ClientContext): void {
     inject: (sessionId) => ({
       sessionId: String(sessionId),
       exitDebugMode: async () => {
-        const result = await remote.commands.execute(sessionId, '/debug off', [])
-        if (!result.ok) return result.error.message + ' (' + result.error.code + ')'
-        if (result.value === undefined) return 'unknown command: /debug off'
-        return null
+        return postJson(COMMAND_PATH, { sessionId, rawInput: 'off' })
       },
     }),
   }, DebugChip as never))

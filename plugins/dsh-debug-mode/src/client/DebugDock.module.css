@@ -54,10 +54,86 @@
   display: inline-flex;
 }
 
+.runChip,
+.archived {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.runChip {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.archived {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
 .clear {
   margin-left: auto;
   flex: none;
   color: var(--dsw-alias-label-secondary);
+}
+
+.hypotheses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px 0;
+}
+
+.hypothesisChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+}
+
+.hypothesisStatus {
+  font-weight: 500;
+}
+
+.hypothesisOpen {
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.hypothesisConfirmed {
+  color: var(--dsw-alias-state-success-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
+}
+
+.hypothesisRejected {
+  color: var(--dsw-alias-state-error-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+}
+
+.hypothesisInconclusive {
+  color: var(--dsw-alias-state-warn-label);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 14%, transparent);
+}
+
+.lineCount {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: baseline;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .flag {
@@ -139,6 +215,30 @@
 .sourceIngest {
   color: var(--dsw-alias-state-warn-label);
   background: color-mix(in srgb, var(--dsw-alias-state-warn-label) 14%, transparent);
+}
+
+.lineHypothesis {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: baseline;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-error-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+}
+
+.lineLocation {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: baseline;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .lineText {

@@ -1,6 +1,71 @@
+import type { IngestSink } from './shared.ts'
+
+/** Pack helper args into one ingest body. Last object may carry structured fields. */
+function packDebugArgsSource(): string {
+  return `function pack(args) {
+  if (args.length === 0) return { message: '' }
+  const last = args[args.length - 1]
+  const extras = last && typeof last === 'object' && !Array.isArray(last)
+    && (last.hypothesisId != null || last.location != null || last.data !== undefined
+      || last.runId != null || last.edge === true || last.edge === false)
+    ? last : null
+  const parts = extras ? args.slice(0, -1) : args
+  const message = parts.map((value) => {
+    if (typeof value === 'string') return value
+    try { return JSON.stringify(value) } catch { return String(value) }
+  }).join(' ').trim()
+  const body = { message }
+  if (extras) {
+    if (typeof extras.hypothesisId === 'string') body.hypothesisId = extras.hypothesisId
+    if (typeof extras.location === 'string') body.location = extras.location
+    if (typeof extras.runId === 'string') body.runId = extras.runId
+    if (extras.edge === true || extras.edge === false) body.edge = extras.edge
+    if (extras.data !== undefined) body.data = extras.data
+  }
+  return body
+}`
+}
+
+function edgeGateSource(): string {
+  return `const _edgeLast = new Map()
+function skipUnchanged(packed) {
+  if (packed.edge === false) return false
+  let data = ''
+  try { data = JSON.stringify(packed.data) } catch { data = String(packed.data) }
+  const slot = (packed.location || '') + '\\0' + (packed.hypothesisId || '')
+  const value = (packed.message || '') + '\\0' + data
+  if (_edgeLast.get(slot) === value) return true
+  _edgeLast.set(slot, value)
+  return false
+}`
+}
+
+/** Browser-safe helper. Bakes the ingest URL only — session comes from the live debug session. */
+export function renderBrowserLogHelper(sink: IngestSink): string {
+  return `\
+const SINK_URL = ${JSON.stringify(sink.url)}
+
+${packDebugArgsSource()}
+
+${edgeGateSource()}
+
+export function debugLog(...args) {
+  const packed = pack(args)
+  if (packed.message === '' && packed.data === undefined) return
+  if (skipUnchanged(packed)) return
+  delete packed.edge
+  fetch(SINK_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ source: 'ingest', timestamp: Date.now(), ...packed }),
+  }).catch((error) => { console.warn('[dsh-debug]', error) })
+}
+`
+}
+
 /** Node ESM helper written to `.dsh/debug/log.mjs`. */
 export const LOG_MJS = `\
-import { readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -9,7 +74,7 @@ const SINK_REL = join('.dsh', 'debug', 'sink.json')
 function findSink() {
   const url = process.env.DSH_DEBUG_URL
   const sessionId = process.env.DSH_DEBUG_SESSION
-  if (url && sessionId) return { url, sessionId }
+  if (url && sessionId) return { url, sessionId, logFile: join('.dsh', 'debug', 'debug.log') }
   const starts = [process.cwd()]
   try { starts.push(dirname(fileURLToPath(import.meta.url))) } catch {}
   for (const start of starts) {
@@ -18,7 +83,7 @@ function findSink() {
       try {
         const raw = JSON.parse(readFileSync(join(dir, SINK_REL), 'utf8'))
         if (typeof raw.url === 'string' && typeof raw.sessionId === 'string') {
-          return { url: raw.url, sessionId: raw.sessionId }
+          return { url: raw.url, sessionId: raw.sessionId, logFile: join(dir, '.dsh', 'debug', 'debug.log') }
         }
       } catch {}
       const parent = dirname(dir)
@@ -29,25 +94,32 @@ function findSink() {
   throw new Error('dsh debug sink not found; is /debug on?')
 }
 
-function lineOf(args) {
-  return args.map((value) => {
-    if (typeof value === 'string') return value
-    try { return JSON.stringify(value) } catch { return String(value) }
-  }).join(' ')
-}
+${packDebugArgsSource()}
+
+${edgeGateSource()}
 
 export async function debugLog(...args) {
-  const text = lineOf(args).trim()
-  if (text === '') return
+  const packed = pack(args)
+  if (packed.message === '' && packed.data === undefined) return
+  if (skipUnchanged(packed)) return
+  delete packed.edge
+  const sink = findSink()
+  const body = { sessionId: sink.sessionId, source: 'ingest', timestamp: Date.now(), ...packed }
   try {
-    const sink = findSink()
-    await fetch(sink.url, {
+    const response = await fetch(sink.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId: sink.sessionId, text, source: 'ingest' }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(2000),
     })
-  } catch {}
+    if (response.ok) return
+    throw new Error('ingest ' + response.status)
+  } catch (error) {
+    try {
+      appendFileSync(sink.logFile, JSON.stringify({ at: Date.now(), source: 'ingest', text: packed.message, ...packed }) + '\\n')
+    } catch {}
+    console.warn('[dsh-debug]', error)
+  }
 }
 
 const entry = process.argv[1]
@@ -71,7 +143,7 @@ if (isMain) {
 
 /** Node CJS helper written to `.dsh/debug/log.cjs`. */
 export const LOG_CJS = `\
-const { readFileSync } = require('node:fs')
+const { appendFileSync, readFileSync } = require('node:fs')
 const { dirname, join } = require('node:path')
 
 const SINK_REL = join('.dsh', 'debug', 'sink.json')
@@ -79,7 +151,7 @@ const SINK_REL = join('.dsh', 'debug', 'sink.json')
 function findSink() {
   const url = process.env.DSH_DEBUG_URL
   const sessionId = process.env.DSH_DEBUG_SESSION
-  if (url && sessionId) return { url, sessionId }
+  if (url && sessionId) return { url, sessionId, logFile: join('.dsh', 'debug', 'debug.log') }
   const starts = [process.cwd(), __dirname]
   for (const start of starts) {
     let dir = start
@@ -87,7 +159,7 @@ function findSink() {
       try {
         const raw = JSON.parse(readFileSync(join(dir, SINK_REL), 'utf8'))
         if (typeof raw.url === 'string' && typeof raw.sessionId === 'string') {
-          return { url: raw.url, sessionId: raw.sessionId }
+          return { url: raw.url, sessionId: raw.sessionId, logFile: join(dir, '.dsh', 'debug', 'debug.log') }
         }
       } catch {}
       const parent = dirname(dir)
@@ -98,25 +170,32 @@ function findSink() {
   throw new Error('dsh debug sink not found; is /debug on?')
 }
 
-function lineOf(args) {
-  return args.map((value) => {
-    if (typeof value === 'string') return value
-    try { return JSON.stringify(value) } catch { return String(value) }
-  }).join(' ')
-}
+${packDebugArgsSource()}
+
+${edgeGateSource()}
 
 async function debugLog(...args) {
-  const text = lineOf(args).trim()
-  if (text === '') return
+  const packed = pack(args)
+  if (packed.message === '' && packed.data === undefined) return
+  if (skipUnchanged(packed)) return
+  delete packed.edge
+  const sink = findSink()
+  const body = { sessionId: sink.sessionId, source: 'ingest', timestamp: Date.now(), ...packed }
   try {
-    const sink = findSink()
-    await fetch(sink.url, {
+    const response = await fetch(sink.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ sessionId: sink.sessionId, text, source: 'ingest' }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(2000),
     })
-  } catch {}
+    if (response.ok) return
+    throw new Error('ingest ' + response.status)
+  } catch (error) {
+    try {
+      appendFileSync(sink.logFile, JSON.stringify({ at: Date.now(), source: 'ingest', text: packed.message, ...packed }) + '\\n')
+    } catch {}
+    console.warn('[dsh-debug]', error)
+  }
 }
 
 module.exports = { debugLog }
@@ -191,7 +270,7 @@ def debug_log(*args: object) -> None:
         sink = _find_sink()
         payload = json.dumps({
             "sessionId": sink["sessionId"],
-            "text": text,
+            "message": text,
             "source": "ingest",
         }).encode("utf-8")
         req = urllib.request.Request(
@@ -201,7 +280,8 @@ def debug_log(*args: object) -> None:
             method="POST",
         )
         urllib.request.urlopen(req, timeout=2).read()
-    except (OSError, urllib.error.URLError, TimeoutError):
+    except (OSError, urllib.error.URLError, TimeoutError) as error:
+        sys.stderr.write(f"[dsh-debug] {error}\\n")
         return
 
 
@@ -256,6 +336,30 @@ else
   exit 1
 fi
 
-body=$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps({"sessionId": sys.argv[1], "text": sys.stdin.read(), "source": "ingest"}))' "$session")
+body=$(printf '%s' "$text" | python3 -c 'import json,sys; print(json.dumps({"sessionId": sys.argv[1], "message": sys.stdin.read(), "source": "ingest"}))' "$session")
 curl -sS -m 2 -X POST -H 'content-type: application/json' -d "$body" "$url" >/dev/null
+`
+
+/** CLI that strips \`// #region agent log\` blocks from the files the agent touched. */
+export const LOG_UNLOAD = `\
+import { readFileSync, writeFileSync } from 'node:fs'
+
+const region = /^[ \\t]*\\/\\/[ \\t]*#region agent log\\r?\\n[\\s\\S]*?^[ \\t]*\\/\\/[ \\t]*#endregion[ \\t]*\\r?\\n?/gm
+
+export function stripAgentLogRegions(source) {
+  return source.replace(region, '')
+}
+
+const files = process.argv.slice(2)
+if (files.length === 0) {
+  console.error('usage: node .dsh/debug/unload.mjs <file>…')
+  process.exitCode = 1
+} else {
+  for (const file of files) {
+    const before = readFileSync(file, 'utf8')
+    const after = stripAgentLogRegions(before)
+    if (after !== before) writeFileSync(file, after)
+    console.log((after === before ? 'unchanged' : 'stripped') + ' ' + file)
+  }
+}
 `
