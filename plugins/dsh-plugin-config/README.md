@@ -19,7 +19,7 @@
 | --- | --- |
 | `src/index.ts` | Host: Cordis inventory/action/catalog/install + Agent pack routes |
 | `src/agent/*` | Agent pack activator (MCP mount / auth / uninstall cleanup) |
-| `catalog/*` | Builtin Agent pack catalog (Supabase, CloudBase, …) |
+| `catalog/*` | Builtin Agent pack catalog (Supabase, CloudBase, COS) |
 | `src/inventory.ts`, `src/classify.ts`, `src/actions.ts`, `src/profile.ts` | Installed inventory + profile mutations |
 | `src/market/*` | Awesome catalog fetch, install validation |
 | `src/client/PluginsTab.tsx` | Single tab UI (search + installed + market) |

@@ -125,6 +125,7 @@ export const zh = {
   agentLoggedOut: '凭证已清除。',
   agentSaveVars: '保存',
   agentComingSoon: '即将提供',
+  agentSecretPlaceholder: '粘贴令牌',
 }
 
 export const en = {
@@ -254,6 +255,7 @@ export const en = {
   agentLoggedOut: 'Credentials cleared.',
   agentSaveVars: 'Save',
   agentComingSoon: 'Coming soon',
+  agentSecretPlaceholder: 'Paste token',
 }
 
 export type PluginsKey = keyof typeof zh
