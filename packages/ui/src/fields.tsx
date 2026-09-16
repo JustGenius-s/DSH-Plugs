@@ -122,6 +122,37 @@ export function NumberField(props: {
   )
 }
 
+/** A stacked settings text/password field: label above the Models-page input. */
+export function TextField(props: {
+  id: string
+  label: string
+  hint?: string
+  type?: 'text' | 'password'
+  value: string
+  placeholder?: string
+  autoComplete?: string
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  ensureStyles()
+  return (
+    <div className="dsh-ui-text-field">
+      <label className="dsh-ui-text-label" htmlFor={props.id}>{props.label}</label>
+      <input
+        id={props.id}
+        className="dsh-ui-text"
+        type={props.type ?? 'text'}
+        value={props.value}
+        placeholder={props.placeholder}
+        autoComplete={props.autoComplete}
+        disabled={props.disabled}
+        onChange={(event) => props.onChange(event.currentTarget.value)}
+      />
+      {props.hint === undefined ? null : <FieldHint>{props.hint}</FieldHint>}
+    </div>
+  )
+}
+
 /** Text-only reset/clear button for a field head's right edge. */
 export function ResetButton(props: {
   disabled?: boolean

@@ -17,6 +17,7 @@ export {
   FieldHint,
   SwitchField,
   NumberField,
+  TextField,
   ResetButton,
   ActionButton,
   AddButton,
