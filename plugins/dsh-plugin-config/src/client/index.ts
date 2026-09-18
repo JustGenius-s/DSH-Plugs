@@ -225,8 +225,9 @@ export function apply(ctx: ClientContext): void {
 
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
-    id: 'all',
-    order: 10,
+    // The official inventory owns `all`; keep both pages independently selectable.
+    id: 'dsh-plugin-config',
+    order: 30,
     label: () => t('tab'),
     locale: NS,
     inject: injected,

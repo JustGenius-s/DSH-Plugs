@@ -1,6 +1,6 @@
 {
   "name": "@just-genius/dsh-plugin-config",
-  "description": "Settings \u2192 Plugins: installed inventory, npm updates, and the awesome-dsh-plugin marketplace in one tab",
+  "description": "Settings \u2192 Plugin extensions: installed inventory, npm updates, marketplace, and Agent packs alongside DSH's plugin manager",
   "version": "0.1.0",
   "publishConfig": {
     "access": "public"

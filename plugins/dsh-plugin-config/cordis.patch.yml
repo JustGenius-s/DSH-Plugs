@@ -1,11 +1,8 @@
 # Bundle patch for @just-genius/dsh-plugin-config.
 #
-# Replaces the official read-only Plugin list tab with a single Plugins page:
-# collapsible installed inventory + awesome-dsh-plugin marketplace.
+# Adds the Plugin extensions tab alongside DSH's own plugin pages.
+# Keep the official inventory and sidebar plugin manager enabled.
 
 - insert:
     - id: dsh-plugin-config
       name: '@just-genius/dsh-plugin-config'
-
-- id: ui-settings-plugin-inventory
-  disabled: true

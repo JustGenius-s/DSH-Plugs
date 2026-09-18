@@ -52,7 +52,7 @@ Click a `dsh-notification` system banner to focus the window and open that sessi
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
-**Settings → 插件管理** in one tab for two kinds: Cordis npm plugins (awesome-dsh-plugin marketplace + profile inventory) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis plugins still need restart. Replaces the official read-only Plugin list.
+**Settings → 插件 → 插件扩展** adds a tab alongside DSH's official plugin pages for Cordis npm plugins (awesome-dsh-plugin marketplace, profile inventory, and npm updates) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis installs and updates require a restart. The official Plugin list and the DSH v0.1.6-alpha.2+ sidebar plugin manager remain available.
 
 ### [@just-genius/dsh-quick-notes](plugins/dsh-quick-notes)
 
