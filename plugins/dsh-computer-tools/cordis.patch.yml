@@ -1,0 +1,9 @@
+# Bundle patch for @just-genius/dsh-computer-tools.
+#
+# Host half owns Browser Use / Computer Use profile entries, diagnostics, and
+# restore. Browser half mounts Settings → 浏览器与桌面.
+# Requires the pluginProfile service from @just-genius/dsh-plugin-config.
+
+- insert:
+    - id: dsh-computer-tools
+      name: '@just-genius/dsh-computer-tools'

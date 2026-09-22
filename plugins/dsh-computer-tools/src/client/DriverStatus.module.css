@@ -1,0 +1,103 @@
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* An unresolved permission makes the whole row the affordance for fixing it, so
+   there is no separate button row to scan past. */
+.rowAction {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowAction:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.rowAction:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: -2px;
+}
+
+.rowAction:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* The button supplies its own padding, so the row must not add a second inset. */
+.row:has(.rowAction) {
+  padding: 0;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+}
+
+.state {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.state[data-state='granted'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.state[data-state='denied'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.go {
+  flex: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
