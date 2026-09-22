@@ -1,0 +1,93 @@
+/* Header chip: phase at a glance while the card is collapsed. */
+.chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 17px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.chipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--dsw-alias-label-dimmed);
+}
+
+.chip[data-state='ok'] {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.chip[data-state='ok'] .chipDot {
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.chip[data-state='warn'] {
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.chip[data-state='warn'] .chipDot {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.chip[data-state='err'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.chip[data-state='err'] .chipDot {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+
+.fieldStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Collapsible advanced block: it follows a field, so it needs its own top gap
+   (fields carry padding but no bottom margin of their own). */
+.advanced {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.advanced > summary {
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+  line-height: 20px;
+  user-select: none;
+}
+
+.advanced[open] > summary {
+  margin-bottom: 8px;
+}
+
+.advanced[open] {
+  padding-bottom: 4px;
+}
+
+
+.diag {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}

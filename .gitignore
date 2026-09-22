@@ -9,3 +9,7 @@ dist/
 
 # Debug scratch left in the repo root by the Cursor-proxy / notify bridge probes
 .tmp-*
+
+# Settings-page design iteration for dsh-computer-tools. Not referenced by the
+# package `files` list or the README, so it is scratch rather than shipped.
+plugins/dsh-computer-tools/preview/

@@ -1,0 +1,70 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The Menu primitive renders a span wrapper; the trigger must fill the field. */
+.root {
+  display: block;
+  width: 100%;
+}
+
+.trigger {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--dsw-alias-label-dimmed);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.trigger:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Selected value as plain text: a pill here would read as a removable token. */
+.value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 120ms ease;
+}
+
+.chevron[data-open='true'] {
+  transform: rotate(180deg);
+}
