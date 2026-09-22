@@ -30,6 +30,10 @@ Workspace enhancement that supersedes installing `dsh-multi-repo` plus a row-men
 
 Global markdown memory: **Settings → Memory** for manual CRUD, `memory_propose` for AI writes that wait for user confirmation, and enabled entries injected into the system prompt. Stored under `~/.dsh/memory/` as `index.json` + `entries/*.md`.
 
+### [@just-genius/dsh-computer-tools](plugins/dsh-computer-tools)
+
+**Settings → 浏览器与桌面**: one card per capability — Browser Use (Playwright MCP) and Computer Use (Cua MCP or Native) — each with its own save. Saving writes a managed `cordis.patch.yml` insert; defaults work out of the box and the knobs live under 高级选项. The capability packages are separate opt-in installs, so a card whose packages are absent offers **一键安装** (with a copyable command as fallback). It does not restart the host or drive the computer. Needs `dsh-plugin-config`.
+
 ### [@just-genius/dsh-sync](plugins/dsh-sync)
 
 GitHub Device Flow + secret Gist config sync: **Settings → Sync** pushes/pulls `settings.yaml` and the web plugin list (portable specs + `cordis.patch.yml`) with no self-hosted sync server. State lives in `~/.dsh/sync/state.json`.
