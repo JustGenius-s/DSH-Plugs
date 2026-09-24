@@ -161,7 +161,7 @@ export function subtreeSettled(
   const status = statusOf(id)
   const children = nodes.filter((node) => node.parentId === id)
   if (status === 'skipped') return true
-  if (status === 'failed' || status === 'pending' || status === 'running' || status === 'ready') return false
+  if (status === 'failed' || status === 'pending' || status === 'running' || status === 'ready' || status === 'paused') return false
   if (status === 'expanded') {
     return children.length > 0 && children.every((child) => subtreeSettled(child.id, nodes, statusOf, guard))
   }

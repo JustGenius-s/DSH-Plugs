@@ -9,6 +9,7 @@ Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop): a s
 - **Two update channels** — app updates jump to GitHub Releases; DSH runtime updates install in place (pnpm) and ask for a restart.
 - **Version skipping** — skip a version and the prompt returns only when a newer one appears; stored in `~/.dsh/desktop-update-skip.json`.
 - **Native seats** — contributes `applicationMenu` / `tray` entries and fires `notify.show` system notifications when an update lands.
+- **Settings** — open **Plugins → Installed → @just-genius/dsh-desktop-update** in the sidebar to configure automatic checks and the DSH update channel.
 - **Graceful degradation** — in a plain browser (no shell) detection still runs and the state is served; only the execute actions sit out.
 
 ## Design
@@ -21,7 +22,7 @@ Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop): a s
 | `src/client/update-store.ts` | Polls the Host's state, reports the shell's version and execute outcomes |
 | `src/client/bridge.ts` | Typed wrapper over `window.dshDesktop` (shell executes only), with presence detection |
 | `src/client/seats.ts` | Menu/tray seat contributions, revoked on dispose |
-| `src/client/card.tsx`, `src/client/index.tsx` | The settings card, registered into the `settings.plugin.item` slot |
+| `src/client/card.tsx`, `src/client/index.tsx` | Bundle settings in `plugins.bundle.config` on DSH 0.1.7+, with `settings.plugin.item` for legacy hosts |
 
 ## Division of labour
 

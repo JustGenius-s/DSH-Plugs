@@ -25,7 +25,7 @@ const NS = 'quick-notes'
 export const inject = [
   CLIENT_SERVICES.slots,
   CLIENT_SERVICES.locale,
-  CLIENT_SERVICES.settingsScope,
+  CLIENT_SERVICES.settingsSchema,
   CLIENT_SERVICES.remote,
   CLIENT_SERVICES.remoteSession,
 ] as const

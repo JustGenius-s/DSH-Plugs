@@ -45,8 +45,9 @@ import type {
 } from '@deepseek-ai/dsh-session/types'
 import type {
   SettingsSchemaService,
-  SettingsScopeBinder,
 } from '@deepseek-ai/dsh-client-ui-settings/client'
+
+export { getSettingsScope, type SettingsScopeBinder } from './settings-scope.ts'
 
 /** Values accepted by the DSH right-Sidebar navigation contract. */
 export type SidebarRightNavigationParams = Readonly<Record<string, unknown>> | undefined
@@ -93,6 +94,8 @@ export interface SidebarRightService {
 
 /** A guide-page capsule contributed by a right-Sidebar tab type. */
 export interface SidebarRightGuideEntry {
+  /** Stable entry key used by DSH 0.1.6+ guide renderers. */
+  id?: string
   order: number
   title: () => string
   /** Kept structural so plugins need not import the official primitives package. */
@@ -103,6 +106,8 @@ export interface SidebarRightGuideEntry {
 export interface SidebarRightTabDefinition {
   id: string
   kind: string
+  /** Open independent page instances when supported by DSH 0.1.6+. */
+  multiple?: boolean
   patterns?: readonly string[]
   priority?: 'extension' | 'builtin' | 'fallback'
   canOpen?: (address: string) => boolean
@@ -160,8 +165,15 @@ export interface PluginClientContext {
 /** Plugin-owned locale namespaces bridged into the official slot registry. */
 export interface PluginLocaleNamespaceMap {}
 
-/** Plugin-owned slots bridged into the official slot registry. */
-export interface PluginSlotMap {}
+/** Plugin-owned slots and newer platform contracts bridged into the slot registry. */
+export interface PluginSlotMap {
+  /** DSH 0.1.7 bundle detail page, keyed by npm package name. */
+  'plugins.bundle.config': {
+    kind: 'keyed'
+    scope: 'root'
+    owner: { readonly view: 'summary' | 'page' }
+  }
+}
 
 /** Plugin-owned conversation node payloads bridged into the chat renderer. */
 export interface PluginChatNodeDataMap {}
@@ -263,7 +275,6 @@ export type {
   SchemaNode,
   SettingsDescribeFace,
   SettingsSchemaService,
-  SettingsScopeBinder,
 } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 const SURFACE_EVENT_TYPES = new Set(['user/message', 'assistant/message', 'tool/result'])
@@ -467,10 +478,6 @@ export function getUiWorkspace(ctx: ClientContext): UiWorkspaceFace {
   const service = ctx.get(CLIENT_SERVICES.uiWorkspace) as UiWorkspaceFace | undefined
   if (service === undefined) throw new Error('uiWorkspace service is unavailable')
   return service
-}
-
-export function getSettingsScope(ctx: ClientContext): SettingsScopeBinder {
-  return ctx.settingsScope
 }
 
 export function getSettingsSchema(ctx: ClientContext): SettingsSchemaService {

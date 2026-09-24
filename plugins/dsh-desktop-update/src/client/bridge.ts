@@ -65,9 +65,11 @@ export interface DshDesktop {
   updates: {
     /** The shell's packaged version; '' when unknown. */
     appVersion(): Promise<string>
-    /** Open the App release download page (GitHub Releases). */
-    downloadApp(): Promise<void>
-    /** Install a DSH runtime version in place; resolves when pnpm finishes. */
+    /**
+     * Open the App release download page. `url` names the release the caller
+     * was shown; the shell falls back to the releases page when it is absent.
+     */
+    downloadApp(url?: string): Promise<void>
     updateDsh(version: string): Promise<void>
     /** Restart the app. */
     relaunch(): void

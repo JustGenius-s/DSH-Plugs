@@ -27,7 +27,7 @@
         "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-settings-plugins"
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
       ],
       "platform": "web"
     },
@@ -45,7 +45,8 @@
     "build": "tsdown -c tsdown.config.ts && tsdown -c tsdown.client.config.ts",
     "watch": "tsdown -c tsdown.config.ts --watch & tsdown -c tsdown.client.config.ts --watch",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf lib"
+    "clean": "rm -rf lib",
+    "test": "pnpm exec vitest run --config ./vitest.config.ts"
   },
   "peerDependencies": {
     "react": "^18.2.0",

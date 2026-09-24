@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type MouseEvent } from 'react'
+import { createContext, useContext, useEffect, useMemo, type MouseEvent } from 'react'
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -14,6 +14,7 @@ import ReactFlow, {
   type NodeTypes,
 } from 'reactflow'
 
+import type { FlowAction } from '../shared.ts'
 import { NodeCard } from './NodeCard.tsx'
 import {
   toFlowElements,
@@ -47,21 +48,24 @@ export interface FlowGraphProps {
   readonly interactive?: boolean
   readonly onNodeClick?: NodeMouseHandler
   readonly onPaneClick?: (event: MouseEvent) => void
+  /** Card button target. Omitted in `compact`, which is read-only. */
+  readonly onAct?: (action: FlowAction) => void
   readonly className?: string
 }
 
 function CardNode({ data, selected }: NodeProps<FlowCardData>) {
+  const onAct = useFlowAct()
   return (
     <>
       <Handle
         type="target"
-        position={Position.Left}
+        position={Position.Top}
         className={styles.handle}
       />
-      <NodeCard node={data.node} selected={selected === true} />
+      <NodeCard node={data.node} selected={selected === true} onAct={onAct} />
       <Handle
         type="source"
-        position={Position.Right}
+        position={Position.Bottom}
         className={styles.handle}
       />
     </>
@@ -98,6 +102,7 @@ function FlowGraphInner({
   interactive,
   onNodeClick,
   onPaneClick,
+  onAct,
   className,
 }: FlowGraphProps) {
   const compact = variant === 'compact'
@@ -131,52 +136,68 @@ function FlowGraphInner({
   ].filter(Boolean).join(' ')
 
   return (
-    <ReactFlow
-      className={rootClass}
-      nodes={nodes}
-      edges={base.edges}
-      nodeTypes={NODE_TYPES}
-      onNodeClick={onNodeClick}
-      onPaneClick={onPaneClick}
-      fitView
-      fitViewOptions={fitViewOptions}
-      defaultViewport={
-        compact
-          ? { x: 0, y: 0, zoom: COMPACT_ZOOM }
-          : undefined
-      }
-      minZoom={0.2}
-      maxZoom={compact ? 1 : 1.6}
-      nodesDraggable={canInteract}
-      nodesConnectable={false}
-      elementsSelectable={showSelection}
-      panOnDrag={canInteract}
-      zoomOnScroll={canInteract}
-      zoomOnPinch={canInteract}
-      zoomOnDoubleClick={canInteract}
-      proOptions={{ hideAttribution: true }}
-    >
-      <Background
-        variant={BackgroundVariant.Dots}
-        gap={18}
-        size={1}
-        className={styles.dots}
-      />
-      {!compact && (
-        <>
-          <Controls showInteractive={false} />
-          <MiniMap pannable zoomable className={styles.minimap} />
-        </>
-      )}
-      <FocusSync
-        nodeId={focusNodeId}
-        x={nodes.find((node) => node.id === focusNodeId)?.position.x}
-        y={nodes.find((node) => node.id === focusNodeId)?.position.y}
-        zoom={compact ? COMPACT_ZOOM : 1}
-        fitWhenIdle={compact}
-      />
-    </ReactFlow>
+    <FlowActContext.Provider value={onAct ?? null}>
+      <ReactFlow
+        className={rootClass}
+        nodes={nodes}
+        edges={base.edges}
+        nodeTypes={NODE_TYPES}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
+        fitView
+        fitViewOptions={fitViewOptions}
+        defaultViewport={
+          compact
+            ? { x: 0, y: 0, zoom: COMPACT_ZOOM }
+            : undefined
+        }
+        minZoom={0.2}
+        maxZoom={compact ? 1 : 1.6}
+        nodesDraggable={canInteract}
+        nodesConnectable={false}
+        elementsSelectable={showSelection}
+        panOnDrag={canInteract}
+        zoomOnScroll={canInteract}
+        zoomOnPinch={canInteract}
+        zoomOnDoubleClick={canInteract}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={18}
+          size={1}
+          className={styles.dots}
+        />
+        {!compact && (
+          <>
+            <Controls showInteractive={false} />
+            <MiniMap pannable zoomable className={styles.minimap} />
+          </>
+        )}
+        <FocusSync
+          nodeId={focusNodeId}
+          x={nodes.find((node) => node.id === focusNodeId)?.position.x}
+          y={nodes.find((node) => node.id === focusNodeId)?.position.y}
+          zoom={compact ? COMPACT_ZOOM : 1}
+          fitWhenIdle={compact}
+        />
+      </ReactFlow>
+    </FlowActContext.Provider>
   )
+}
+
+/**
+ * The card-button callback, handed to cards through context.
+ *
+ * React Flow's `nodeTypes` is a stable map built once, so a callback cannot be
+ * passed to a card through it without rebuilding the map (and remounting every
+ * card) on each render. Context carries the latest callback instead.
+ */
+const FlowActContext = createContext<((action: FlowAction) => void) | null>(null)
+
+function useFlowAct(): ((action: FlowAction) => void) | undefined {
+  const onAct = useContext(FlowActContext)
+  return onAct ?? undefined
 }
 
 /** Recenter when `focusNodeId` changes or that node first appears. */

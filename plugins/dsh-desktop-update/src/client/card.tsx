@@ -1,8 +1,8 @@
 // Settings card for the `desktop-update` namespace, rendered inside the
-// Plugins section's configurable tab (`settings.plugin.item`).
+// desktop update bundle's detail page in Plugins (a card on legacy hosts).
 // Chrome comes from @just-genius/dsh-plugin-ui (the official PluginCard look:
 // collapsible header, staged edits, save/discard footer). Writes go through
-// ctx.settingsScope (generic settings RPC → settings.yaml).
+// the shared settings adapter (Config forms on current hosts).
 //
 // The version line and the update actions read state from this plugin's Host
 // half (detection lives there now), not from the preload bridge. Executing an
@@ -40,6 +40,8 @@ ensureCardStyles()
 export interface UpdateCardProps {
   t: (key: string) => string
   scope: SettingsScope<DesktopUpdateConfig>
+  /** The plugin manager opens the form directly on the bundle's page. */
+  view?: 'summary' | 'page'
   /** Shared Host-state feed (see update-store.ts). */
   store: UpdateStore
 }
@@ -60,7 +62,7 @@ export function UpdateCard(props: UpdateCardProps) {
   const subscribeStore = useCallback((cb: () => void) => store.subscribe(() => { cb() }), [store])
   const getStoreSnapshot = useCallback(() => store.get(), [store])
 
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(props.view === 'page')
   const [draft, setDraft] = useState<DesktopUpdateConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [failed, setFailed] = useState(false)

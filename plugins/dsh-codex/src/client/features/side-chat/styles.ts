@@ -28,7 +28,7 @@ ${CONTENT_SCOPE} pre{white-space:pre-wrap}
 .dsh-codex-sidechat-error-message{display:block;overflow-wrap:anywhere}
 .dsh-codex-sidechat-error-stackwrap{margin-top:4px}
 .dsh-codex-sidechat-error-stackwrap summary{cursor:pointer;color:var(--dsw-alias-label-secondary,#b0b0b5);font-size:11px;font-weight:600}
-.dsh-codex-sidechat-error-stack{max-height:200px;margin:4px 0 0;padding:6px 8px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-overlay,rgba(0,0,0,.28));color:var(--dsw-alias-label-secondary,#b0b0b5);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:16px;white-space:pre;tab-size:2}
+.dsh-codex-sidechat-error-stack{max-height:200px;margin:4px 0 0;padding:6px 8px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-overlay,rgba(0,0,0,.28));color:var(--dsw-alias-label-secondary,#b0b0b5);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:11px;line-height:16px;white-space:pre;tab-size:2}
 .dsh-codex-sidechat-error-dismiss{flex:none;border:none;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:20px;padding:0 4px}
 .dsh-codex-sidechat-empty-panel{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}
 .dsh-codex-sidechat-empty-panel p{margin:0}

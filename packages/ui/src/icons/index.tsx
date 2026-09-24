@@ -575,6 +575,18 @@ export const IconPauseOutline16 = ({ size = 16, className }: IconProps) => (
   </svg>
 )
 
+/** ic_ds_skip_outline_16: a play triangle plus a bar — "jump past this one". */
+export const IconSkipOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M14.1446 8C14.1446 4.6062 11.3938 1.85539 8 1.85539C4.6062 1.85539 1.85539 4.6062 1.85539 8C1.85539 11.3938 4.6062 14.1446 8 14.1446C11.3938 14.1446 14.1446 11.3938 14.1446 8ZM15.511 8C15.511 12.148 12.148 15.511 8 15.511C3.85202 15.511 0.489014 12.148 0.489014 8C0.489014 3.85202 3.85202 0.489014 8 0.489014C12.148 0.489014 15.511 3.85202 15.511 8Z"
+      fill="currentColor"
+    />
+    <path d="M4.6 5.3 9.2 8l-4.6 2.7V5.3Z" fill="currentColor" />
+    <path d="M11.4 5.4V10.6h-1.3V5.4h1.3Z" fill="currentColor" />
+  </svg>
+)
+
 /** ic_ds_fullscreen_outline_16 */
 export const IconFullscreenOutline16 = ({ size = 16, className }: IconProps) => (
   <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -913,6 +925,29 @@ export const IconGitGraphColor16 = ({ size = 16, className }: IconProps) => (
     <circle cx="4" cy="2.65" r=".55" fill="#FFF" />
     <circle cx="9.35" cy="2.65" r=".55" fill="#FFF" />
     <circle cx="10.55" cy="12.8" r=".55" fill="#FFF" />
+  </svg>
+)
+
+/** Monochrome workflow nodes used by commands and mode chips. */
+export const IconFlowOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flex: 'none' }}>
+    <g stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.5 8h2.75m0-4.75v9.5m0-9.5h2.25m-2.25 9.5h2.25" />
+      <rect x="1" y="5.75" width="4.5" height="4.5" rx="1" />
+      <rect x="10.5" y="1" width="4.5" height="4.5" rx="1" />
+      <rect x="10.5" y="10.5" width="4.5" height="4.5" rx="1" />
+    </g>
+  </svg>
+)
+
+/** Colored workflow nodes used by Flow page tabs. */
+export const IconFlowColor16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flex: 'none' }}>
+    <path d="M5.75 8h2.5m0-4.75v9.5m0-9.5h2m-2 9.5h2" stroke="#7067E8" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+    <rect x=".75" y="5.5" width="5" height="5" rx="1.4" fill="#4EA5F5" />
+    <rect x="10.25" y=".75" width="5" height="5" rx="1.4" fill="#F59E42" />
+    <rect x="10.25" y="10.25" width="5" height="5" rx="1.4" fill="#55C98A" />
+    <path d="M2.5 8H4m8-4.75h1.5M12 12.75h1.5" stroke="#FFF" strokeWidth="1.1" strokeLinecap="round" />
   </svg>
 )
 

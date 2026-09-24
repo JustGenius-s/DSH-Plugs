@@ -34,7 +34,7 @@ const NODE_SCHEMA = {
 /** Compile one parameter map exactly as `defineTool` would at boot. */
 function compile(parameters: Record<string, unknown>) {
   return defineTool({
-    name: 'schema.compile.check',
+    name: 'schema_compile_check',
     description: 'Compiles a candidate parameter schema.',
     // Invalid maps are part of the suite: they must fail at runtime, not at tsc.
     parameters: parameters as never,
@@ -43,7 +43,7 @@ function compile(parameters: Record<string, unknown>) {
   })
 }
 
-test('flow.plan parameters compile', () => {
+test('flow_plan parameters compile', () => {
   expect(() => compile({
     title: { type: 'string' },
     nodes: { type: 'array', items: NODE_SCHEMA },
@@ -51,7 +51,7 @@ test('flow.plan parameters compile', () => {
   })).not.toThrow()
 })
 
-test('flow.patch parameters compile', () => {
+test('flow_patch parameters compile', () => {
   expect(() => compile({
     ops: {
       type: 'array',
@@ -68,27 +68,27 @@ test('flow.patch parameters compile', () => {
   })).not.toThrow()
 })
 
-test('flow.expand parameters compile', () => {
+test('flow_expand parameters compile', () => {
   expect(() => compile({
     parentId: { type: 'string' },
     nodes: { type: 'array', items: NODE_SCHEMA },
   })).not.toThrow()
 })
 
-test('flow.confirm parameters compile', () => {
+test('flow_confirm parameters compile', () => {
   expect(() => compile({
     question: { type: 'string' },
     nodeId: { type: 'string' },
   })).not.toThrow()
 })
 
-test('flow.status parameters compile', () => {
+test('flow_status parameters compile', () => {
   expect(() => compile({
     nodeId: { type: 'string', description: 'Optional focus.' },
   })).not.toThrow()
 })
 
-test('flow.report parameters compile', () => {
+test('flow_report parameters compile', () => {
   expect(() => compile({
     note: { type: 'string', description: 'Required. One line of progress.' },
   })).not.toThrow()

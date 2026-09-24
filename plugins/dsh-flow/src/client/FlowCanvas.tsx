@@ -4,39 +4,29 @@ import { useCallback, useState } from 'react'
 // plain CSS path is not an admitted client module in this monorepo.
 
 import { Button } from '@just-genius/dsh-plugin-ui'
-import type { PropsRuntime } from '@just-genius/dsh-plugin-runtime/client'
 
-import { ACTION_PATH, MODE_PATH, waitingForConfirm } from '../shared.ts'
+import { ACTION_PATH, waitingForConfirm } from '../shared.ts'
 import type {
   FlowAction,
   FlowNodeView,
   FlowPlanView,
-  FlowStateResponse,
 } from '../shared.ts'
 import { postResult } from '@just-genius/dsh-plugin-runtime/client'
 import { FlowGraph } from './FlowGraph.tsx'
+import { elapsedMs, formatDuration, inputTokens, totalTokens } from './metrics.ts'
 import { STATUS_LABEL, progressOf } from './status.ts'
 import { useFlowState } from './useFlowState.ts'
 import styles from './FlowCanvas.module.css'
 
-/** Props the client entry injects into the registered view. */
-export interface FlowCanvasInjected {
+/** The Sidebar supplies the conversation session owning this tab. */
+export interface FlowCanvasProps {
   sessionId: string
 }
-
-/** Result of `POST MODE_PATH`. */
-interface ModeResult {
-  readonly ok: boolean
-  readonly message: string | null
-}
-
-export type FlowCanvasProps = PropsRuntime<'conversation.view'> &
-  FlowCanvasInjected
 
 /**
  * The Flow tab.
  *
- * Read-mostly by design: the Leader reshapes the graph through `flow.patch`, so
+ * Read-mostly by design: the Leader reshapes the graph through `flow_patch`, so
  * the canvas offers only the local actions that do not fight the model for
  * ownership of the topology — retry a failed node, skip it, stop a live one.
  */
@@ -60,22 +50,12 @@ export function FlowCanvas({ sessionId }: FlowCanvasProps) {
     }
   }, [sessionId])
 
-  const setMode = useCallback(async (on: boolean) => {
-    setError(null)
-    try {
-      await postResult<ModeResult>(`${MODE_PATH}?sessionId=${encodeURIComponent(sessionId)}`, { on })
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    }
-  }, [sessionId])
-
   if (!state.mode) {
     return (
       <OffState
-        pending={state.modePending}
         degraded={state.degraded}
         reason={state.degradedReason}
-        onEnable={() => void setMode(true)}
+        error={state.error}
       />
     )
   }
@@ -85,7 +65,6 @@ export function FlowCanvas({ sessionId }: FlowCanvasProps) {
       <EmptyState
         degraded={state.degraded}
         reason={state.degradedReason}
-        onDisable={() => void setMode(false)}
       />
     )
   }
@@ -101,9 +80,6 @@ export function FlowCanvas({ sessionId }: FlowCanvasProps) {
           <span className={styles.badge} data-status={plan.status}>
             {plan.status === 'settled' ? '全部结束' : plan.status === 'running' ? '执行中' : '待执行'}
           </span>
-          <button type="button" className={styles.modeToggle} onClick={() => void setMode(false)}>
-            退出 Flow 模式
-          </button>
         </div>
 
         <div className={styles.meter} role="presentation">
@@ -111,7 +87,7 @@ export function FlowCanvas({ sessionId }: FlowCanvasProps) {
         </div>
 
         <div className={styles.legend}>
-          {(['pending', 'running', 'expanded', 'done', 'failed', 'skipped'] as const).map((status) => (
+          {(['pending', 'running', 'paused', 'expanded', 'done', 'failed', 'skipped'] as const).map((status) => (
             <span key={status} className={styles.legendItem}>
               <span className={styles.statusDot} data-status={status} aria-hidden="true" />
               {STATUS_LABEL[status]}
@@ -142,6 +118,7 @@ export function FlowCanvas({ sessionId }: FlowCanvasProps) {
             selectedId={selectedId}
             onNodeClick={(_event, node) => setSelectedId(node.id)}
             onPaneClick={() => setSelectedId(null)}
+            onAct={(action) => void act(action)}
           />
         </div>
 
@@ -172,8 +149,11 @@ function DetailPane({
 }) {
   const canRetry = node.status === 'failed' || node.status === 'skipped' || node.status === 'done'
   const canSkip = node.status !== 'done' && node.status !== 'skipped'
-  const canCancel = node.status === 'running'
+  const canStop = node.status === 'running'
+  const canPause = node.status === 'running'
+  const canResume = node.status === 'paused'
   const showConfirm = confirm !== null && (confirm.nodeId === null || confirm.nodeId === node.id)
+  const duration = elapsedMs(node.startedAt, node.endedAt, Date.now())
 
   return (
     <aside className={styles.detail}>
@@ -185,12 +165,14 @@ function DetailPane({
       </header>
 
       <dl className={styles.meta}>
-        <div><dt>节点</dt><dd><code>{node.id}</code></dd></div>
         <div><dt>状态</dt><dd>{STATUS_LABEL[node.status]}</dd></div>
-        <div><dt>依赖</dt><dd>{node.deps.length === 0 ? '无' : node.deps.join('、')}</dd></div>
-        {node.parentId !== undefined && <div><dt>父节点</dt><dd><code>{node.parentId}</code></dd></div>}
         <div><dt>尝试次数</dt><dd>{node.attempts}</dd></div>
-        {node.childId !== null && <div><dt>子 Agent</dt><dd><code>{node.childId}</code></dd></div>}
+        {duration !== null && <div><dt>执行时间</dt><dd>{formatDuration(duration)}</dd></div>}
+        {duration !== null && <div><dt>Token</dt><dd>{node.usage === null ? (node.status === 'running' ? '统计中' : '暂无统计') : totalTokens(node.usage).toLocaleString()}</dd></div>}
+        {node.usage !== null && <div><dt>输入</dt><dd>{inputTokens(node.usage).toLocaleString()}</dd></div>}
+        {node.usage !== null && <div><dt>输出</dt><dd>{node.usage.outputTokens.toLocaleString()}</dd></div>}
+        {node.usage !== null && node.usage.cacheReadTokens > 0 && <div><dt>缓存读取</dt><dd>{node.usage.cacheReadTokens.toLocaleString()}</dd></div>}
+        {node.usage !== null && node.usage.cacheWriteTokens > 0 && <div><dt>缓存写入</dt><dd>{node.usage.cacheWriteTokens.toLocaleString()}</dd></div>}
       </dl>
 
       <section className={styles.detailSection}>
@@ -224,13 +206,16 @@ function DetailPane({
       <div className={styles.actions}>
         {showConfirm && <Button onClick={() => void onAct({ kind: 'next' })}>通过并继续</Button>}
         {canRetry && <Button onClick={() => void onAct({ kind: 'retry', nodeId: node.id })}>重试</Button>}
+        {canResume && <Button onClick={() => void onAct({ kind: 'resume', nodeId: node.id })}>继续</Button>}
         {canSkip && <Button onClick={() => void onAct({ kind: 'skip', nodeId: node.id })}>跳过</Button>}
-        {canCancel && <Button onClick={() => void onAct({ kind: 'cancel', nodeId: node.id })}>停止</Button>}
+        {canPause && <Button onClick={() => void onAct({ kind: 'pause', nodeId: node.id })}>暂停</Button>}
+        {canStop && <Button onClick={() => void onAct({ kind: 'cancel', nodeId: node.id })}>停止</Button>}
       </div>
 
       <p className={styles.hint}>
-        只有 Leader 或子代理请求确认时才会暂停。平时 Leader 验收后自己继续。
-        改拓扑请用 <code>flow.patch</code>。
+        卡片左下角也有跳过 / 暂停 / 停止，鼠标移到节点上即可操作。
+        暂停会停掉该子代理，之后可以「继续」；停止则标记为失败，交给 Leader 处理。
+        只有 Leader 或子代理请求确认时才会暂停整个流程。改拓扑请用 <code>flow_patch</code>。
       </p>
     </aside>
   )
@@ -243,34 +228,30 @@ function timeOf(iso: string): string {
   return date.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
-/** Mode off: the tab explains itself and offers the one switch that matters. */
+/** Opening the graph does not enable a mode; entry belongs to the composer. */
 function OffState({
-  pending,
   degraded,
   reason,
-  onEnable,
+  error,
 }: {
-  pending: boolean | null
   degraded: boolean
   reason: string | null
-  onEnable: () => void
+  error: string | null
 }) {
   return (
     <div className={styles.empty}>
       <h2 className={styles.emptyTitle}>Flow</h2>
       <p className={styles.emptyText}>
-        Flow 模式未开启。开启后，主 Agent 只负责规划：它把任务拆成一张依赖图，
-        每个节点交给一个子 Agent 执行，并可以根据执行结果调整这张图。
+        在输入框的命令菜单中选择 <code>/flow</code> 开启 Flow 模式。
+        主 Agent 会把任务拆成依赖图，每个节点交给子 Agent 执行。
       </p>
       <p className={styles.emptyText}>
-        开启期间 Leader 的执行类工具会被禁用 —— 它只能规划、审查和改图。
+        流程图会在这里实时更新，可以同时查看对话和执行进展。
       </p>
-      <div className={styles.emptyActions}>
-        <Button onClick={onEnable}>{pending === true ? '开启中…' : '开启 Flow 模式'}</Button>
-      </div>
       <p className={styles.hint}>
-        也可以直接在对话框输入 <code>/flow</code>；退出用 <code>/flow off</code>。
+        开启后输入框显示 Flow chip，点击关闭即可退出；也可输入 <code>/flow off</code>。
       </p>
+      {error !== null && <p className={styles.error} role="status">{error}</p>}
       {degraded && (
         <p className={styles.degraded}>
           编排器降级：{reason ?? '未知原因'}。图可以显示，但不会派发子 Agent。
@@ -284,25 +265,20 @@ function OffState({
 function EmptyState({
   degraded,
   reason,
-  onDisable,
 }: {
   degraded: boolean
   reason: string | null
-  onDisable: () => void
 }) {
   return (
     <div className={styles.empty}>
       <h2 className={styles.emptyTitle}>Flow 模式已开启</h2>
       <p className={styles.emptyText}>
-        还没有工作流。给主 Agent 一个需要多步完成的任务，它会调用 <code>flow.plan</code>
+        还没有工作流。给主 Agent 一个需要多步完成的任务，它会调用 <code>flow_plan</code>
         生成依赖图，每个节点交给一个子 Agent 执行。
       </p>
       <p className={styles.emptyText}>
         执行过程中 Leader 会根据子 Agent 的结果调整这张图：重试、跳过、插入补救步骤。
       </p>
-      <div className={styles.emptyActions}>
-        <Button onClick={onDisable}>退出 Flow 模式</Button>
-      </div>
       {degraded && (
         <p className={styles.degraded}>
           编排器降级：{reason ?? '未知原因'}。图可以显示，但不会派发子 Agent。
@@ -311,6 +287,3 @@ function EmptyState({
     </div>
   )
 }
-
-/** Exported for the entry's type check of the injected session id. */
-export type { FlowStateResponse }

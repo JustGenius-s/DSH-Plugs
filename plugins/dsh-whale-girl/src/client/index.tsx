@@ -10,7 +10,7 @@ export const name = 'dsh-whale-girl'
 export const inject = [
   CLIENT_SERVICES.slots,
   CLIENT_SERVICES.locale,
-  CLIENT_SERVICES.settingsScope,
+  CLIENT_SERVICES.settingsSchema,
 ] as const
 
 const NS = 'whale-girl'

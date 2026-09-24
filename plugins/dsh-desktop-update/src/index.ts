@@ -32,9 +32,9 @@ import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import {
   HOST_SERVICES,
   Schema,
+  installSettingsSection,
   readJsonBody,
   sendJson,
-  settingsNamespace,
 } from '@just-genius/dsh-plugin-runtime/host'
 
 import {
@@ -60,7 +60,7 @@ export const SETTINGS_NS = 'desktop-update'
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000
 
 /** User-togglable gates for the two background checks. */
-export const Config = Schema.object({
+export const ConfigSchema = Schema.object({
   /** 自动检查 DSH-Desktop 本体更新（GitHub Releases）。 */
   checkApp: Schema.boolean().default(true),
   /** 自动检查 DSH 运行时更新（npm registry）。 */
@@ -79,7 +79,9 @@ export const Config = Schema.object({
   /** dshChannel === 'custom' 时匹配的精确版本。 */
   dshVersion: Schema.string().default(''),
 })
-export type Config = Schemastery.TypeT<typeof Config>
+export type Config = Schemastery.TypeT<typeof ConfigSchema>
+/** DSH 0.1.7 projects settings only from live fields in the Config export. */
+export const Config = ConfigSchema.volatile()
 
 const DEFAULTS: Config = {
   checkApp: true,
@@ -98,9 +100,15 @@ function result(res: ServerResponseLike, status: number, body: DesktopUpdateResu
 /** Minimal response surface: enough for sendJson, no node:http import needed. */
 type ServerResponseLike = Parameters<typeof sendJson>[0]
 
-export function apply(ctx: Context) {
+export function apply(ctx: Context, entry?: Partial<Config> | ReturnType<typeof Config>) {
+  const entrySource = (): Config => ({
+    ...DEFAULTS,
+    ...(entry && 'get' in entry ? entry.get() : entry),
+  })
+  let currentConfig: () => DesktopUpdateConfig = entrySource
   let state: DesktopUpdateState = {
     ...EMPTY_STATE,
+    config: currentConfig(),
     versions: { app: '', dsh: installedDshVersion() ?? null },
   }
 
@@ -110,53 +118,48 @@ export function apply(ctx: Context) {
    * than racing.
    */
   let inFlight: Promise<void> | null = null
-  function detect(): Promise<void> {
-    if (inFlight !== null) return inFlight
+  let recheck = false
+  function detect(inputsChanged = false): Promise<void> {
+    if (inFlight !== null) {
+      recheck ||= inputsChanged
+      return inFlight
+    }
     state = { ...state, checking: true }
     inFlight = (async () => {
-      try {
-        const config = currentConfig()
-        const found = await detectUpdates(config, state.versions.app)
-        state = {
-          ...state,
-          app: found.app,
-          dsh: found.dsh,
-          checking: false,
-          config,
-          versions: { app: state.versions.app, dsh: installedDshVersion() ?? null },
+      do {
+        recheck = false
+        try {
+          const config = currentConfig()
+          const found = await detectUpdates(config, state.versions.app)
+          // A save can change the channel while this request is in flight.
+          // Discard the old result and finish a round with the latest inputs.
+          if (recheck) continue
+          state = {
+            ...state,
+            app: found.app,
+            dsh: found.dsh,
+            checking: false,
+            config,
+            versions: { app: state.versions.app, dsh: installedDshVersion() ?? null },
+          }
+        } catch {
+          if (!recheck) state = { ...state, checking: false }
         }
-      } catch {
-        state = { ...state, checking: false }
-      } finally {
-        inFlight = null
-      }
-    })()
+      } while (recheck)
+    })().finally(() => {
+      inFlight = null
+      if (recheck) void detect()
+    })
     return inFlight
   }
 
-  // Take the settings scope directly rather than through
-  // `installSettingsSection`: that helper keeps the scope to itself and hands
-  // back only a read thunk, while detection needs `watch` (re-run when the
-  // gates or channel change). Registering the namespace is enough for the
-  // browser card, which reads it through the generic settings RPC.
-  let scope: { get(): Config } | undefined
-  function currentConfig(): DesktopUpdateConfig {
-    return scope?.get() ?? DEFAULTS
-  }
-
-  ctx.inject([HOST_SERVICES.settings], (sctx) => {
-    const registered = sctx.settings.register(settingsNamespace(SETTINGS_NS), Config, { base: DEFAULTS })
-    scope = { get: () => registered.get() }
-    state = { ...state, config: registered.get() }
-    sctx.effect(
-      () =>
-        registered.watch((next) => {
-          state = { ...state, config: next }
-          // Gates or channel changed: re-detect on the new settings.
-          void detect()
-        }),
-      'desktop-update: settings watch',
-    )
+  installSettingsSection(ctx, SETTINGS_NS, ConfigSchema, entrySource(), {
+    entrySource,
+    setSource: next => { currentConfig = next },
+    onChange: next => {
+      state = { ...state, config: next }
+      void detect(true)
+    },
   })
 
   ctx.effect(
@@ -206,7 +209,7 @@ export function apply(ctx: Context) {
             }
             // First report, or the shell was upgraded: the app half of the
             // result is stale, so re-detect.
-            if (changed) await detect()
+            if (changed) await detect(true)
             return { ok: true, state }
           }, req)
         },

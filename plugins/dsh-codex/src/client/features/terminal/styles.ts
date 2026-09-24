@@ -11,7 +11,7 @@ const BLOCK_CSS = `
 .dsh-codex-terminal-tab{display:flex;flex:1;min-width:0;min-height:0;height:100%;flex-direction:column;overflow:hidden}
 .dsh-codex-terminal-toolbar{display:flex;flex:none;align-items:center;justify-content:flex-end;min-height:32px;padding:2px 8px}
 .dsh-codex-terminal-tab>.dsh-warp-terminal{height:auto;flex:1;min-height:0}
-.dsh-warp-terminal{height:100%;display:flex;flex-direction:column;overflow:hidden;padding:8px 12px 12px;box-sizing:border-box;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
+.dsh-warp-terminal{height:100%;display:flex;flex-direction:column;overflow:hidden;padding:8px 12px 12px;box-sizing:border-box;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:var(--dsw-font-family,Inter,sans-serif)}
 .dsh-warp-terminal-scroll{position:relative;flex:1;min-height:0;overflow-y:hidden;overscroll-behavior:contain;outline:none}
 .dsh-warp-terminal-scroll.is-scrollable{overflow-y:auto}
 .dsh-warp-terminal-doc{position:relative;width:100%}
@@ -35,7 +35,7 @@ const BLOCK_CSS = `
 
 .dsh-warp-terminal-block-actions{flex:none;display:flex;gap:2px;align-items:center;opacity:0;transition:opacity .12s ease}
 .dsh-warp-block-overlay:hover .dsh-warp-terminal-block-actions{opacity:1}
-.dsh-warp-terminal-prompt-line{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:clip;min-width:0;opacity:.85;user-select:text}
+.dsh-warp-terminal-prompt-line{font-family:var(--dsh-codex-terminal-font-family,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:13px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:clip;min-width:0;opacity:.85;user-select:text}
 /* Prompt segment colors default to the LIGHT palette (GitHub-light flavored);
    the data-ds-dark-theme block at the end restates the original One Dark
    values, which are too light to read on a white surface. */
@@ -59,13 +59,13 @@ const BLOCK_CSS = `
    is extended by the editor's measured height to keep it reachable. No border — the block chrome above already separates runs. */
 .dsh-warp-terminal-block-editing{position:absolute;left:0;right:0;z-index:4;border-bottom:none;padding-top:2px;padding-bottom:14px}
 .dsh-warp-terminal-chips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 6px}
-.dsh-warp-terminal-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;background:rgba(0,0,0,.05);border:1px solid rgba(0,0,0,.08);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--dsw-alias-label-secondary,#57606a);white-space:nowrap}
-.dsh-warp-terminal-command-textarea{position:relative;z-index:1;display:block;width:100%;box-sizing:border-box;resize:none;border:none;background:transparent;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;outline:none;padding:0 2px;white-space:pre-wrap;overflow:hidden}
+.dsh-warp-terminal-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;background:rgba(0,0,0,.05);border:1px solid rgba(0,0,0,.08);font-family:var(--dsh-codex-terminal-font-family,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:12px;color:var(--dsw-alias-label-secondary,#57606a);white-space:nowrap}
+.dsh-warp-terminal-command-textarea{position:relative;z-index:1;display:block;width:100%;box-sizing:border-box;resize:none;border:none;background:transparent;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:var(--dsh-codex-terminal-font-family,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:13px;line-height:1.6;outline:none;padding:0 2px;white-space:pre-wrap;overflow:hidden}
 .dsh-warp-terminal-command-textarea:disabled{opacity:.6}
 .dsh-warp-terminal-editor-wrap{position:relative;z-index:30}
-.dsh-warp-terminal-ghost{position:absolute;inset:0;z-index:0;padding:0 2px;overflow:hidden;pointer-events:none;white-space:pre-wrap;word-wrap:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;color:transparent}
+.dsh-warp-terminal-ghost{position:absolute;inset:0;z-index:0;padding:0 2px;overflow:hidden;pointer-events:none;white-space:pre-wrap;word-wrap:break-word;font-family:var(--dsh-codex-terminal-font-family,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:13px;line-height:1.6;color:transparent}
 .dsh-warp-terminal-ghost-hint{color:var(--dsw-alias-label-tertiary,#8b8b90)}
-.dsh-warp-terminal-ghost-accept{margin-left:8px;color:var(--dsw-alias-label-tertiary,#8b8b90);font-family:Inter,var(--dsw-font-family,sans-serif);font-size:11px}
+.dsh-warp-terminal-ghost-accept{margin-left:8px;color:var(--dsw-alias-label-tertiary,#8b8b90);font-family:var(--dsw-font-family,Inter,sans-serif);font-size:11px}
 /* The completion menu opens downward while the editor sits high in the
    viewport, and flips upward (-up) once the editor nears the bottom edge —
    the view computes the flip from the editor's on-screen position. */

@@ -7,7 +7,7 @@
  * `./shared.ts`.
  */
 import type { Agent } from '@just-genius/dsh-plugin-runtime/host'
-import type { FlowConfirmRequest, FlowNodeSpec, FlowNote, FlowPlanStatus, NodeStatus } from './shared.ts'
+import type { FlowConfirmRequest, FlowNodeSpec, FlowNote, FlowPlanStatus, FlowTokenUsage, NodeStatus } from './shared.ts'
 
 /**
  * The live handle of one dispatched child.
@@ -26,6 +26,8 @@ export interface DispatchedRun {
    * see `running` before a child id exists.
    */
   childId: string | null
+  /** Live provider usage from the child's local session, when available. */
+  readonly usage: () => FlowTokenUsage | null
   /** Cancels remaining child work and releases resources; idempotent. */
   readonly dispose: () => Promise<void>
   /** Never rejects for a child-level failure — it resolves with a stop reason. */
@@ -37,6 +39,7 @@ export interface ChildOutcome {
   readonly stopReason: string
   readonly output: string
   readonly diagnostic: string | null
+  readonly usage: FlowTokenUsage | null
 }
 
 /** Execution state of one node, alongside its model-authored spec. */
@@ -51,8 +54,11 @@ export interface RuntimeNode {
   /** Truncated projection of `output` for the canvas. */
   summary: string | null
   diagnostic: string | null
-  /** Progress notes the running child posted via `flow.report`. */
+  /** Progress notes the running child posted via `flow_report`. */
   notes: FlowNote[]
+  startedAt: string | null
+  endedAt: string | null
+  usage: FlowTokenUsage | null
   updatedAt: string
   attempts: number
 }

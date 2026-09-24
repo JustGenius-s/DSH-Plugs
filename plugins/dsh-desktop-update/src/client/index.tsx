@@ -1,8 +1,7 @@
 // Browser half of @just-genius/dsh-desktop-update.
 //
-// Registers the `desktop-update` settings card into the Plugins section's
-// configurable tab (`settings.plugin.item`; on older hosts the
-// card simply never dispatches) and, when the desktop shell is present, uses
+// Registers Software updates on this bundle's Plugins detail page on current
+// hosts, or in the legacy configurable tab, and, when the desktop shell is present, uses
 // the three-family `window.dshDesktop` API: `seats` for applicationMenu +
 // tray, `notify` for system notifications. A plain browser has no
 // `dshDesktop` and the native half stays inert.
@@ -22,7 +21,7 @@ export const inject = [
   CLIENT_SERVICES.locale,
   CLIENT_SERVICES.connection,
   CLIENT_SERVICES.remote,
-  CLIENT_SERVICES.settingsScope,
+  CLIENT_SERVICES.settingsSchema,
 ] as const
 
 /** Dictionary namespace owned by this plugin. */
@@ -129,7 +128,7 @@ export function apply(ctx: ClientContext): void {
         (apply) => store.subscribe(apply),
         {
           checkNow: () => { store.checkNow() },
-          downloadApp: () => { void bridge()?.updates.downloadApp().catch(() => {}) },
+          downloadApp: (url) => { void bridge()?.updates.downloadApp(url).catch(() => {}) },
           updateDsh: (version) => { void store.updateDsh(version) },
           relaunch: () => { bridge()?.updates.relaunch() },
         },
@@ -140,6 +139,18 @@ export function apply(ctx: ClientContext): void {
   // Bound on this fiber: disposal, invalidation subscriptions, and the
   // initial Host read are owned by the binder's ctx.effect.
   const scope = getSettingsScope(ctx).bind<DesktopUpdateConfig>({ namespace: SETTINGS_NS })
+  if (ctx.get('configForms') !== undefined) {
+    // The plugin manager owns this keyed slot. `plugins.item` is reserved
+    // for official settings pages; third-party bundles configure here.
+    ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+      name: 'plugins.bundle.config',
+      key: '@just-genius/dsh-desktop-update',
+      locale: NS as never,
+      inject: () => ({ scope, store }),
+    }, UpdateCard as never))
+    return
+  }
+
   ctx.slots.inject('settings.plugin.item', () =>
     ctx.slots.register(
       {

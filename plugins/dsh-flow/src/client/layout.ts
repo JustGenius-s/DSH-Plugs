@@ -1,9 +1,9 @@
 /**
- * Canvas geometry: turn the plan's dependency edges into stable x/y columns.
+ * Canvas geometry: turn the plan's dependency edges into stable top-down rows.
  *
  * Layout must be *stable* — the canvas polls the host, and a layout that
- * reshuffles on every poll makes the graph unreadable. So x comes from the
- * topological depth (deterministic) and y from the plan's own insertion order
+ * reshuffles on every poll makes the graph unreadable. So y comes from the
+ * topological depth (deterministic) and x from the plan's own insertion order
  * (also deterministic), never from a force simulation or from object iteration.
  */
 import type { FlowNodeView } from '../shared.ts'
@@ -15,32 +15,28 @@ export interface LaidOutNode {
 }
 
 const COLUMN_WIDTH = 300
-const ROW_HEIGHT = 140
+const ROW_HEIGHT = 180
 const ORIGIN_X = 24
 const ORIGIN_Y = 24
 
 /**
- * Assign each node a column by its longest dependency path, then stack nodes
- * within a column in plan order.
+ * Assign each node a row by its longest dependency path, then place nodes
+ * within a row from left to right in plan order.
  */
 export function layoutNodes(nodes: readonly FlowNodeView[]): LaidOutNode[] {
   const depths = computeDepths(nodes)
-  const rowOf = new Map<string, number>()
-
-  // Reserve rows column by column so a node never lands on top of a node in
-  // the same column, and so column height stays balanced across columns.
-  const rowCursor = new Map<number, number>()
+  // Reserve a separate column for each node at the same dependency depth.
+  const columnCursor = new Map<number, number>()
   const placed: LaidOutNode[] = []
 
   for (const node of nodes) {
     const depth = depths.get(node.id) ?? 0
-    const row = rowCursor.get(depth) ?? 0
-    rowCursor.set(depth, row + 1)
-    rowOf.set(node.id, row)
+    const column = columnCursor.get(depth) ?? 0
+    columnCursor.set(depth, column + 1)
     placed.push({
       node,
-      x: ORIGIN_X + depth * COLUMN_WIDTH,
-      y: ORIGIN_Y + row * ROW_HEIGHT,
+      x: ORIGIN_X + column * COLUMN_WIDTH,
+      y: ORIGIN_Y + depth * ROW_HEIGHT,
     })
   }
 

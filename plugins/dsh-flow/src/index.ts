@@ -4,9 +4,9 @@
  * Owns the workflow graph, dispatching each step to a child agent, and serves a
  * wire-safe projection to the browser canvas.
  *
- * Flow mode is OFF until the user turns it on with `/flow` (or the canvas
- * toggle). While it is off, the `flow.*` tools stay invisible and the Leader
- * contract is not injected — the plugin costs the model nothing.
+ * Flow mode is OFF until the user turns it on with `/flow` or its menu action.
+ * While it is off, the Leader contract is not injected and the Flow planning
+ * tools reject calls from the Leader.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
@@ -19,7 +19,7 @@ import { IDLE_HINT, LEADER_POLICY } from './policy.ts'
 import { createFlowTools } from './tools.ts'
 import {
   ACTION_PATH,
-  FLOW_COMMAND,
+  FLOW_TOOL_NAMES,
   MODE_PATH,
   STATE_PATH,
   clampConcurrency,
@@ -30,6 +30,7 @@ import {
 
 export const name = 'dsh-flow'
 export const inject = [
+  HOST_SERVICES.agents,
   HOST_SERVICES.systemPrompt,
   HOST_SERVICES.tools,
   HOST_SERVICES.webServer,
@@ -44,33 +45,13 @@ export const inject = [
  */
 const LEADER_SECTION_ORDER = 30
 
-/**
- * Tools the Leader may still call while Flow mode is on.
- *
- * Everything else — notably `edit`, `write`, `bash` — disappears from the
- * model's visible tool set, which is what makes "the Leader only plans" a
- * structural guarantee rather than a request. Read-only tools stay because a
- * Leader that can read the codebase plans better; the point is to remove the
- * ability to *do* the work, not to blind it.
- */
+/** Execution allowlist for the Leader; all investigation and implementation belongs to children. */
 const LEADER_TOOL_ALLOWLIST = [
-  'flow.plan',
-  'flow.status',
-  'flow.next',
-  'flow.expand',
-  'flow.confirm',
-  'flow.report',
-  'flow.patch',
-  'flow.clear',
-  'read',
-  'glob',
-  'grep',
-  'read_image',
-  'web_search',
-  'web_fetch',
-  'skill',
-  'todo_write',
-  'ask_user_question',
+  FLOW_TOOL_NAMES.plan,
+  FLOW_TOOL_NAMES.status,
+  FLOW_TOOL_NAMES.next,
+  FLOW_TOOL_NAMES.patch,
+  FLOW_TOOL_NAMES.confirm,
 ] as const
 
 /** The subagent seam, narrowed to the two calls this plugin makes. */
@@ -84,6 +65,7 @@ interface SubagentService {
     readonly persona?: string
   }): Promise<{
     readonly id: string
+    readonly localAgent?: { readonly session: { readonly events?: unknown; readonly snapshotEvents?: () => unknown } }
     readonly result: Promise<{
       readonly stopReason: string
       readonly output: readonly { readonly type: string; readonly text?: string }[]
@@ -142,8 +124,11 @@ export function apply(ctx: Context): void {
       const agent = exec.agent
       if (agent === undefined) return undefined
       if (!modes.isOn(sessionIdOf(agent))) return undefined
+      // PTC/code mode exposes only this reserved transport to the model. Its
+      // SDK sub-calls retain the Leader agent and run through this guard again.
+      if (exec.name === 'run_code') return undefined
       if (LEADER_TOOL_ALLOWLIST.includes(exec.name as never)) return undefined
-      return `Flow mode is on: "${exec.name}" is unavailable to the Leader. Express this work as a step in the graph (flow.plan / flow.patch) and let a child agent execute it, or leave Flow mode with \`/flow off\`.`
+      return `Flow mode is on: "${exec.name}" is unavailable to the Leader. Express this work as a step in the graph (flow_plan / flow_patch) and let a child agent execute it, or leave Flow mode with \`/flow off\`.`
     }),
     'dsh-flow: leader tool guard',
   )
@@ -169,23 +154,14 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: ACTION_PATH,
-    handler: (req, res) => { void handleAction(req, res, orchestrator, modes) },
+    handler: (req, res) => { void handleAction(ctx, req, res, orchestrator, modes) },
   }), 'dsh-flow: action route')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: MODE_PATH,
-    handler: (req, res) => { void handleMode(req, res, modes) },
+    handler: (req, res) => { void handleMode(ctx, req, res, modes, orchestrator) },
   }), 'dsh-flow: mode route')
-
-  ctx.inject([HOST_SERVICES.commands], (commandCtx) => {
-    ctx.effect(() => commandCtx.commands.register({
-      name: FLOW_COMMAND,
-      description: 'Enter or leave Flow mode (Leader plans, child agents execute)',
-      input: { hint: '[off|message]' },
-      handler: ({ agent, rawInput }) => handleFlowCommand(agent, rawInput, modes, orchestrator),
-    }), 'dsh-flow: command')
-  })
 
   ctx.effect(() => () => {
     orchestrator.shutdown()
@@ -226,31 +202,27 @@ function handleFlowCommand(
 }
 
 function formatOn(outcome: string, turnOpen: boolean, forwarded: boolean): string {
-  const forwardedNote = forwarded ? ' The rest of the line was forwarded as the task.' : ''
+  const forwardedNote = forwarded ? '命令后的内容已作为任务发送。' : ''
   switch (outcome) {
     case 'noop':
-      return `Flow mode is already on.${forwardedNote}`
+      return `Flow 模式已开启。${forwardedNote}`
     case 'queued':
-      return `Entering Flow mode (applies from the next step).${forwardedNote}`
+      return `正在开启 Flow 模式，将从下一步生效。${forwardedNote}`
     default:
       return turnOpen
-        ? `Flow mode on. From the next step I will plan work as a graph and delegate each step to a child agent.${forwardedNote}`
-        : [
-            'Flow mode on. I am now the Leader: I plan work as a dependency graph and',
-            'delegate each step to a child agent. Execution tools are unavailable to me',
-            'while this mode is on — use `/flow off` to leave.',
-          ].join(' ') + forwardedNote
+        ? `Flow 模式已开启。从下一步开始，主 Agent 负责规划流程，并将各步骤交给子 Agent 执行。${forwardedNote}`
+        : `Flow 模式已开启。主 Agent 负责规划流程，子 Agent 负责执行各步骤。主 Agent 的执行工具已禁用，输入 \`/flow off\` 可退出。${forwardedNote}`
   }
 }
 
 function formatOff(outcome: string): string {
   switch (outcome) {
     case 'noop':
-      return 'Flow mode is already off.'
+      return 'Flow 模式已关闭。'
     case 'queued':
-      return 'Leaving Flow mode (applies from the next step).'
+      return '正在退出 Flow 模式，将从下一步生效。'
     default:
-      return 'Flow mode off. Execution tools restored; any running child agents were cancelled.'
+      return 'Flow 模式已关闭，执行工具已恢复，正在运行的子 Agent 已取消。'
   }
 }
 
@@ -281,6 +253,7 @@ async function handleState(
 }
 
 async function handleAction(
+  ctx: Context,
   req: IncomingMessage,
   res: ServerResponse,
   orchestrator: FlowOrchestrator,
@@ -308,9 +281,7 @@ async function handleAction(
     return
   }
   if (action.kind === 'setMode') {
-    const outcome = setFlowMode(modes, sessionId, action.on, false)
-    if (!action.on && orchestrator.view() !== null) orchestrator.applyAction({ kind: 'clear' })
-    send(res, 200, { ok: true, value: { ok: true, message: outcome } })
+    respondCommand(ctx, res, modes, orchestrator, sessionId, action.on ? '' : 'off')
     return
   }
   if (action.kind === 'setConcurrency') {
@@ -322,8 +293,14 @@ async function handleAction(
   send(res, 200, { ok: true, value: result })
 }
 
-/** `GET/POST MODE_PATH` — lets the canvas toggle Flow mode without the command. */
-async function handleMode(req: IncomingMessage, res: ServerResponse, modes: FlowModeStore): Promise<void> {
+/** `GET/POST MODE_PATH` — menu, typed command, and chip share mode semantics. */
+async function handleMode(
+  ctx: Context,
+  req: IncomingMessage,
+  res: ServerResponse,
+  modes: FlowModeStore,
+  orchestrator: FlowOrchestrator,
+): Promise<void> {
   const sessionId = sessionOf(req)
   if (sessionId === null) {
     send(res, 400, { ok: false, message: 'sessionId is required' })
@@ -348,13 +325,37 @@ async function handleMode(req: IncomingMessage, res: ServerResponse, modes: Flow
     send(res, 400, { ok: false, message: errorMessage(error) })
     return
   }
-  const value = (body ?? {}) as { on?: unknown }
+  const value = (body ?? {}) as { on?: unknown; rawInput?: unknown }
+  if (value.rawInput !== undefined) {
+    if (typeof value.rawInput !== 'string' || value.on !== undefined) {
+      send(res, 400, { ok: false, message: '`rawInput` must be a string and cannot be combined with `on`' })
+      return
+    }
+    respondCommand(ctx, res, modes, orchestrator, sessionId, value.rawInput)
+    return
+  }
   if (typeof value.on !== 'boolean') {
     send(res, 400, { ok: false, message: '`on` must be a boolean' })
     return
   }
-  const outcome = setFlowMode(modes, sessionId, value.on, false)
-  send(res, 200, { ok: true, value: { ok: true, message: outcome } })
+  respondCommand(ctx, res, modes, orchestrator, sessionId, value.on ? '' : 'off')
+}
+
+function respondCommand(
+  ctx: Context,
+  res: ServerResponse,
+  modes: FlowModeStore,
+  orchestrator: FlowOrchestrator,
+  sessionId: string,
+  rawInput: string,
+): void {
+  const agent = ctx.agents.get(sessionId as never)
+  if (agent === undefined) {
+    send(res, 404, { ok: false, message: 'session not found' })
+    return
+  }
+  const result = handleFlowCommand(agent, rawInput, modes, orchestrator)
+  send(res, 200, { ok: true, value: { ok: true, message: result.text } })
 }
 
 type ParsedRequest = FlowRequest | { kind: 'setConcurrency'; concurrency: number }
@@ -373,7 +374,7 @@ function parseRequest(body: unknown): ParsedRequest | null {
   }
   const nodeId = value.nodeId
   if (typeof nodeId !== 'string' || nodeId === '') return null
-  if (value.kind === 'retry' || value.kind === 'skip' || value.kind === 'cancel') {
+  if (value.kind === 'retry' || value.kind === 'skip' || value.kind === 'cancel' || value.kind === 'pause' || value.kind === 'resume') {
     return { kind: value.kind, nodeId }
   }
   return null

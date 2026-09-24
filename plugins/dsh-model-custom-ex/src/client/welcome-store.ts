@@ -5,10 +5,11 @@
  * stays process-local here.
  */
 
-import type { SettingsScope, SnapshotStore } from '@just-genius/dsh-plugin-runtime/client'
+import type { SettingsScope, SettingsScopeBinder, SnapshotStore } from '@just-genius/dsh-plugin-runtime/client'
 import { createSnapshotStore } from '@just-genius/dsh-plugin-runtime/client'
 import {
   WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_VERSION,
+  WELCOME_NOTICE_SETTINGS_ENTRY_ID, WELCOME_NOTICE_SETTINGS_NAMESPACE,
 } from '../onboarding-copy.ts'
 
 /** State rendered by the welcome step. */
@@ -32,6 +33,15 @@ export function decodeWelcomeSection(section: unknown): WelcomeSection {
   return typeof section === 'object' && section !== null && !Array.isArray(section)
     ? section as WelcomeSection
     : {}
+}
+
+/** Bind the acknowledgement to the settings location served by this DSH version. */
+export function createWelcomeNoticeStore(settings: SettingsScopeBinder): WelcomeNoticeStore {
+  return new WelcomeNoticeStore(settings.bind({
+    namespace: WELCOME_NOTICE_SETTINGS_NAMESPACE,
+    entryId: WELCOME_NOTICE_SETTINGS_ENTRY_ID,
+    decode: decodeWelcomeSection,
+  }))
 }
 
 /* v8 ignore next 3 -- closed-union default only defends future source widening */

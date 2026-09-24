@@ -2,7 +2,6 @@ import { createElement, useEffect, useSyncExternalStore } from 'react'
 import type {
   ClientContext,
   SettingsScope,
-  SidebarRightTabDefinition,
 } from '@just-genius/dsh-plugin-runtime/client'
 import { IconTerminalColor16 } from '@just-genius/dsh-plugin-ui'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../../../shared/config'
@@ -22,9 +21,6 @@ import type { QuickActionsContribution } from '../quick-actions/contribution'
 import { WarpTerminalView } from './warp-terminal-view'
 import type { TerminalControllerStore } from './controller'
 import {
-  TERMINAL_TAB_ID,
-  TERMINAL_TAB_KIND,
-  TERMINAL_RESOURCE_PATTERN,
   isTerminalResourceAddress,
   terminalControllerId,
   terminalCwd,
@@ -33,24 +29,9 @@ import {
 } from './contract'
 import { createTerminalLifetimeRegistry } from './lifetime'
 import { createTerminalReference } from './reference'
+import { legacyTerminalTabDefinition, terminalTabDefinition } from './definition'
 
 const NS = 'settings.codex'
-
-export function terminalTabDefinition(t: (key: CodexKey) => string): SidebarRightTabDefinition {
-  return {
-    id: TERMINAL_TAB_ID,
-    kind: TERMINAL_TAB_KIND,
-    patterns: [TERMINAL_RESOURCE_PATTERN],
-    priority: 'extension',
-    canOpen: isTerminalResourceAddress,
-    title: () => t('view.warpTerminal'),
-    guide: [{
-      order: 20,
-      title: () => t('view.warpTerminal'),
-      icon: IconTerminalColor16,
-    }],
-  }
-}
 
 export function createTerminalFeature(
   ctx: ClientContext,
@@ -143,6 +124,7 @@ export function createTerminalFeature(
                   terminalShell: config.terminalShell,
                   terminalScrollback: config.terminalScrollback,
                   terminalFontSize: config.terminalFontSize,
+                  codeFontFamily: config.codeFontFamily,
                   controllerStore,
                   controllerId,
                   visible,
@@ -166,14 +148,14 @@ export function createTerminalFeature(
             return sidebarTabTitle(IconTerminalColor16, props.t('view.warpTerminal'))
           }
 
-          const disposeRegistration = registerSidebarTab(
-            ctx,
-            terminalTabDefinition(t),
-            TerminalTab,
-            { locale: NS, title: TerminalTitle },
-          )
+          const registrations = [
+            terminalTabDefinition(t, IconTerminalColor16),
+            legacyTerminalTabDefinition(t),
+          ].map(definition => registerSidebarTab(
+            ctx, definition, TerminalTab, { locale: NS, title: TerminalTitle },
+          ))
           return () => {
-            disposeRegistration()
+            for (const dispose of registrations.reverse()) dispose()
             retainedTabs.dispose()
             lifetimes.dispose()
           }

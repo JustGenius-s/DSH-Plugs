@@ -176,9 +176,9 @@ function syncNotify(state: DesktopUpdateState | null): void {
 export interface SeatHandlers {
   /** Re-run detection now. */
   checkNow: () => void
-  /** Open the App download page. */
-  downloadApp: () => void
-  /** Install the given runtime version. */
+  /** Open the App download page for the release the seat advertised. */
+  downloadApp: (url: string) => void
+  /** Install the runtime version the seat advertised. */
   updateDsh: (version: string) => void
   /** Restart the desktop app. */
   relaunch: () => void
@@ -197,12 +197,17 @@ export function installDesktopSeats(
 ): () => void {
   const b = bridge()
   let alive = true
+  // The snapshot the current seat items were rendered from. Menu items are
+  // built from it (the "update runtime" item is only enabled when it has a
+  // pending dsh update), so their actions must use the same version / URL the
+  // label promised rather than re-resolving on click.
+  let rendered: DesktopUpdateState | null = null
 
   const unsubSeat = b?.seats?.onAction((action) => {
     if (!alive || action.contributor !== CONTRIBUTOR) return
     if (action.id === 'check-now') handlers.checkNow()
-    else if (action.id === 'download-app') handlers.downloadApp()
-    else if (action.id === 'update-dsh') handlers.updateDsh('')
+    else if (action.id === 'download-app') handlers.downloadApp(rendered?.app?.url ?? '')
+    else if (action.id === 'update-dsh') handlers.updateDsh(rendered?.dsh?.latest ?? '')
     else if (action.id === 'relaunch') handlers.relaunch()
   }) ?? (() => {})
 
@@ -213,7 +218,8 @@ export function installDesktopSeats(
     handlers.checkNow()
   }) ?? (() => {})
 
-  const apply = (state: DesktopUpdateState | null) => {
+  const apply = (state: DesktopUpdateState | null): void => {
+    rendered = state
     void push(state)
     syncNotify(state)
   }

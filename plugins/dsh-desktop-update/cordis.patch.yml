@@ -3,8 +3,8 @@
 # Installing this package joins it to the profile's bundle stack because
 # package.json declares `dsh.bundle.patch`. This patch inserts the plugin's
 # loader row into the tree; the row's `name` is the module specifier the
-# loader imports (the package's own name). No host `config` is needed: the
-# host body is empty and all behavior lives in the browser half.
+# loader imports (the package's own name). The host owns update detection and
+# live settings; omitted configuration resolves through the Config defaults.
 
 - insert:
     - id: desktop-update

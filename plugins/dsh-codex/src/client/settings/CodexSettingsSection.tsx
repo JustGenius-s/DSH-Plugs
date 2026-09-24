@@ -14,6 +14,7 @@ import {
   type TerminalShell,
 } from '../../shared/config'
 import type { CodexKey } from '../locales'
+import { FontSettings } from './FontSettings'
 
 export interface CodexSettingsInjected {
   scope: SettingsScope<DshCodexConfig>
@@ -209,6 +210,10 @@ function SettingsBody(props: CodexSettingsInjected) {
       <p style={{ margin: '0 0 12px', color: 'var(--dsw-alias-label-secondary)', lineHeight: '20px' }}>{t('description')}</p>
       {snapshot.status === 'loading' ? <p style={{ color: 'var(--dsw-alias-label-secondary)' }}>{t('statusLoading')}</p> : null}
       {snapshot.status === 'unavailable' ? <p style={{ color: 'var(--dsw-alias-label-secondary)' }}>{t('statusUnavailable')}</p> : null}
+
+      <Group title={t('groupFonts')}>
+        <FontSettings scope={scope} value={value} writable={snapshot.status === 'ready' && snapshot.writable} t={t} />
+      </Group>
 
       <Group title={t('groupConversation')}>
         <FieldRow label={t('longMessageCollapseEnabled')}>

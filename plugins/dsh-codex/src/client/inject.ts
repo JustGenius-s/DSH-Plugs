@@ -26,5 +26,6 @@ export const CODEX_CLIENT_INJECT = [
   CLIENT_SERVICES.sidebarRightTabs,
   // Terminal selections and file review comments register `@` codecs here.
   CLIENT_SERVICES.inputTriggers,
-  CLIENT_SERVICES.settingsScope,
+  // Published by both the legacy settingsScope and 0.1.7 configForms provider.
+  CLIENT_SERVICES.settingsSchema,
 ] as const

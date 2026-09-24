@@ -1,6 +1,6 @@
 # Bundle patch for @just-genius/dsh-flow.
 #
-# Host half owns the workflow graph, the subagent dispatcher, the flow.* model
+# Host half owns the workflow graph, the subagent dispatcher, the flow_* model
 # tools, and the HTTP projection. Browser half paints the Flow tab with React
 # Flow.
 

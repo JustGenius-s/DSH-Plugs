@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
-import { expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
+import type { InputTriggerSource } from '@just-genius/dsh-plugin-runtime/client'
+import type { FlowCommand } from '../src/client/command.ts'
+
+afterEach(() => vi.unstubAllGlobals())
 
 const require = createRequire(import.meta.url)
 const CLIENT = fileURLToPath(new URL('../lib/client.js', import.meta.url))
@@ -115,32 +119,126 @@ test('client bundle loads without process, require, or module', () => {
   expect(typeof mod?.apply).toBe('function')
 })
 
-test('client bundle declares only the slots injection', () => {
+test('client bundle declares the command and Sidebar services', () => {
   const { mod } = loadInBrowserScope()
-  expect(mod?.inject).toEqual(['slots'])
+  expect(mod?.inject).toEqual(['slots', 'locale', 'sidebarRight', 'sidebarRightTabs', 'inputTriggers', 'commandUi'])
 })
 
-test('apply registers only the Flow conversation view', () => {
-  const { mod, registered } = loadInBrowserScope()
+function installClient() {
+  const loaded = loadInBrowserScope()
+  const disposers: Array<() => void> = []
+  const unregister = vi.fn()
+  const registerDefinition = vi.fn(() => unregister)
+  const decorate = vi.fn(() => unregister)
+  const registerCommand = vi.fn((_command: FlowCommand) => unregister)
+  const registerSource = vi.fn((_source: InputTriggerSource) => unregister)
+  const openTab = vi.fn()
+  let language = 'zh'
+  let dictionaries: Record<string, Record<string, string>> = {}
   const ctx = {
+    effect(register: () => () => void) {
+      const dispose = register()
+      disposers.push(dispose)
+      return dispose
+    },
+    locale: {
+      register(_namespace: string, values: typeof dictionaries) {
+        dictionaries = values
+        return unregister
+      },
+      bind: () => (key: string) => dictionaries[language]![key],
+    },
+    get: () => ({ decorate, register: registerCommand }),
+    inputTriggers: { registerSource },
+    sidebarRight: { openTab },
+    sidebarRightTabs: { register: registerDefinition },
     slots: {
-      inject(key: string, cb: () => void) {
-        if (key === 'conversation.view') cb()
-        return () => {}
+      inject(_key: string, cb: () => () => void) {
+        const dispose = cb()
+        disposers.push(dispose)
+        return dispose
       },
       register(opts: Record<string, unknown>, comp: unknown) {
-        registered.push({ ...opts, component: typeof comp })
-        return () => {}
+        loaded.registered.push({ ...opts, component: typeof comp })
+        return unregister
       },
     },
   }
-  mod!.apply(ctx)
+  loaded.mod!.apply(ctx)
+  return {
+    ...loaded, registerDefinition, decorate, registerCommand, registerSource, openTab, disposers, unregister,
+    setLanguage: (next: string) => { language = next },
+  }
+}
 
-  expect(registered.length).toBe(1)
-  expect(registered[0]!.name).toBe('conversation.view')
-  expect(registered[0]!.id).toBe('flow')
-  expect(registered[0]!.label).toBe('Flow')
-  expect(registered[0]!.component).toBe('function')
+test('apply registers a Sidebar page and composer chip, without a conversation view', () => {
+  const { registered, registerDefinition } = installClient()
+  expect(registered).toEqual([
+    { name: 'sidebar.right.pane.tab', key: '@just-genius/dsh-flow', component: 'function' },
+    { name: 'sidebar.right.pane.tab.title', key: '@just-genius/dsh-flow', component: 'function' },
+    expect.objectContaining({ name: 'conversation.input.left', id: 'flow-chip', locale: 'flow', component: 'function' }),
+  ])
+  expect(registerDefinition).toHaveBeenCalledWith(expect.objectContaining({
+    id: '@just-genius/dsh-flow',
+    kind: 'dsh-flow',
+    priority: 'extension',
+    guide: [expect.objectContaining({ id: 'new', title: expect.any(Function) })],
+  }))
+  const chip = registered[2]!
+  expect((chip.inject as (sessionId: string) => unknown)('session-2')).toEqual({ sessionId: 'session-2' })
+})
+
+test('bare /flow opens the Sidebar and enables the selected session without a duplicate command', async () => {
+  const fetch = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ ok: true, value: { ok: true, mode: true } }),
+  }))
+  vi.stubGlobal('fetch', fetch)
+  const { decorate, registerCommand, openTab } = installClient()
+  expect(decorate).not.toHaveBeenCalled()
+  expect(registerCommand).toHaveBeenCalledTimes(1)
+  const command = registerCommand.mock.calls[0]![0]
+  expect(command.name).toBe('flow')
+  expect(command.ui.kind).toBe('action')
+  command.ui.run({ sessionId: 'session/2' })
+  expect(openTab).toHaveBeenCalledWith('dsh-flow')
+  expect(fetch).toHaveBeenCalledWith('/api/dsh-flow/mode?sessionId=session%2F2', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ on: true }),
+  }))
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+})
+
+test('the registered menu row exposes a localized title, description, and monochrome icon', () => {
+  const { registerCommand, setLanguage } = installClient()
+  const command = registerCommand.mock.calls[0]![0]
+  expect(command.label()).toBe('流程')
+  expect(command.description()).toContain('主 Agent 规划')
+  expect(command.icon.name).toBe('IconFlowOutline16')
+  setLanguage('en')
+  expect(command.label()).toBe('Flow')
+  expect(command.description()).toContain('the Leader plans')
+})
+
+test('typed command arguments use the mode route and surface failures to the composer', async () => {
+  const fetch = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({ ok: true, value: { ok: true, mode: true } }),
+  }))
+  vi.stubGlobal('fetch', fetch)
+  const { registerSource, openTab } = installClient()
+  const source = registerSource.mock.calls[0]![0]
+  const result = source.matchSpace!({ sessionId: 'session/2' as never }, '/flow')
+  if (result === undefined || typeof result !== 'object' || !('claim' in result)) throw new Error('missing Flow claim')
+  expect(await result.claim.submit('调整登录流程', {} as never, [])).toEqual({ kind: 'success' })
+  expect(fetch).toHaveBeenCalledWith('/api/dsh-flow/mode?sessionId=session%2F2', expect.objectContaining({
+    method: 'POST', body: JSON.stringify({ rawInput: '调整登录流程' }),
+  }))
+  expect(openTab).toHaveBeenCalledWith('dsh-flow')
+  openTab.mockClear()
+  expect(await result.claim.submit('off', {} as never, [])).toEqual({ kind: 'success' })
+  expect(openTab).not.toHaveBeenCalled()
+  fetch.mockRejectedValueOnce(new Error('offline'))
+  expect(await result.claim.submit('off', {} as never, [])).toEqual({ kind: 'error', text: 'offline' })
 })
 
 test('bundle self-injects its stylesheets at load time', () => {

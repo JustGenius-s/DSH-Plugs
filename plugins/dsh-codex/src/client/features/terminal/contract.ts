@@ -1,5 +1,9 @@
-export const TERMINAL_TAB_KIND = 'dsh-codex-terminal'
+// Sharing the built-in kind lets DSH select our extension and its guide entry.
+export const TERMINAL_TAB_KIND = 'terminal'
 export const TERMINAL_TAB_ID = '@just-genius/dsh-codex/terminal'
+// Saved layouts from before the takeover still carry this kind.
+export const LEGACY_TERMINAL_TAB_KIND = 'dsh-codex-terminal'
+export const LEGACY_TERMINAL_TAB_ID = '@just-genius/dsh-codex/terminal/legacy'
 export const TERMINAL_RESOURCE_PATTERN = 'dsh-resource://dsh-codex-terminal/**'
 
 const TERMINAL_RESOURCE_PREFIX = 'dsh-resource://dsh-codex-terminal/'

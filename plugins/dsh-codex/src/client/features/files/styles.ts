@@ -1,7 +1,7 @@
 import { injectStyles } from '@just-genius/dsh-plugin-ui'
 
 const FILES_CSS = `
-.dsh-files{height:100%;display:flex;flex-direction:column;min-height:0;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:Inter,var(--dsw-font-family,sans-serif)}
+.dsh-files{height:100%;display:flex;flex-direction:column;min-height:0;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:var(--dsw-font-family,Inter,sans-serif)}
 .dsh-files-status{padding:16px 12px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#b0b0b5)}
 .dsh-files-status.is-error{color:#cf222e}
 .dsh-files-tree{flex:1;min-height:0;display:flex;flex-direction:column}
@@ -72,7 +72,7 @@ body[data-ds-dark-theme] .dsh-files-code-line.is-find-active-line{background:rgb
 .dsh-files-tree-dir{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b8b90)}
 .dsh-files-tree-note{padding:4px 12px;font-size:12px;line-height:18px}
 /* Wrapped rows stay in normal flow because their height depends on pane width. */
-.dsh-files-view{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;position:relative;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:21px}
+.dsh-files-view{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;position:relative;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:13px;line-height:21px}
 .dsh-files-code,.dsh-files-diff-body{position:relative;width:100%;min-width:0;padding:0 0 8px;box-sizing:border-box}
 .dsh-files-expand-slot{width:100%;padding:8px;box-sizing:border-box}
 .dsh-files-code-entry,.dsh-files-diff-entry{width:100%;min-width:0}
