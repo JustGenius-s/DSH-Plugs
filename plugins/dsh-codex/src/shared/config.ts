@@ -29,16 +29,19 @@ export interface DshCodexConfig {
   /** Cap on in-window user messages while full-session load is on (inclusive). */
   fullSessionLoadLimit: number
   terminalEnabled: boolean
+  /**
+   * Switch off DSH's built-in terminal: its guide entry disappears and any of
+   * its sidebar tabs close, while the Codex terminal panel is unaffected.
+   */
+  officialTerminalDisabled: boolean
   gitGraphEnabled: boolean
   /** Prefer the retained Codex file tree and previews over DSH's built-ins. */
   customFilesEnabled: boolean
   /** Offer the side-chat panel: a blank conversation beside the current session. */
   sideChatEnabled: boolean
   /**
-   * Hand a new side chat a digest of the parent conversation as context.
-   *
-   * Context, not history: the side chat's own transcript still starts empty —
-   * the digest only tells the side agent what the main task is about.
+   * Link a new side chat to the main conversation and allow on-demand reads.
+   * No parent turns are injected when the side chat opens.
    */
   sideChatContextEnabled: boolean
   /** Light syntax-highlight theme id for the files panel (see client catalog). */
@@ -63,6 +66,7 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   fullSessionLoadEnabled: false,
   fullSessionLoadLimit: 25,
   terminalEnabled: true,
+  officialTerminalDisabled: false,
   gitGraphEnabled: true,
   customFilesEnabled: false,
   sideChatEnabled: true,

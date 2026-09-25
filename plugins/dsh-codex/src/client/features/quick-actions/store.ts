@@ -47,21 +47,21 @@ export function createQuickActionsStore(
   return {
     getSnapshot: channel.getSnapshot,
     subscribe: channel.subscribe,
-    add(action) {
+    async add(action) {
       const id = action.id.trim() || newId()
-      return scope.set('quickActions', [
+      await scope.set('quickActions', [
         ...current(),
         { ...action, id, steps: action.steps.map(step => ({ ...step })) },
       ])
     },
-    update(action) {
+    async update(action) {
       const next = current().map(item => item.id === action.id
         ? { ...action, steps: action.steps.map(step => ({ ...step })) }
         : item)
-      return scope.set('quickActions', next)
+      await scope.set('quickActions', next)
     },
-    remove(id) {
-      return scope.set('quickActions', current().filter(action => action.id !== id))
+    async remove(id) {
+      await scope.set('quickActions', current().filter(action => action.id !== id))
     },
     dispose() {
       unsubscribeScope()

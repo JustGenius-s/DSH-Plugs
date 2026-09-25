@@ -284,6 +284,9 @@ function SettingsBody(props: CodexSettingsInjected) {
         <FieldRow label={t('terminalEnabled')}>
           <Switch label={t('terminalEnabled')} checked={value.terminalEnabled} onChange={next => set('terminalEnabled', next)} />
         </FieldRow>
+        <FieldRow label={t('officialTerminalDisabled')}>
+          <Switch label={t('officialTerminalDisabled')} checked={value.officialTerminalDisabled} onChange={next => set('officialTerminalDisabled', next)} />
+        </FieldRow>
         <FieldRow label={t('terminalShell')}>
           <ShellMenu label={t('terminalShell')} value={value.terminalShell} t={t} onChange={next => set('terminalShell', next)} />
         </FieldRow>

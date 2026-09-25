@@ -16,7 +16,9 @@
  */
 
 import {
+  Fragment,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -35,10 +37,11 @@ import {
 import {
   draftPreviewsOf,
   imageFilesOf,
-  sideChatPromptContent,
   type SideChatConversationFace,
 } from './connection'
-import { debugPrompt } from './snapshot'
+import { sideChatApi } from './api'
+import { filterReferenceCandidates, insertSessionMention, mentionKeyAction, mentionQuery, moveMentionSelection } from './mentions'
+import type { SideChatReferenceCandidate } from '../../../shared/side-chat'
 import type { ModelCatalogModel, ModelReasoning, ModelSelection, SessionModels } from './types'
 import { modelLookupErrorMessage, modelMenuNotice } from './model-picker'
 import {
@@ -62,7 +65,9 @@ import {
 export interface SideChatComposerSession {
   /** Raw session id (avoid the duplicated SessionId brand across dsh-session copies). */
   sessionId: string
-  prompt(content: readonly unknown[], mode: 'queue' | 'steer'): Promise<unknown>
+  getSnapshot(): unknown
+  beginSubmission(input: unknown): unknown
+  prompt(content: readonly unknown[], mode: 'queue' | 'steer', signal?: AbortSignal, requestId?: unknown): Promise<unknown>
   cancel(): Promise<unknown>
   command?(line: string): Promise<unknown>
   /** Live sandbox-permission projection (`permissions` key). */
@@ -133,6 +138,57 @@ export function SideChatComposer({
   const [draftIds, setDraftIds] = useState<readonly unknown[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const mentionMenuRef = useRef<HTMLDivElement>(null)
+  const mentionListId = useId()
+  const [caret, setCaret] = useState({ start: 0, end: 0 })
+  const [mentionDismissed, setMentionDismissed] = useState(false)
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [referenceState, setReferenceState] = useState<{
+    sessionId: string
+    rows: SideChatReferenceCandidate[]
+    loading: boolean
+    error?: string
+  }>({ sessionId: '', rows: [], loading: true })
+  const range = mentionDismissed ? undefined : mentionQuery(draft, caret.start, caret.end)
+  const mentionOpen = range !== undefined
+  const referenceLoading = referenceState.loading || referenceState.sessionId !== session.sessionId
+  const referenceRows = useMemo(() => filterReferenceCandidates(
+    referenceLoading ? [] : referenceState.rows, range?.query ?? '',
+  ), [referenceLoading, referenceState.rows, range?.query])
+  const activeMentionIndex = Math.min(mentionIndex, Math.max(0, referenceRows.length - 1))
+
+  useEffect(() => {
+    if (!mentionOpen) return
+    const controller = new AbortController()
+    setReferenceState({ sessionId: session.sessionId, rows: [], loading: true })
+    void sideChatApi.references(session.sessionId, controller.signal).then(rows => {
+      if (!controller.signal.aborted) setReferenceState({ sessionId: session.sessionId, rows, loading: false })
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setReferenceState({
+        sessionId: session.sessionId, rows: [], loading: false,
+        error: cause instanceof Error ? cause.message : '会话列表加载失败',
+      })
+    })
+    return () => controller.abort()
+  }, [mentionOpen, session.sessionId])
+
+  useEffect(() => { setMentionIndex(0) }, [range?.query, range?.start])
+  useEffect(() => {
+    mentionMenuRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+  }, [activeMentionIndex])
+
+  const pickReference = (row: SideChatReferenceCandidate): void => {
+    if (range === undefined) return
+    const next = insertSessionMention(draft, range, row.mention)
+    setDraft(next.text)
+    setCaret({ start: next.caret, end: next.caret })
+    setMentionDismissed(true)
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.setSelectionRange(next.caret, next.caret)
+    })
+  }
 
   // Close the model menu on outside click / Escape.
   useEffect(() => {
@@ -192,24 +248,13 @@ export function SideChatComposer({
     setDraft('')
     setSending(true)
     try {
-      // DSH 0.1.5 serializes every draft kind through one attachment result;
-      // it also expects attachments before the optional text block.
-      const content = await sideChatPromptContent(conversation, submittedIds, text)
-      const result = await session.prompt(content, 'queue')
-      // Record what the send actually returned to the host trace: whether the
-      // RPC accepted the message is the first thing to rule in or out.
-      debugPrompt(session.sessionId, result)
-      if (result != null && typeof result === 'object' && 'ok' in result
-        && (result as { ok?: boolean }).ok === false) {
-        const err = (result as { error?: { message?: string } }).error
-        throw new Error(err?.message ?? '消息发送失败')
-      }
-
-      // Raw `session.prompt` does not settle the browser draft registry for
-      // us, so release only after Host admission succeeds. Any files added
-      // while this request was pending remain in the next draft.
-      if (conversation !== undefined && submittedIds.length > 0) {
-        for (const id of submittedIds) conversation.releaseDraftAttachment(id)
+      if (conversation === undefined) throw new Error('会话发送服务不可用')
+      // The 0.1.7 send path owns the local echo and draft attachment lifecycle.
+      // Calling session.prompt directly bypasses both, leaving queued sends
+      // invisible until Host admission and leaking browser draft attachments.
+      const result = await conversation.sendSession(session, text, submittedIds, 'queue')
+      if (result.kind !== 'success') throw new Error(result.text ?? '消息发送失败')
+      if (submittedIds.length > 0) {
         const consumed = new Set(submittedIds)
         setDraftIds(current => current.filter(id => !consumed.has(id)))
       }
@@ -373,14 +418,83 @@ export function SideChatComposer({
         </div>
       )}
       <div className="dsh-codex-sidechat-card">
+        {mentionOpen && (
+          <div className="dsh-codex-sidechat-mentions" ref={mentionMenuRef}>
+            <div className="dsh-codex-sidechat-mentions-heading">近七天活跃会话</div>
+            {referenceLoading ? <div className="dsh-codex-sidechat-mentions-status" role="status">正在加载会话…</div>
+              : referenceState.error ? <div className="dsh-codex-sidechat-mentions-status" role="alert">{referenceState.error}</div>
+                : referenceRows.length === 0 ? <div className="dsh-codex-sidechat-mentions-status" role="status">没有匹配的会话</div> : null}
+            <div id={mentionListId} role="listbox" aria-label="近七天活跃会话" className="dsh-codex-sidechat-mentions-list">
+              {referenceRows.map((row, index) => (
+                <Fragment key={row.sessionId}>
+                  {(index === 0 || row.sameWorkspace !== referenceRows[index - 1]?.sameWorkspace) && (
+                    <div className="dsh-codex-sidechat-mentions-heading" role="presentation">
+                      {row.sameWorkspace ? '当前工作区' : '其他工作区'}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    role="option"
+                    id={`${mentionListId}-${index}`}
+                    aria-selected={index === activeMentionIndex}
+                    tabIndex={-1}
+                    className="dsh-codex-sidechat-mention-option"
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => pickReference(row)}
+                    title={`${row.displayTitle ?? row.label}\n${row.cwd ?? ''}\n${row.sessionId}`}
+                  >
+                    <span className="dsh-codex-sidechat-mention-title">{row.displayTitle ?? row.label}</span>
+                    <span className="dsh-codex-sidechat-mention-id">{row.cwd ? `${row.cwd} · ` : ''}{row.sessionId}</span>
+                  </button>
+                </Fragment>
+              ))}
+            </div>
+          </div>
+        )}
         <textarea
+          ref={inputRef}
           className="dsh-codex-sidechat-composer-input"
           rows={3}
           value={draft}
           placeholder="给智能体发消息"
-          onChange={event => setDraft(event.target.value)}
+          aria-label="侧聊消息"
+          aria-autocomplete="list"
+          aria-controls={mentionOpen ? mentionListId : undefined}
+          aria-activedescendant={mentionOpen && referenceRows.length > 0 ? `${mentionListId}-${activeMentionIndex}` : undefined}
+          onChange={event => {
+            setDraft(event.target.value)
+            setCaret({ start: event.target.selectionStart, end: event.target.selectionEnd })
+            setMentionDismissed(false)
+          }}
+          onSelect={event => {
+            setCaret({ start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd })
+          }}
+          onBlur={event => {
+            if (!mentionMenuRef.current?.contains(event.relatedTarget)) setMentionDismissed(true)
+          }}
           onPaste={onPaste}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return
+            if (mentionOpen) {
+              const action = mentionKeyAction(event.key, event.shiftKey, false)
+              if (action === 'dismiss') {
+                event.preventDefault()
+                event.stopPropagation()
+                setMentionDismissed(true)
+                return
+              }
+              if (action === 'next' || action === 'previous') {
+                event.preventDefault()
+                setMentionIndex(moveMentionSelection(activeMentionIndex, action === 'next' ? 1 : -1, referenceRows.length))
+                return
+              }
+              if (action === 'pick') {
+                event.preventDefault()
+                const row = referenceRows[activeMentionIndex]
+                if (row !== undefined) pickReference(row)
+                return
+              }
+            }
             if (event.key !== 'Enter' || event.shiftKey) return
             // Enter must not send while an IME candidate window is open: the
             // keypress belongs to the composition (confirming 中文/日本語

@@ -48,6 +48,52 @@ export interface SidebarTabRegistrationOptions {
   title?: SidebarTabComponent
 }
 
+/** One open tab's metadata as the official cross-session inventory reports it. */
+export interface SidebarRightOpenTab {
+  sessionId: string
+  tabId: string
+  kind: string
+}
+
+/**
+ * Controller internals behind the typed SidebarRightService face: the shipped
+ * 0.1.5 controller also carries the cross-session tab inventory and a
+ * session-addressed close, which the typed face has not caught up with. Same
+ * dynamic-seam rule as DynamicSlots above.
+ */
+interface SidebarRightInternals {
+  openTabs: {
+    getSnapshot(): readonly SidebarRightOpenTab[]
+    subscribe(listener: () => void): () => void
+  }
+  closeIn(sessionId: string, tabId: string): void
+}
+
+/**
+ * Close every open tab of a kind, now and whenever one appears.
+ *
+ * The close runs the tab kind's registered close handler, so the owning
+ * plugin's resources (a built-in terminal's PTY) are released rather than
+ * orphaned. Tabs of sessions whose store is not adopted yet cannot be closed
+ * from here; the inventory re-reports them when the session mounts, and the
+ * subscription sweeps them then.
+ */
+export function closeSidebarTabsByKind(ctx: ClientContext, kind: string): () => void {
+  const internals = ctx.sidebarRight as unknown as SidebarRightInternals
+  const sweep = (): void => {
+    for (const tab of internals.openTabs.getSnapshot()) {
+      if (tab.kind !== kind) continue
+      try {
+        internals.closeIn(tab.sessionId, tab.tabId)
+      } catch (error) {
+        console.error(`dsh-codex: failed to close a ${JSON.stringify(kind)} tab`, error)
+      }
+    }
+  }
+  sweep()
+  return internals.openTabs.subscribe(sweep)
+}
+
 /** Register a tab type and its keyed body/title seats as one lifecycle. */
 export function registerSidebarTab(
   ctx: ClientContext,

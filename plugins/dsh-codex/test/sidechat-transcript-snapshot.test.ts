@@ -72,6 +72,31 @@ describe('chatRowsOf', () => {
 })
 
 describe('queuedRowsOf', () => {
+  it('reads 0.1.7 pending submission echoes and durable Inbox rows without duplicating admission', () => {
+    const pendingSubmissions = [
+      { requestId: 'already-admitted', placement: 'queued', text: 'queued', attachments: [] },
+      { requestId: 'sending', placement: 'transcript', text: 'new send', attachments: [] },
+    ]
+    const inbox = { 'next-turn': [{
+      id: 'queue-id',
+      content: [{ type: 'text', text: 'queued' }],
+      source: { kind: 'user', rpcId: 'already-admitted' },
+    }] }
+    expect(queuedRowsOf(control({ pendingSubmissions }), inbox)).toEqual([
+      inbox['next-turn'][0],
+      { id: 'sending', content: [{ type: 'text', text: 'new send' }] },
+    ])
+  })
+
+  it('shows an attachment-only local echo before Host admission', () => {
+    expect(queuedRowsOf(control({ pendingSubmissions: [{
+      requestId: 'image-send', placement: 'transcript', text: '',
+      attachments: [{ type: 'image', value: { name: 'shot.png' } }],
+    }] }))).toEqual([{
+      id: 'image-send', content: [{ type: 'text', text: ' [图片: shot.png]' }],
+    }])
+  })
+
   it('survives a missing queue', () => {
     expect(queuedRowsOf(control())).toEqual([])
     expect(queuedRowsOf(undefined)).toEqual([])
@@ -103,6 +128,13 @@ describe('queuedRowsOf', () => {
 })
 
 describe('hasQueuedWork', () => {
+  it('counts 0.1.7 local echoes and Inbox rows', () => {
+    expect(hasQueuedWork(control({ pendingSubmissions: [
+      { requestId: 'r', placement: 'transcript', text: 'hello', attachments: [] },
+    ] }))).toBe(true)
+    expect(hasQueuedWork(control(), { 'next-turn': [{ id: 'q', content: [] }] })).toBe(true)
+  })
+
   it('counts an injected digest as work in flight', () => {
     expect(hasQueuedWork(control({ queue: [{ placement: 'context' }] }))).toBe(true)
   })

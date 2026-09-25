@@ -255,6 +255,12 @@ export type SideChatSubmitAttachment =
  * `SessionId` / `DraftAttachmentId` copies in a materialized DSH runtime.
  */
 export interface SideChatConversationFace {
+  sendSession(
+    session: unknown,
+    text: string,
+    attachmentIds: readonly unknown[],
+    mode: 'queue' | 'steer',
+  ): Promise<{ kind: 'success' | 'error'; text?: string }>
   createDrafts(sessionId: string, files: readonly File[]): readonly SideChatDraftAttachment[]
   resolveDraftAttachments(ids: readonly unknown[]): readonly SideChatDraftAttachment[]
   serializeDraftAttachments(ids: readonly unknown[]): Promise<{
@@ -264,6 +270,7 @@ export interface SideChatConversationFace {
 }
 
 const DRAFT_ATTACHMENT_METHODS = [
+  'sendSession',
   'createDrafts',
   'resolveDraftAttachments',
   'serializeDraftAttachments',

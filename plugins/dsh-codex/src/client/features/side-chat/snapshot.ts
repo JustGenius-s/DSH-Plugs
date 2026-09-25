@@ -31,20 +31,36 @@ export interface ChatLike {
 }
 
 /**
- * The control-face snapshot (`session.getSnapshot()`): queue / running /
- * pending. Since 0.1.2 this carries NO conversation rows — see the panel.
+ * The control-face snapshot (`session.getSnapshot()`). In 0.1.7 the pending
+ * local echoes live here; durable queued items live in the Inbox projection.
  */
 export interface ControlLike {
   running?: boolean
   pending?: readonly unknown[]
+  pendingSubmissions?: readonly {
+    requestId: string
+    placement: string
+    text: string
+    attachments?: readonly { type: string; value?: { name?: string } }[]
+  }[]
+  /** Pre-0.1.7 fixture fallback. */
   queue?: readonly { placement?: string }[]
 }
 
+/** Only the Inbox projection fields required by the side transcript. */
+export interface InboxLike {
+  readonly 'next-turn'?: readonly {
+    id: string
+    content: readonly unknown[]
+    source?: { kind?: string; rpcId?: string }
+  }[]
+}
+
 /**
- * The parent-context rows a freshly opened side chat shows beneath its empty
+ * The model-facing context rows a freshly opened side chat shows beneath its empty
  * hero.
  *
- * A new side chat's only node IS its inherited parent context, and hiding it
+ * A new side chat's only node may be its main-session link, and hiding it
  * is what made this feature look broken — the user saw an empty chat with no
  * evidence the main conversation came along.
  */
@@ -106,9 +122,7 @@ export function debugSnapshot(
   try {
     const order = chat?.order ?? []
     const nodes = chat?.nodes
-    const queue = (control?.queue ?? []).map(item => ({
-      placement: (item as { placement?: unknown }).placement,
-    }))
+    const queue = control?.pendingSubmissions ?? control?.queue ?? []
     postProbe({
       kind: 'snapshot',
       sessionId,
@@ -116,7 +130,7 @@ export function debugSnapshot(
       order: order.length,
       kinds: order.map(key => nodes?.get(key)?.kind),
       queue: queue.length,
-      queuePlacements: queue,
+      queuePlacements: queue.map(item => ({ placement: item.placement })),
       running: control?.running,
       pending: control?.pending?.length ?? 0,
     })
@@ -196,22 +210,50 @@ export function hasVisibleContent(chat: ChatLike): boolean {
 }
 
 /**
- * The queued rows that have not entered the log yet, as transcript bubbles.
+ * The queued rows that have not entered the chat target yet, as bubbles.
  *
  * Three placements exist: `queued` (appended after the current turn),
- * `steering` (interrupts it), and `context` (an injected digest — model-facing,
+ * `steering` (interrupts it), and `context` (an injected link — model-facing,
  * never conversation). Rendering only `steering` is why a sent message looked
  * like it vanished: the composer sends with mode `'queue'`, so the item sits in
  * the queue as `queued` and stayed invisible until its turn began.
  *
- * `context` is excluded deliberately: it is the injected digest, and showing it
+ * `context` is excluded deliberately: it is injected context, and showing it
  * as a user bubble would claim the user said something they did not.
  *
- * `T` is the caller's own queue-item type — this only filters, never reshapes.
+ * 0.1.7 keeps durable next-turn messages in the Inbox projection and local
+ * submission echoes in SessionSnapshot.pendingSubmissions. An admitted echo
+ * is suppressed while the Inbox row with the same RPC id is present.
  */
-export function queuedRowsOf<T = { placement?: string }>(
+export function queuedRowsOf<T = { id: string; content: readonly unknown[] }>(
   snapshot: ControlLike | undefined,
+  inbox?: InboxLike,
 ): T[] {
+  if (inbox !== undefined || snapshot?.pendingSubmissions !== undefined) {
+    const rows = inbox?.['next-turn'] ?? []
+    const inChat = new Set((snapshot?.pendingSubmissions ?? [])
+      .filter(item => item.placement === 'transcript').map(item => item.requestId))
+    const queue = rows.filter(row => row.source?.kind !== 'user'
+      || row.source.rpcId === undefined || !inChat.has(row.source.rpcId))
+    const admitted = new Set(queue.flatMap(row => row.source?.kind === 'user'
+      && row.source.rpcId !== undefined ? [row.source.rpcId] : []))
+    const echoes = (snapshot?.pendingSubmissions ?? [])
+      .filter(item => !admitted.has(item.requestId))
+      .map(item => ({
+        id: item.requestId,
+        content: [
+          ...(item.text === '' ? [] : [{ type: 'text', text: item.text }]),
+          ...((item.attachments ?? []).map(attachment => ({
+            type: 'text',
+            text: attachment.type === 'image'
+              ? ` [图片${attachment.value?.name ? `: ${attachment.value.name}` : ''}]`
+              : ` [文件${attachment.value?.name ? `: ${attachment.value.name}` : ''}]`,
+          }))),
+        ],
+      }))
+    return [...queue, ...echoes] as T[]
+  }
+  // The older shape remains useful for existing fixtures and saved snapshots.
   return (snapshot?.queue ?? []).filter(
     item => item?.placement === 'queued' || item?.placement === 'steering',
   ) as T[]
@@ -219,10 +261,12 @@ export function queuedRowsOf<T = { placement?: string }>(
 
 /**
  * Whether anything is waiting in the queue at all, including an injected
- * digest — the test for "a turn is already on its way".
+ * context — the test for "a turn is already on its way".
  */
-export function hasQueuedWork(snapshot: ControlLike | undefined): boolean {
-  return (snapshot?.queue ?? []).length > 0
+export function hasQueuedWork(snapshot: ControlLike | undefined, inbox?: InboxLike): boolean {
+  return (snapshot?.pendingSubmissions?.length ?? 0) > 0
+    || (inbox?.['next-turn']?.length ?? 0) > 0
+    || (snapshot?.queue?.length ?? 0) > 0
 }
 
 /**
