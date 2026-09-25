@@ -10,11 +10,13 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type SchemaType from '@deepseek-ai/schemastery'
-import type {
-  SettingsNamespace,
-  SettingsRegisterOptions,
-  SettingsScope,
-} from '@deepseek-ai/dsh-settings'
+/** The legacy registration face retained only for disabled older plugins. */
+interface SettingsRegisterOptions<T> { base?: Partial<T>; applies?: 'live' | 'restart' }
+interface SettingsScope<T> { get(): T; watch(listener: (value: T) => void): () => void }
+export interface SettingsProvider {
+  describe(): Array<{ ns: string; user?: unknown; revision: number }>
+  replace(ns: string, section: object, expectedRevision?: number): Promise<void>
+}
 
 /**
  * Brand a namespace string for the settings service.
@@ -26,8 +28,8 @@ import type {
  * @param ns - dot-separated namespace, e.g. `plugin.desktop-update`.
  * @returns the namespace as the branded settings type.
  */
-export function settingsNamespace<T extends string>(ns: T): T & SettingsNamespace {
-  return ns as T & SettingsNamespace
+export function settingsNamespace<T extends string>(ns: T): T {
+  return ns
 }
 
 /** What a plugin hands to {@link installSettingsSection}. */
@@ -74,7 +76,7 @@ export function installSettingsSection<T>(
     const injected = sctx as Context & {
       settings: {
         register<N extends string, V>(
-          ns: N & SettingsNamespace,
+          ns: N,
           schema: unknown,
           options?: SettingsRegisterOptions<V>,
         ): SettingsScope<V>
