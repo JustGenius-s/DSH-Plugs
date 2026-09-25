@@ -1,7 +1,7 @@
 import { isAbsolute, normalize } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AssembleContext, Context } from '@just-genius/dsh-plugin-runtime/host'
-import { HOST_SERVICES, Schema, settingsNamespace } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES } from '@just-genius/dsh-plugin-runtime/host'
 
 import { adoptFolder, InvalidFolderError } from './scan.ts'
 import {
@@ -9,32 +9,28 @@ import {
   PINS_PATH,
   PROJECT_PATH,
   SCAN_PATH,
-  SESSION_TITLES_PATH,
-  SETTINGS_NS,
+  SESSION_EXPORT_PATH,
   type HttpResult,
   type ProjectAction,
   type RepoFolder,
-  type SessionTitleLookup,
 } from './shared.ts'
-import { bindBinding, deleteBinding, findBindingForCwd, listBindings, storeRoot } from './store.ts'
+import { bindBinding, deleteBinding, findBindingForCwd, listBindings, pruneBindings, storeRoot } from './store.ts'
 import { requestRejection, type RequestAuthFace } from './request-auth.ts'
-import { resolveSessionTitleFacts } from './session-titles.ts'
 import { renderWorkspaceContext, type WorkspacePromptInput } from './workspace-prompt.ts'
 import { openInOs } from './open-path.ts'
 import { parsePinAction } from './pin-state.ts'
 import { changeStoredPins, readStoredPins } from './pin-store.ts'
+import { readSessionExportSource, SessionExportSourceError } from './session-export-source.ts'
+import { exportSessionMarkdown } from './session-export.ts'
 
 export const name = 'dsh-workspace-plus'
 export const inject = [
   HOST_SERVICES.connection,
   HOST_SERVICES.sessions,
   HOST_SERVICES.sessionPersistence,
-  HOST_SERVICES.settings,
   HOST_SERVICES.systemPrompt,
   HOST_SERVICES.webServer,
 ] as const
-
-const SettingsSchema = Schema.object({})
 
 interface PromptAgent {
   session?: { header?: { cwd?: string } }
@@ -61,7 +57,6 @@ export function apply(ctx: Context): void {
   })
 
   ctx.effect(() => acquireRoutes(ctx), 'dsh-workspace-plus: host routes')
-  ctx.settings.register(settingsNamespace(SETTINGS_NS), SettingsSchema, { base: {} })
 }
 
 function bindingFor(context: AssembleContext): WorkspacePromptInput | null {
@@ -100,13 +95,13 @@ function acquireRoutes(ctx: Context): () => void {
     }),
     ctx.webServer.register({
       kind: 'exact',
-      path: SESSION_TITLES_PATH,
-      handler: (req, res) => { void handleSessionTitles(ctx, req, res) },
+      path: PINS_PATH,
+      handler: (req, res) => { void handlePins(ctx, req, res) },
     }),
     ctx.webServer.register({
       kind: 'exact',
-      path: PINS_PATH,
-      handler: (req, res) => { void handlePins(ctx, req, res) },
+      path: SESSION_EXPORT_PATH,
+      handler: (req, res) => { void handleSessionExport(ctx, req, res) },
     }),
   ]
   const lease: RouteLease = {
@@ -203,6 +198,10 @@ async function handleBinding(ctx: Context, req: IncomingMessage, res: ServerResp
     return
   }
   try {
+    if (action.action === 'prune') {
+      json(res, 200, { ok: true, value: { removed: pruneBindings(action.livePaths).map((b) => b.root) } })
+      return
+    }
     if (action.action === 'delete') {
       if (!deleteBinding(action.root)) {
         json(res, 404, { ok: false, message: 'binding not found' })
@@ -251,7 +250,7 @@ async function handleOpen(ctx: Context, req: IncomingMessage, res: ServerRespons
   }
 }
 
-async function handleSessionTitles(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleSessionExport(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!authorizeRequest(ctx, req, res)) return
   if (req.method !== 'POST') {
     json(res, 405, { ok: false, message: 'method not allowed' })
@@ -264,15 +263,17 @@ async function handleSessionTitles(ctx: Context, req: IncomingMessage, res: Serv
     json(res, 400, { ok: false, message: errorMessage(error) })
     return
   }
-  const lookups = parseSessionTitleLookups(body)
-  if (lookups === undefined) {
-    json(res, 400, { ok: false, message: 'invalid session title request' })
+  const sessionId = readString(body, 'sessionId')
+  if (sessionId === undefined || sessionId.length > 256 || sessionId !== sessionId.trim()
+    || sessionId === '.' || sessionId === '..' || /[/\\\u0000-\u001f\u007f]/.test(sessionId)) {
+    json(res, 400, { ok: false, message: 'invalid session id' })
     return
   }
   try {
-    json(res, 200, { ok: true, value: { sessions: await resolveSessionTitleFacts(ctx, lookups) } })
+    const source = await readSessionExportSource(ctx, sessionId)
+    json(res, 200, { ok: true, value: exportSessionMarkdown(source) })
   } catch (error) {
-    json(res, 500, { ok: false, message: errorMessage(error) })
+    json(res, error instanceof SessionExportSourceError ? error.status : 500, { ok: false, message: errorMessage(error) })
   }
 }
 
@@ -282,6 +283,10 @@ function parseBindingAction(body: unknown): ProjectAction | undefined {
   if (value.action === 'delete') {
     if (typeof value.root !== 'string') return undefined
     return { action: 'delete', root: value.root }
+  }
+  if (value.action === 'prune') {
+    if (!Array.isArray(value.livePaths)) return undefined
+    return { action: 'prune', livePaths: value.livePaths.filter((p): p is string => typeof p === 'string') }
   }
   if (value.action === 'bind') {
     if (typeof value.root !== 'string' || !Array.isArray(value.repos)) return undefined
@@ -308,28 +313,6 @@ function parseBindingAction(body: unknown): ProjectAction | undefined {
     }
   }
   return undefined
-}
-
-function parseSessionTitleLookups(body: unknown): SessionTitleLookup[] | undefined {
-  if (body === null || typeof body !== 'object') return undefined
-  const sessions = (body as { sessions?: unknown }).sessions
-  if (!Array.isArray(sessions)) return undefined
-  const lookups: SessionTitleLookup[] = []
-  for (const item of sessions) {
-    if (item === null || typeof item !== 'object') return undefined
-    const value = item as Record<string, unknown>
-    if (typeof value.id !== 'string' || value.id.trim() === '') return undefined
-    if (typeof value.updatedAt !== 'number' || !Number.isFinite(value.updatedAt)) return undefined
-    if (typeof value.listedBlank !== 'boolean') return undefined
-    if (value.cwd !== undefined && typeof value.cwd !== 'string') return undefined
-    lookups.push({
-      id: value.id,
-      updatedAt: value.updatedAt,
-      listedBlank: value.listedBlank,
-      ...(typeof value.cwd === 'string' ? { cwd: value.cwd } : {}),
-    })
-  }
-  return lookups
 }
 
 function readString(body: unknown, key: string): string | undefined {

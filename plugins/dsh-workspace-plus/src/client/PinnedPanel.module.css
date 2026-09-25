@@ -1,0 +1,399 @@
+/*
+ * The pinned area sits INSIDE the sidebar's row scroll container, directly under
+ * the section header. It is a plain block, not a flex row: the official rows
+ * below it are the flex items, and the panel must not join their ordering or
+ * their movement animation.
+ *
+ * Every value below is taken from the official `Rows` stylesheet so a pinned row
+ * and a workspace row look like the same list rather than two. The originals:
+ *
+ *   row                    padding: 0 8px; border-radius: 8px; gap: 6px
+ *                          padding-inline-start: calc(8px + var(--dsh-workspace-indent, 0px))
+ *   row:hover              background: var(--dsw-alias-interactive-bg-hover)
+ *   project row            height: 34px
+ *   session row            height: 32px; gap: 0
+ *   title                  font-size: 14px; line-height: 20px; ellipsis
+ *   session title          flex: 1; margin: 0 6px 0 4px
+ *   slot (leading)         width: 16px; height: 20px; color: label-tertiary
+ *   rowActions             display: none; gap: 10px
+ *   row:hover rowActions   display: inline-flex
+ *   iconButton             16x16; border-radius: 4px; color: label-tertiary
+ *
+ * The project row is intentionally 2px taller than a session row, and a nested
+ * session keeps the SAME height and radius as a top-level one — that is the
+ * official relationship, and matching it is what keeps the two readable as one
+ * hierarchy instead of two stacked lists.
+ */
+
+.heading {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  margin-bottom: 2px;
+  padding-left: 4px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+/* The title is the wide hit target; the fold control is a separate, smaller
+   button on the RIGHT, aligned with the rows' own trailing buttons. */
+.headingButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.headingButton:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.headingText {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.fold:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.headingButton:focus-visible,
+.fold:focus-visible {
+  outline: 1px solid var(--dsw-alias-label-secondary);
+  outline-offset: 1px;
+}
+
+.arrow,
+.arrowOpen {
+  flex: none;
+  transition: transform 0.15s var(--ds-ease-in-out, ease);
+}
+
+.arrowOpen {
+  transform: rotate(90deg);
+}
+
+/* Collapsed: keep a hint of how much is hidden, so the fold reads as content
+   rather than an empty band. */
+.count {
+  flex: none;
+  margin-left: 6px;
+  color: var(--dsw-alias-label-caption);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  /* The panel scrolls WITH the list, so it must not introduce a second
+     scroller: an inner one would trap the wheel over the pinned rows. */
+  overflow: visible;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Nested sessions indent exactly like an official child row: the official
+   stylesheet drives that indent through this variable, so reusing it keeps a
+   pinned child aligned with a workspace-tree child. */
+.children {
+  display: flex;
+  flex-direction: column;
+  --dsh-workspace-indent: 12px;
+}
+
+/* The official row shell, shared by BOTH kinds.
+   `gap: 0` matches the session row (the dominant kind); horizontal rhythm comes
+   from the title's own margin, exactly as it does upstream. */
+.row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px;
+  padding-inline-start: calc(8px + var(--dsh-workspace-indent, 0px));
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--dsw-alias-label-primary);
+}
+
+.row:hover,
+.row[aria-selected='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* A project row is 34px and a session row 32px, exactly as in the official list. */
+.group > .row {
+  height: 34px;
+}
+
+.children > .row,
+.list > .row {
+  height: 32px;
+}
+
+/* The leading slot, 16x20 as upstream. Session rows show a pin or a status dot. */
+.slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* A project row has TWO leading slots, exactly as the official row does: a folder
+   and a chevron. Both stay in the DOM and `display` swaps them, so the row keeps
+   one slot's width at rest and the fold affordance appears on hover without a
+   permanently visible arrow competing with the title. */
+.folderSlot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The official row tints the folder while it contains the session you are in, so
+   the ancestor chain of the current session is visible at a glance. */
+.folderActive {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.chevronSlot {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 20px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.row:hover .folderSlot,
+.row:focus-within .folderSlot {
+  display: none;
+}
+
+.row:hover .chevronSlot,
+.row:focus-within .chevronSlot {
+  display: inline-flex;
+}
+
+.arrow,
+.arrowOpen {
+  flex: none;
+  transition: transform 0.15s var(--ds-ease-in-out, ease);
+}
+
+/* Points down while open, right while folded. */
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  margin: 0 6px 0 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* The parent row reads slightly stronger than its children. */
+.group > .row .text {
+  font-weight: 500;
+}
+
+/* Edge fades while a title is crawled, so characters do not run under a hard
+   clip. These mirror the official title's `data-scrolled` / `data-clipped` rules;
+   the marquee sets the attributes. */
+.text[data-scrolled] {
+  mask-image: linear-gradient(90deg, #0000, #000 12px);
+}
+
+.text[data-clipped] {
+  mask-image: linear-gradient(270deg, #0000, #000 12px);
+}
+
+.text[data-scrolled][data-clipped] {
+  mask-image: linear-gradient(90deg, #0000, #000 12px calc(100% - 12px), #0000);
+}
+
+/* A crawled title must be able to scroll, so the resting ellipsis comes from
+   overflow rather than the ellipsis token. */
+.text[data-scrolled],
+.text[data-clipped] {
+  text-overflow: clip;
+}
+
+.owner {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* How many sessions a project holds. Matches the official `time` slot. */
+.countPill {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* The official action strip: hidden until hover, then shown inline. */
+.actions {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.row:hover .actions,
+.row:focus-within .actions,
+/* While this row's own menu is open its action strip stays laid out, so the
+   trigger does not vanish out from under the pointer, and the row keeps the
+   highlight that shows which row the open menu belongs to. The attribute is set
+   by the row itself (see menu-open.ts). This mirrors the official row's
+   `menuOpen` state. */
+.row[data-workspace-plus-menu-open] .actions {
+  display: inline-flex;
+}
+
+.row[data-workspace-plus-menu-open] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* The trailing time, matching the official `time` slot. */
+.time {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+/* The official row hides its trailing time (and pin marker) while the actions
+   are showing, and the count pill occupies that same slot. */
+.row:hover .time,
+.row:focus-within .time,
+.row[data-workspace-plus-menu-open] .time,
+.group > .row:hover .countPill,
+.group > .row:focus-within .countPill,
+.group > .row[data-workspace-plus-menu-open] .countPill {
+  display: none;
+}
+
+/* The official row hides its trailing time and pin marker while the actions are
+   showing (they would collide). The count pill is the same trailing slot. */
+.group > .row:hover .countPill,
+.group > .row:focus-within .countPill,
+.group > .row[data-workspace-plus-menu-open] .countPill {
+  display: none;
+}
+
+/* The official icon button: 16x16. */
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.action:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.action:focus-visible {
+  outline: 1px solid var(--dsw-alias-label-secondary);
+  outline-offset: 1px;
+}
+
+.divider {
+  height: 1px;
+  margin: 6px 4px 8px;
+  background: var(--dsw-alias-border-l4);
+}
+
+/* ---------------------------------------------------------------------------
+   Drag ordering
+   ---------------------------------------------------------------------------
+   The drop indicator is the OFFICIAL one, lifted from the host stylesheet
+   (`dropBefore` / `dropAfter` in dsh-client-ui-workspace): a 2px line inset 4px
+   with a chevron at its left end, drawn from three stacked gradients so it needs
+   no extra element. Copying it verbatim is the point — a re-drawn caret would
+   drift from the host's the moment upstream touched it, and this marker has to
+   read as the same gesture as dragging in the official list. */
+
+.row[data-drop='before'],
+.row[data-drop='after'] {
+  position: relative;
+}
+
+.row[data-drop='before']::before,
+.row[data-drop='after']::after {
+  content: '';
+  z-index: 1;
+  background:
+    linear-gradient(55deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat,
+    linear-gradient(125deg, transparent calc(50% - 1px), var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat,
+    linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;
+  pointer-events: none;
+  height: 12px;
+  position: absolute;
+  left: 0;
+  right: 4px;
+}
+
+.row[data-drop='before']::before {
+  top: -7px;
+}
+
+.row[data-drop='after']::after {
+  bottom: -7px;
+}
+
+/* The row being carried is dimmed, as the host dims the row it is moving. */
+.row[data-dragging] {
+  opacity: 0.5;
+}
