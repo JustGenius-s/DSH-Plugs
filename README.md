@@ -38,10 +38,6 @@ Global markdown memory: **Settings → Memory** for manual CRUD, `memory_propose
 
 GitHub Device Flow + secret Gist config sync: **Settings → Sync** pushes/pulls `settings.yaml` and the web plugin list (portable specs + `cordis.patch.yml`) with no self-hosted sync server. State lives in `~/.dsh/sync/state.json`.
 
-### [@just-genius/dsh-desktop-update](plugins/dsh-desktop-update)
-
-Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop) next to the sidebar Settings button, driven by the `window.dshDesktop` Electron bridge. App updates jump to GitHub Releases; DSH runtime updates install in place. Renders nothing in a plain browser.
-
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 
 Replaces the official Models settings page (fork of `ui-settings-models`) to add per-model dropdown multi-selects for **vision** (`input`) and **thinking strength** (`reasoningEfforts`), plus a per-model **default thinking strength** and typeable **capacity combos** — the controls the stock page punts to `settings.yaml`.

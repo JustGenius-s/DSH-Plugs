@@ -30,7 +30,7 @@ DSH-Plugs/
 ├── docs/                    # 调研文档（非包）
 ├── package.json             # 根 workspace：脚本与共享工具链
 ├── packages/                # workspace 共享层（runtime、ui）
-├── plugins/                 # workspace 插件（11 个一级目录）
+├── plugins/                 # workspace 插件（10 个一级目录）
 ├── pnpm-lock.yaml           # lockfile（不解析传递树）
 ├── pnpm-workspace.yaml      # 成员 glob
 ├── public/                  # 静态截图（非包）
@@ -67,7 +67,7 @@ packages:
 
 | 路径 | 是否 workspace 包 |
 | --- | --- |
-| `plugins/*`（11 个一级目录） | 是 |
+| `plugins/*`（10 个一级目录） | 是 |
 | `packages/*`（`runtime`、`ui`） | 是 |
 | `apps/` | **否**（空目录，无 `package.json`） |
 | `public/` | **否** |
@@ -130,7 +130,7 @@ packages:
 | 包 | 额外 `compilerOptions` |
 | --- | --- |
 | `plugins/dsh-codex` | 无覆盖 |
-| `dsh-desktop-update`、`dsh-multi-repo` | `types: ["node"]` |
+| `dsh-multi-repo` | `types: ["node"]` |
 | `dsh-model-custom-ex` | `allowImportingTsExtensions: true` |
 | `dsh-debug-mode`、`dsh-memory`、`dsh-plugin-config`、`dsh-sync`、`dsh-whale-girl`、`packages/runtime`、`packages/ui` | `allowImportingTsExtensions` + `types: ["node"]` |
 | `dsh-flow` | 上两项 + 再写 `jsx: "react-jsx"` |
@@ -139,13 +139,12 @@ packages:
 
 ## 2. 源码区二级树
 
-### 2.1 `plugins/`（11 个一级目录，一行一个）
+### 2.1 `plugins/`（10 个一级目录，一行一个）
 
 ```
 plugins/
 ├── dsh-codex/
 ├── dsh-debug-mode/
-├── dsh-desktop-update/
 ├── dsh-flow/
 ├── dsh-memory/
 ├── dsh-model-custom-ex/
@@ -156,7 +155,7 @@ plugins/
 └── dsh-whale-girl/
 ```
 
-标准 TS 插件（除 synapse 外 10 个）一级可见项：`package.json`、`tsconfig.json`、`tsdown.config.ts`、`tsdown.client.config.ts`、`cordis.patch.yml`、`src/`、`README.md`。构建后另有被 gitignore 的 `lib/`。
+标准 TS 插件（除 synapse 外 9 个）一级可见项：`package.json`、`tsconfig.json`、`tsdown.config.ts`、`tsdown.client.config.ts`、`cordis.patch.yml`、`src/`、`README.md`。构建后另有被 gitignore 的 `lib/`。
 
 标准插件 `src/` 二级（以 `dsh-memory` 为典型）：
 
@@ -219,15 +218,14 @@ scripts/
 | `packages/runtime` | `@just-genius/dsh-plugin-runtime` | `0.1.0` | shared | 提供 `./client` 适配器，本身不是 DSH 插件 | `src/host.ts` → `lib/host.js`（export `./host`） | `src/client.ts` → `lib/client.js`（export `./client`） | `tsdown` | `tsc --noEmit` | 无 `watch`；唯一允许直连 `@deepseek-ai/*` 的边界 |
 | `packages/ui` | `@just-genius/dsh-plugin-ui` | `0.2.0` | shared | 否（UI kit） | 无 host 插件入口 | `src/index.tsx` → `lib/index.js`；另 `./theme.css`、`./css-modules` | `tsdown` | `tsc --noEmit` | 另有 `sync-theme`；无 `watch`；**无** `@deepseek-ai/*` 依赖 |
 
-### 3.2 插件（`plugins/*`，12 行，与磁盘一级目录数相等）
+### 3.2 插件（`plugins/*`，10 行，与磁盘一级目录数相等）
 
-Client 三项（缺一须标明）：① `package.json` 有 `dsh.client`；② browser 入口文件；③ `dsh.bundle.patch` → `cordis.patch.yml`。下表 12 包三项均具备，故「有 client」。
+Client 三项（缺一须标明）：① `package.json` 有 `dsh.client`；② browser 入口文件；③ `dsh.bundle.patch` → `cordis.patch.yml`。下表 10 包三项均具备，故「有 client」。
 
 | 目录 | npm name | version | 类型 | 有 client | host 入口 | browser 入口 | build | typecheck | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `dsh-codex` | `@just-genius/dsh-codex` | `0.2.1` | plugin | 是：① `dsh.client.platform=web` + inject；② `src/client/index.tsx` → `lib/client.js` + `exports["./client"]`；③ `cordis.patch.yml` | `main`/`exports["."]` → `lib/index.js`（`src/index.ts`） | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
 | `dsh-debug-mode` | `@just-genius/dsh-debug-mode` | `0.1.0` | plugin | 是（同上三项，入口 `src/client/index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
-| `dsh-desktop-update` | `@just-genius/dsh-desktop-update` | `0.2.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-flow` | `@just-genius/dsh-flow` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
 | `dsh-memory` | `@just-genius/dsh-memory` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-model-custom-ex` | `@just-genius/dsh-model-custom-ex` | `0.1.0` | plugin | 是；browser 源为 `src/client/index.ts`（非 tsx） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 入口扩展名变体 |
@@ -266,7 +264,6 @@ README「Plugins」列出 13 个名字（含两个幽灵）；未点名 synapse�
 | --- | --- |
 | `dsh-codex` | Codex 风格导航、侧栏与终端集成壳 |
 | `dsh-debug-mode` | Cursor 风格 debug：`/debug`、复现卡片、运行时日志码头 |
-| `dsh-desktop-update` | DSH-Desktop 更新徽标与原生座位/通知（`window.dshDesktop`） |
 | `dsh-flow` | Leader 规划 / 子代理执行的 DAG，React Flow 页签 |
 | `dsh-memory` | 全局 markdown 记忆：设置页、AI 提议确认、系统提示注入 |
 | `dsh-model-custom-ex` | 替换官方 Models 设置页，补 vision / reasoning-effort 选择器 |
@@ -332,14 +329,14 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 | `./css-modules` | `lib/css-modules.js`（tsdown 的 `dshCssModules` 助手） |
 | `./package.json` | `package.json` |
 
-**插件侧常见位置**：10 个标准插件均把 ui 放在 **`devDependencies`**（`workspace:*`），不是 `dependencies`。与 README「插件构建期打包」一致，且其 `tsdown.client.config.ts` 的 `alwaysBundle` 均含 `@just-genius/dsh-plugin-ui`。
+**插件侧常见位置**：9 个标准插件均把 ui 放在 **`devDependencies`**（`workspace:*`），不是 `dependencies`。与 README「插件构建期打包」一致，且其 `tsdown.client.config.ts` 的 `alwaysBundle` 均含 `@just-genius/dsh-plugin-ui`。
 
 ### 5.3 插件 → runtime / ui
 
 | 依赖 | 插件 |
 | --- | --- |
-| runtime `workspace:*`（`dependencies`） | 除 synapse 外全部 10 个 |
-| ui `workspace:*`（`devDependencies`） | 同上 10 个 |
+| runtime `workspace:*`（`dependencies`） | 除 synapse 外全部 9 个 |
+| ui `workspace:*`（`devDependencies`） | 同上 9 个 |
 | **两者都没有** | **仅 `dsh-synapse`** |
 
 额外 npm 依赖（非共享层）：codex（shiki / xterm / markdown-it 等）、flow（`reactflow`）、sync 与 whale-girl（`zod`）。标准插件普遍 `peerDependencies`：`react` / `react-dom` `^18.2.0`（model-custom-ex、plugin-config 只 peer `react`）。
@@ -369,7 +366,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 
 | 包 | `build` | `watch` | `typecheck` | `clean` |
 | --- | --- | --- | --- | --- |
-| 10 个标准插件 | 有 | 有 | 有 | 有 |
+| 9 个标准插件 | 有 | 有 | 有 | 有 |
 | `dsh-synapse` | 有（`node --check`，非 tsdown） | **无** | **无** | **无** |
 | `packages/runtime` | 有 | **无** | 有 | 有 |
 | `packages/ui` | 有 | **无** | 有 | 有 |
@@ -403,7 +400,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 
 **对 synapse 的覆盖**：会被扫进 manifest（缺 runtime → 报错）和源码（`client.js` 有 `require('@deepseek-ai/dsh-client-ui-primitives')` → 报错）。**不会**因缺 `lib/` 而跳过。
 
-**另一处源码命中（调研原稿未写）**：`plugins/dsh-codex/scripts/probe-commit.ts` 含 `require('@deepseek-ai/dsh-sdk-minimal')` 与 `require('@deepseek-ai/cordis')`。该文件是 `.ts`、不在 `lib/` / `node_modules/`，会被递归源码扫描命中。对比：`dsh-desktop-update/src/updater.ts` 用 `createRequire` 后的 `req('@deepseek-ai/dsh/package.json')`，**不匹配**脚本正则（要求字面 `require(` / `import` / `from` / `declare module`）。
+**另一处源码命中（调研原稿未写）**：`plugins/dsh-codex/scripts/probe-commit.ts` 含 `require('@deepseek-ai/dsh-sdk-minimal')` 与 `require('@deepseek-ai/cordis')`。该文件是 `.ts`、不在 `lib/` / `node_modules/`，会被递归源码扫描命中。
 
 验证阶段实测：`node scripts/check-dependency-contracts.mjs` **退出码 1**，三条：synapse 缺 runtime、synapse `client.js` 直连官方包、codex `scripts/probe-commit.ts` 直连官方包。
 
@@ -435,7 +432,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 
 | 文件 | 典型设置 |
 | --- | --- |
-| `tsdown.config.ts`（host） | entry `src/index.ts`；`format: 'esm'`；`platform` 多数为 `'node'`，**`dsh-codex` / `dsh-desktop-update` / `dsh-model-custom-ex` 为 `'neutral'`**；`dts: true`；`outDir: 'lib'`；`deps.neverBundle: true` |
+| `tsdown.config.ts`（host） | entry `src/index.ts`；`format: 'esm'`；`platform` 多数为 `'node'`，**`dsh-codex` / `dsh-model-custom-ex` 为 `'neutral'`**；`dts: true`；`outDir: 'lib'`；`deps.neverBundle: true` |
 | `tsdown.client.config.ts`（browser） | entry `src/client/index.tsx` 或 `index.ts`；`format: 'cjs'`；`platform: 'browser'`；banner/footer 包进 `window.__ModuleLoader__.load({ id, factory })`；`alwaysBundle` ui（及通常 runtime） |
 
 **已见变体（单独成行，不粉饰）**
@@ -450,7 +447,7 @@ runtime **没有** `@deepseek-ai/dsh-client-schema-form`。例外表只存在于
 | 纯 JS 根入口 | `dsh-synapse` | 无 tsdown；`index.js` / `client.js` / `app.js` |
 | client 入口 `.ts` 而非 `.tsx` | `dsh-model-custom-ex`、`dsh-plugin-config` | `tsdown.client` entry 为 `src/client/index.ts` |
 | 未 alwaysBundle runtime | `dsh-multi-repo` | client 配置仅 bundle ui；当前 `lib/client.js` 泄漏 runtime require |
-| host `platform: 'neutral'` | `dsh-codex`、`dsh-desktop-update`、`dsh-model-custom-ex` | 其余标准插件 host 为 `'node'` |
+| host `platform: 'neutral'` | `dsh-codex`、`dsh-model-custom-ex` | 其余标准插件 host 为 `'node'` |
 | 包内 scripts | `dsh-codex` | `scripts/test-watch.mjs`、`scripts/probe-commit.ts` |
 | 共享包单配置 | runtime / ui | 各自一份 `tsdown.config.ts`（ui 为双 entry 数组：组件库 + css-modules） |
 
@@ -530,7 +527,7 @@ plugins/<folder>/
 4. **纯 JS 根入口**：`dsh-synapse`（无 `src/`、无 `@just-genius` scope、无 runtime、无 typecheck）。
 6. **client 入口 `.ts`**：`dsh-model-custom-ex`、`dsh-plugin-config`。
 7. **包内辅助 scripts**：`dsh-codex/scripts/`（`test-watch.mjs`、`probe-commit.ts`；后者直 `require` 官方包，依赖合约会失败）。
-9. **host platform `neutral`**：`dsh-codex`、`dsh-desktop-update`、`dsh-model-custom-ex`。
+9. **host platform `neutral`**：`dsh-codex`、`dsh-model-custom-ex`。
 
 ### 8.5 新建插件最低对齐清单
 
