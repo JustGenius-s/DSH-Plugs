@@ -78,3 +78,12 @@
   font-size: 12px;
   line-height: 18px;
 }
+
+/* Per-row mutation failure: kept inside the row so one failed action never
+ * replaces the list it belongs to. */
+.rowError {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}

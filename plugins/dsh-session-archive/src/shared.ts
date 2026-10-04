@@ -1,5 +1,6 @@
 export const LIST_PATH = '/dsh-session-archive/list'
 export const DELETE_PATH = '/dsh-session-archive/delete'
+export const UNARCHIVE_PATH = '/dsh-session-archive/unarchive'
 
 export interface ArchiveHttpOk<T> {
   ok: true
