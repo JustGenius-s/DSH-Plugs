@@ -6,21 +6,26 @@
  * 2. Watch the session list for approval / ask / plan-review waits and show
  *    a system notification on the rising edge (same tag, so click still jumps).
  */
-import type { ClientContext } from '@just-genius/dsh-plugin-runtime/client'
-import { CLIENT_SERVICES, getSessions } from '@just-genius/dsh-plugin-runtime/client'
+import type { ClientContext, SessionId } from '@just-genius/dsh-plugin-runtime/client'
+import { CLIENT_SERVICES, getSessions, getUiWorkspace } from '@just-genius/dsh-plugin-runtime/client'
 import { startPendingWatcher, type SessionsListFace } from './watch'
 import { installNotificationJump } from './wrap'
 
-export const inject = [CLIENT_SERVICES.sessions] as const
+export const inject = [CLIENT_SERVICES.sessions, CLIENT_SERVICES.uiSession, CLIENT_SERVICES.uiWorkspace] as const
 
 export function apply(ctx: ClientContext): void {
-  const sessions = getSessions(ctx) as unknown as SessionsListFace & { open(id: string): void }
+  const sessions = getSessions(ctx) as SessionsListFace
+  const uiWorkspace = getUiWorkspace(ctx)
   ctx.effect(
-    () => installNotificationJump((id) => sessions.open(id)),
+    () => installNotificationJump((id) => {
+      if (typeof uiWorkspace.openSession !== 'function') throw new Error('workspace navigation unavailable')
+      uiWorkspace.openSession(id as SessionId)
+    }),
     'dsh-notify-jump: wrap Notification',
   )
   ctx.effect(
-    () => startPendingWatcher(sessions, (listener) => ctx.on('connection/reset', listener)),
+    () => startPendingWatcher(sessions, ctx.uiSession.sessionStatus, ctx.uiSession.adapter.current,
+      (listener) => ctx.on('connection/reset', listener)),
     'dsh-notify-jump: pending waits',
   )
 }

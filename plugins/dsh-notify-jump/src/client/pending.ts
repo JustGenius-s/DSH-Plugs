@@ -1,4 +1,4 @@
-/** List-row wait kinds from `SessionSummary.pendingInteraction`. */
+/** Wait kinds published by `uiSession.sessionStatus`. */
 export type PendingKind = 'approval' | 'plan-review' | 'question'
 
 /** Seeded observation: `''` means no wait after the first list snapshot. */
