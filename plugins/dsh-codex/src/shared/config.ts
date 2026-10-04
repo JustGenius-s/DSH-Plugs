@@ -47,6 +47,14 @@ export interface DshCodexConfig {
    * No parent turns are injected when the side chat opens.
    */
   sideChatContextEnabled: boolean
+  /** Toggle the built-in voice input from the focused DSH window. */
+  voiceShortcutEnabled: boolean
+  /** KeyboardEvent.code-based binding, such as Mod+Shift+KeyM. */
+  voiceShortcut: string
+  /** Stop after speech goes quiet, or cancel if no speech was detected. */
+  voiceAutoStopEnabled: boolean
+  voiceNoSpeechSeconds: number
+  voiceAfterSpeechSeconds: number
   /** Light syntax-highlight theme id for the files panel (see client catalog). */
   highlightThemeLight: string
   /** Dark syntax-highlight theme id for the files panel (see client catalog). */
@@ -61,6 +69,7 @@ export interface DshCodexConfig {
 export const FULL_SESSION_LOAD_LIMIT_MIN = 5
 export const FULL_SESSION_LOAD_LIMIT_MAX = 200
 export const FULL_SESSION_LOAD_LIMIT_PRESETS = [10, 15, 25, 50] as const
+export const DEFAULT_VOICE_SHORTCUT = 'Mod+Shift+KeyM'
 
 export const DEFAULT_CONFIG: DshCodexConfig = {
   uiFontFamily: '',
@@ -76,6 +85,11 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   customFilesEnabled: false,
   sideChatEnabled: true,
   sideChatContextEnabled: true,
+  voiceShortcutEnabled: true,
+  voiceShortcut: DEFAULT_VOICE_SHORTCUT,
+  voiceAutoStopEnabled: true,
+  voiceNoSpeechSeconds: 8,
+  voiceAfterSpeechSeconds: 2.5,
   highlightThemeLight: 'codex-light',
   highlightThemeDark: 'codex-dark',
   terminalShell: 'auto',

@@ -115,9 +115,8 @@ export interface SideChatPanelProps {
   /** The validated `ctx.conversation` draft-attachment face. */
   conversation?: SideChatConversationFace
   /**
-   * The session-keyed pending-interaction store (`uiSession.pendingInteractions`).
-   * DSH 0.1.5 answers approvals and questions through this store instead of a
-   * `snapshot.pending` array, so a side chat without it never takes over.
+   * The session-status observable (`uiSession.sessionStatus`), whose rows carry
+   * pending approvals and questions.
    */
   pendingInteractions?: PendingInteractionsFace | undefined
   t: (key: string) => string

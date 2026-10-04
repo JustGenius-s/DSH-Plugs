@@ -7,7 +7,7 @@
  *   directory; the old `connection.api.sessions.models` RPC was REMOVED in
  *   0.1.2 — see ./model-directory), including the model's reasoning effort
  * - permission chip through the `/permission` slash command
- * - approval / ask_user_question takeover while `snapshot.pending` is waiting
+ * - approval / ask_user_question takeover while the host is waiting
  *
  * It is intentionally narrower than the full InputBar (no slash menu) — side
  * chats are for quick Q&A — but the transports are the same native verbs, so
@@ -78,9 +78,7 @@ export interface SideChatComposerProps {
   session: SideChatComposerSession
   running: boolean
   /**
-   * The session-keyed pending-interaction store. DSH 0.1.5 answers approvals
-   * and questions through this store rather than a `snapshot.pending` array,
-   * so without it a side chat never sees a wait and never takes over.
+   * The host's session-status observable, carrying pending interactions.
    */
   pendingInteractions?: PendingInteractionsFace | undefined
   /** Chat content rows, used to pair an approval with the command it asks about. */
@@ -118,7 +116,7 @@ export function SideChatComposer({
   onError,
   t,
 }: SideChatComposerProps) {
-  // The pending store is an observable indexed by session: subscribe so a wait
+  // The status store is an observable indexed by session: subscribe so a wait
   // that arrives while this panel is mounted takes over the composer.
   // The snapshot reads the RAW carrier — the store's own object identity — so
   // it stays referentially stable between updates; recognition runs in a memo

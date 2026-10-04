@@ -1019,7 +1019,7 @@ export function SideChatTranscript({
   /** Session id used to authorize durable image reads. */
   sessionId?: string
   /**
-   * The session-keyed pending-interaction store. A pending approval or question
+   * The session-status observable. A pending approval or question
    * counts as content, so the empty hero does not replace a live wait.
    */
   pendingInteractions?: PendingInteractionsFace | undefined
@@ -1075,9 +1075,7 @@ export function SideChatTranscript({
   // (running/queue) from the control snapshot. A side chat renders content the
   // moment EITHER carries any. A PENDING interaction counts too: an approval or
   // question is a live turn the user must answer, and the empty hero would
-  // otherwise replace it — the wait lives on `uiSession`, so it is read from
-  // the store the panel passes down rather than the control snapshot (DSH 0.1.5
-  // removed `snapshot.pending`).
+  // otherwise replace it. The wait comes from the host's session-status row.
   const chatRows = chatRowsOf<ChatConversationViewNode>(chat)
   const hasChat = (chat !== undefined && hasVisibleContent(chat)) || snapshot?.running === true
     || wait !== undefined || hasQueuedWork(snapshot, inbox)

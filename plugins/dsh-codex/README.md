@@ -1,6 +1,6 @@
 # @just-genius/dsh-codex
 
-Codex-style additions for DSH: Side Chat, Terminal, and Git mounted into DSH's official right Sidebar — all configurable from one Codex settings section. Files use DSH's built-in implementation by default.
+Codex-style additions for DSH: Side Chat, Terminal, and Git mounted into DSH's official right Sidebar, plus voice controls — all configurable from one Codex settings section. Files use DSH's built-in implementation by default.
 
 ## Features
 
@@ -14,6 +14,7 @@ Codex-style additions for DSH: Side Chat, Terminal, and Git mounted into DSH's o
 - **Terminal panel** — takes over DSH's built-in `terminal` kind, so the Sidebar start page shows only the Codex terminal entry while this feature is enabled. Turning it off restores the built-in entry. Previously saved `dsh-codex-terminal` tabs remain supported through a hidden compatibility registration. Warp-style blocks are backed by a real login-shell PTY over WebSocket (`/dsh-codex/terminal/ws`), with completions, history, ghost hints, and full-screen program (vim/htop) alt-screen support. Aborting its official `tab.signal` terminates the PTY.
 - **Git graph panel** — read-only commit graph walking `git log` (`/dsh-codex/git-graph`), with lane layout, branch filter, and a commit context menu (copy, checkout, branch, cherry-pick, revert, reset).
 - **Side chat** — a temporary conversation beside the current session (`/side`, or a `侧聊` tab). It shares the parent's sandbox, while its transcript starts empty. An identity-only link tells the agent which main session it can consult; a scoped tool reads a bounded excerpt of recent turns only when the side chat needs it. Two settings govern it: the panel switch and whether main-session access is enabled. Turning the panel off also releases the side chats it owns.
+- **Voice input controls** — with DSH's voice-input bundle enabled, the configurable shortcut starts recording or stops and transcribes it. The default is ⌘/Ctrl+Shift+M; press the shortcut field in Codex settings and type another combination to replace it. Pressing the shortcut while microphone access is pending cancels it. Codex settings can disable the shortcut and separately disable automatic silence handling. By default, eight seconds without detected speech cancels capture; after detected speech, 2.5 seconds of silence stops and transcribes. Both waits are editable. The controller reads the official voice waveform's measured RMS and presses the official controls, so it never acquires a second microphone stream. A voice-input UI update that removes that waveform or changes those controls requires updating the compatibility adapter in `src/client/host-adapters/voice-dom.ts`.
 
 ## Design
 
