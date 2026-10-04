@@ -10,6 +10,19 @@ dist/
 # Debug scratch left in the repo root by the Cursor-proxy / notify bridge probes
 .tmp-*
 
+# Playwright MCP scratch (page snapshots, console logs, screenshots)
+.playwright-mcp/
+
+# Local scratch: capture runs, recordings, probe output, one-off artifacts.
+# Never committed — some docs/ evidence files reference these by relative path,
+# so they stay on disk and are simply not tracked.
+.tmp/
+scratch/
+
 # Settings-page design iteration for dsh-computer-tools. Not referenced by the
 # package `files` list or the README, so it is scratch rather than shipped.
 plugins/dsh-computer-tools/preview/
+
+# Local recovery snapshots and workspace design capture.
+/backups/
+/workspace-plus-panel.png

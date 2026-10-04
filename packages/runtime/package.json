@@ -24,7 +24,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/*.test.js",
     "test:host": "node --test test/*-host.test.js",
     "clean": "rm -rf lib"
   },

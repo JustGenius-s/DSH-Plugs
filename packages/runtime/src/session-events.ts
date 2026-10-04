@@ -12,6 +12,13 @@ export function sessionEventsOf(session: {
   events?: unknown
   snapshotEvents?: () => unknown
 } | null | undefined): readonly unknown[] {
+  // DSH 0.1.7 removed the public `events` getter. Existing synchronous
+  // consumers can use its immutable snapshot until they move to projections.
+  //
+  // The snapshot is typed loosely because a caller may hold a structural
+  // projection rather than a live `Session`; normalising the result through the
+  // same checks as `events` keeps a bad shape degrading to "no events" instead
+  // of leaking a non-iterable to the caller.
   const events = typeof session?.snapshotEvents === 'function'
     ? session.snapshotEvents()
     : session?.events
