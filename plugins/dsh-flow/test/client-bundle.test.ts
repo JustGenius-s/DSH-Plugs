@@ -25,13 +25,6 @@ const CLIENT = fileURLToPath(new URL('../lib/client.js', import.meta.url))
  * React and react-dom are resolved BEFORE the globals are hidden: they
  * legitimately read `process.env.NODE_ENV`, and requiring them lazily inside
  * the clean window would fail this test for the harness's own reasons.
- *
- * The stub table must mirror the host's real platform seed table
- * (`staticModules` in the DSH web frontend), because every seed is a legitimate
- * bare `require` in the bundle. The seeded packages are browser-only ESM with
- * `.css` imports, so Node cannot load them here: they are stubbed. A require
- * that is neither a seed nor a declared injection is a real defect and still
- * throws, which is what this test exists to catch.
  */
 
 type LoadedModule = {
@@ -56,8 +49,8 @@ function loadInBrowserScope() {
   // Browser-only seeds the bundle may legitimately require. React and
   // react-dom are loaded for real (their `process.env` read happens here, in
   // the normal scope); the DSH-seeded packages are stubbed because Node cannot
-  // evaluate their `.css` imports. Importing Button from the shared UI layer
-  // is what pulls the primitives seed into this bundle.
+  // evaluate their `.css` imports. The shared kit forwards host-owned menus
+  // and glyphs, so a consumer can require the primitives seed.
   const deps: Record<string, unknown> = {
     react: require('react'),
     'react/jsx-runtime': require('react/jsx-runtime'),
