@@ -1,0 +1,62 @@
+{
+  "verifiedAt": "2026-09-19T13:56:25.619Z",
+  "runtimeVersion": "2026-09-19-observed-window-monitor-v6",
+  "capture": "screencapturekit-window",
+  "monitor": {
+    "readyGate": true,
+    "observe": "native-image",
+    "postActionObservation": true,
+    "modelRequestGate": true
+  },
+  "actionBindings": "canonical-session-provider-v2",
+  "recovery": {
+    "maxRetries": 2,
+    "delaysMs": [500, 1500],
+    "restartUserStopped": false
+  },
+  "automatedVerification": {
+    "testFiles": 25,
+    "testsPassed": 585,
+    "typecheck": "passed",
+    "nativeContract": "passed",
+    "pluginBuild": "passed",
+    "clientModuleContracts": "passed"
+  },
+  "nativePermission": {
+    "identity": "DSH Window Capture",
+    "launch": "launchservices",
+    "screenRecording": false,
+    "helperRebuiltAndResigned": true,
+    "officialCuaOrCodexPermissionsReset": false,
+    "permissionPromptRequestedThisRevision": false
+  },
+  "liveDeniedCapture": {
+    "sessionId": "session-417d65d6-b29f-4a11-b9fb-c04393495fb4",
+    "target": { "pid": 35074, "windowId": 37901 },
+    "framesReceived": 0,
+    "lastLifecycle": {
+      "phase": "paused",
+      "generation": 0,
+      "retryCount": 0,
+      "nextRetryAt": null,
+      "errorCode": "permission_denied"
+    },
+    "closeAt": 1789826182280,
+    "closedAt": 1789826182280,
+    "terminalEventReceived": true,
+    "activeStreamsAfterClose": 0,
+    "focusSamples": 1649,
+    "targetFrontmostSamples": 0,
+    "activationChanges": [],
+    "scriptExitCode": 1,
+    "rawReport": "../.tmp/grok-monitor-v6-denied/session-report.json"
+  },
+  "conclusion": {
+    "liveVersionAndPermissionFailureLifecycleVerified": true,
+    "guardAndRecoveryVerifiedByFunctionAndHostInterfaceTests": true,
+    "authorizedV6NativeFramesVerified": false,
+    "applicationInputPerformed": false,
+    "browserE2EPerformed": false,
+    "remaining": "Reauthorize DSH Window Capture, then verify real native frames and the observe/action loop. Zero frames and exit=1 are not a successful recording acceptance."
+  }
+}

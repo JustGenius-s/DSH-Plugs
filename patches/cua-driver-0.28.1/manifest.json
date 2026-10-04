@@ -1,0 +1,17 @@
+{
+  "upstreamTag": "cua-driver-rs-v0.28.1",
+  "upstreamCommit": "d8028a7943087ee258dc1b4d19dc12a7cd27669c",
+  "patchSha256": "fc056fa44f00b73ad0e24d34ffd007c789013237e415249582ca22d2a1cac87a",
+  "platform": "macOS arm64",
+  "recording": "exact-window SCStream + SCRecordingOutput, 30fps target H264 MP4",
+  "livePipStream": false,
+  "nativeRecordingVerified": false,
+  "productionInstalled": false,
+  "sourceTests": {
+    "recording_video_target": 7,
+    "recording_capture_authorization": 6,
+    "observation_projection": 3,
+    "video_sckit": 8
+  },
+  "builtAt": "2026-09-19T10:04:11.140560+00:00"
+}
