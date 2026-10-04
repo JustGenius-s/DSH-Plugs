@@ -1,12 +1,8 @@
 /**
  * Defensive session-log access.
  *
- * `Session.events` is a prototype getter that snapshots an append-only log, so
- * a caller can hold an object that is not a live `Session` — a record rebuilt
- * by the persistence layer, or an instance built by a second copy of
- * dsh-session — and read `undefined` from it. Iterating that throws
- * `TypeError: events is not iterable`, which is how this surfaced: a crash
- * while opening a side chat, with no hint about the session object's shape.
+ * Both the legacy `events` getter and the current `snapshotEvents()` API must
+ * expose a session's log to consumers without depending on its package copy.
  */
 
 import { test } from 'node:test'
@@ -16,6 +12,14 @@ import { sessionEventsOf } from '../src/session-events.ts'
 test('returns the log as-is when it is an array', () => {
   const log = [{ type: 'user/message' }]
   assert.equal(sessionEventsOf({ events: log }), log)
+})
+
+test('reads current DSH sessions through snapshotEvents', () => {
+  const log = [{ type: 'assistant/message', data: { usage: { inputTokens: 7, outputTokens: 3 } } }]
+  const session = { snapshotEvents: () => log }
+  assert.equal(sessionEventsOf(session), log)
+  log.push({ type: 'assistant/message', data: { usage: { inputTokens: 2, outputTokens: 1 } } })
+  assert.equal(sessionEventsOf(session).length, 2)
 })
 
 test('degrades a missing log to an empty array', () => {

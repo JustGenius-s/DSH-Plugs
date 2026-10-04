@@ -1,27 +1,20 @@
 /**
  * Defensive session-log access.
  *
- * `Session.events` is a prototype getter that snapshots an append-only log, so
- * a caller can hold an object that is not a live `Session` — a plain
- * projection, or an instance built by a second copy of dsh-session — and read
- * `undefined` from it. Iterating that throws
- * `TypeError: <expr> is not iterable`, which is exactly how this surfaced: a
- * crash while opening a side chat, with no hint that the session object had the
- * wrong shape.
- *
- * Reads routed through here degrade a missing log to "no events" instead.
+ * Older DSH sessions expose an `events` getter; newer ones expose
+ * `snapshotEvents()`. Read either shape without assuming a caller holds a live
+ * Session. A missing or non-iterable log degrades to an empty list.
  *
  * @param session - object expected to carry an event log.
  * @returns the log, or an empty array when it is absent or not iterable.
  */
 export function sessionEventsOf(session: {
   events?: unknown
-  snapshotEvents?: () => readonly unknown[]
+  snapshotEvents?: () => unknown
 } | null | undefined): readonly unknown[] {
-  // DSH 0.1.7 removed the public `events` getter. Existing synchronous
-  // consumers can use its immutable snapshot until they move to projections.
-  if (typeof session?.snapshotEvents === 'function') return session.snapshotEvents()
-  const events = session?.events
+  const events = typeof session?.snapshotEvents === 'function'
+    ? session.snapshotEvents()
+    : session?.events
   if (events === undefined || events === null) return []
   if (Array.isArray(events)) return events
   // Strings are iterable but are never an event log — spreading one would

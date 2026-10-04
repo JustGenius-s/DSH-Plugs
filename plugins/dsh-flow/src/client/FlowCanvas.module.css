@@ -2,15 +2,20 @@
    both stay correct without a second copy of the palette. */
 
 .wrap {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   gap: 10px;
-  padding: 16px 18px;
+  padding: 12px;
   box-sizing: border-box;
+  overflow: hidden;
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .header {
@@ -22,12 +27,14 @@
 
 .titleRow {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
 
 .title {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: 15px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
@@ -51,29 +58,6 @@
 .badge[data-status='settled'] {
   border-color: var(--dsw-alias-state-success-primary);
   color: var(--dsw-alias-state-success-primary);
-}
-
-.modeToggle {
-  margin-left: auto;
-  padding: 2px 9px;
-  border-radius: 6px;
-  border: 1px solid var(--dsw-alias-border-l3);
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  line-height: 18px;
-  cursor: pointer;
-}
-
-.modeToggle:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-.emptyActions {
-  display: flex;
-  gap: 8px;
-  margin-top: 4px;
 }
 
 .meter {
@@ -105,6 +89,7 @@
 
 .confirmBar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 8px 10px;
@@ -138,6 +123,7 @@
 }
 .statusDot[data-status='expanded'] { background: var(--dsw-alias-state-business-primary); }
 .statusDot[data-status='done'] { background: var(--dsw-alias-state-success-primary); }
+.statusDot[data-status='paused'] { background: var(--dsw-alias-state-warn-primary); }
 .statusDot[data-status='failed'] { background: var(--dsw-alias-state-error-primary); }
 .statusDot[data-status='skipped'] { background: var(--dsw-alias-label-dimmed); }
 
@@ -173,6 +159,7 @@
 .canvas {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 8px;
   overflow: hidden;
@@ -245,6 +232,99 @@
   opacity: 0.6;
 }
 
+/* Paused: the user stopped this child, so it is held, not broken — the
+   running blue keeps its dashed "held" reading without the error palette. */
+.node[data-status='paused'] {
+  border-color: var(--dsw-alias-state-business-secondary);
+  border-style: dashed;
+}
+
+/* --- card actions ---
+
+   Bottom-left overlay, revealed on hover / keyboard focus. Absolutely
+   positioned so revealing it never reflows the card — the graph is polled
+   every 1.2s and a card that changes height on hover would make the whole
+   layout twitch under the pointer. */
+
+.node {
+  position: relative;
+}
+
+.nodeActions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 6px;
+  /* Hidden rather than unmounted: the buttons stay in the accessibility tree
+     order and no state is needed to remember whether they were shown. */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+  z-index: 2;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.node:hover .nodeActions,
+.node:focus-within .nodeActions,
+.node[data-selected='true'] .nodeActions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.nodeAction {
+  /* Square icon buttons: 22x22 with a 14px glyph, so the row reads as one
+     control strip rather than three text labels. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  box-shadow: 0 1px 4px var(--dsw-alias-bg-mask-2);
+}
+
+.nodeAction:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+/* Tones are a property of the action, not of its slot: skip is light blue,
+   pause/resume is white, stopping is red. */
+.nodeAction[data-tone='accent'] {
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.nodeAction[data-tone='accent']:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 82%, white);
+}
+
+.nodeAction[data-tone='neutral'] {
+  background: var(--dsw-alias-bg-layer-1);
+  border-color: var(--dsw-alias-border-l3);
+  color: var(--dsw-alias-label-primary);
+}
+
+.nodeAction[data-tone='neutral']:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.nodeAction[data-tone='danger'] {
+  background: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.nodeAction[data-tone='danger']:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 82%, white);
+}
+
 .nodeHead {
   display: flex;
   align-items: center;
@@ -261,15 +341,13 @@
 }
 
 .nodeStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   color: var(--dsw-alias-label-tertiary);
   flex: 0 0 auto;
-}
-
-.nodeId {
-  font-size: 10px;
-  color: var(--dsw-alias-label-caption);
-  font-family: var(--dsw-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  white-space: nowrap;
 }
 
 .attempts {
@@ -300,10 +378,25 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* The paused line replaces the metrics row, which is meaningless while the
+   clock is stopped. */
+.paused {
+  color: var(--dsw-alias-state-warn-label);
+  -webkit-line-clamp: 1;
+}
+
 /* The latest progress note under a running node: quieter than the status
    line, clamped to two lines so a chatty child cannot stretch the card. */
 .note {
   -webkit-line-clamp: 2;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.nodeMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 10px;
   color: var(--dsw-alias-label-tertiary);
 }
 
@@ -341,6 +434,7 @@
 .edgeIdle :global(.react-flow__edge-path),
 .edgeDone :global(.react-flow__edge-path),
 .edgeRunning :global(.react-flow__edge-path),
+.edgePaused :global(.react-flow__edge-path),
 .edgeFailed :global(.react-flow__edge-path),
 .edgeSkipped :global(.react-flow__edge-path) {
   stroke-width: 1.5;
@@ -349,6 +443,10 @@
 .edgeIdle :global(.react-flow__edge-path) { stroke: var(--dsw-alias-border-l4); }
 .edgeDone :global(.react-flow__edge-path) { stroke: var(--dsw-alias-state-success-secondary); }
 .edgeRunning :global(.react-flow__edge-path) { stroke: var(--dsw-alias-state-business-primary); }
+.edgePaused :global(.react-flow__edge-path) {
+  stroke: var(--dsw-alias-state-warn-primary);
+  stroke-dasharray: 3 3;
+}
 .edgeFailed :global(.react-flow__edge-path) { stroke: var(--dsw-alias-state-error-secondary); }
 .edgeSkipped :global(.react-flow__edge-path) {
   stroke: var(--dsw-alias-border-l3);
@@ -368,6 +466,28 @@
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-2);
   overflow-y: auto;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Docked sidebars stack detail below the graph; wide/floating tabs keep it beside it. */
+@container (max-width: 640px) {
+  .body {
+    flex-direction: column;
+  }
+
+  .canvas {
+    flex-basis: 180px;
+  }
+
+  .detail {
+    flex: 0 1 auto;
+    max-height: 45%;
+  }
+
+  .minimap {
+    display: none;
+  }
 }
 
 .detailHead {
@@ -466,9 +586,14 @@
   align-items: center;
   justify-content: center;
   height: 100%;
+  min-height: 0;
   padding: 24px;
+  box-sizing: border-box;
+  overflow-y: auto;
   text-align: center;
   color: var(--dsw-alias-label-secondary);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .emptyTitle {

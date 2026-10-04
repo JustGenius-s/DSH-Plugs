@@ -4,6 +4,7 @@ import type {
   GitGraphActionRequest,
   GitResetMode,
 } from '../../shared/git-graph'
+import { parsePorcelainEntries } from './browse'
 import { execGit, runGit } from './git-exec'
 
 const ACTION_TIMEOUT_MS = 30_000
@@ -103,30 +104,15 @@ async function runWorkdirAction(ctx: Context, request: GitGraphActionRequest): P
         return gitText(ctx, cwd, ['rm', '-q', '-r', '--cached', '--ignore-unmatch', '--', '.'])
       }
     }
-    case 'discard': {
-      // VSCode parity: untracked files are deleted, tracked files are
-      // restored from the index (worktree side only; staged changes stay).
-      // The path may be a directory (tree-view folder discard), which can
-      // hold both kinds at once, so each side is handled independently.
-      const path = safePath(request.path)
-      const status = await gitText(ctx, cwd, ['status', '--porcelain', '-z', '--', path])
-      if (status.length === 0) return ''
-      const entries = status.split('\0').filter((entry) => entry.length > 0)
-      const out: string[] = []
-      if (entries.some((entry) => !entry.startsWith('??'))) {
-        out.push(await gitText(ctx, cwd, ['checkout', '--', path]))
-      }
-      if (entries.some((entry) => entry.startsWith('??'))) {
-        // -d: an untracked path can be a whole directory.
-        out.push(await gitText(ctx, cwd, ['clean', '-fd', '--', path]))
-      }
-      return out.filter((part) => part.length > 0).join('\n')
-    }
-    case 'discard-all': {
-      const reset = await gitText(ctx, cwd, ['reset', '--hard', 'HEAD'])
-      const clean = await gitText(ctx, cwd, ['clean', '-fd'])
-      return [reset, clean].filter((part) => part.length > 0).join('\n')
-    }
+    case 'discard':
+      // The path may be a file or a directory (tree-view folder discard),
+      // which can hold both kinds at once — discardWorktree splits them.
+      return discardWorktree(ctx, await repoRoot(ctx, cwd), safePath(request.path))
+    case 'discard-all':
+      // The section-header action on the unstaged group: drop every
+      // worktree-side change and delete every untracked file, and leave the
+      // index — the user's staged work — exactly as it was.
+      return discardWorktree(ctx, await repoRoot(ctx, cwd), undefined)
     case 'pull':
       return gitText(ctx, cwd, ['pull', '--ff-only'])
     case 'push':
@@ -140,6 +126,90 @@ async function runWorkdirAction(ctx: Context, request: GitGraphActionRequest): P
     default:
       throw badRequest('invalid action')
   }
+}
+
+/**
+ * The repository root, so git path arguments (which are always repo-relative,
+ * even when the workspace is opened below the root) line up with the paths
+ * the panel lists.
+ */
+async function repoRoot(ctx: Context, cwd: string): Promise<string> {
+  const root = await gitText(ctx, cwd, ['rev-parse', '--show-toplevel']).catch(() => '')
+  return root.length > 0 ? root : cwd
+}
+
+/** Max paths per git invocation, so a huge change set cannot blow up argv. */
+const PATH_BATCH = 100
+/** Unmerged porcelain X/Y letters: an unmerged path has no index entry to restore. */
+const UNMERGED = new Set(['U'])
+
+/**
+ * Discard the unstaged (worktree) side of the changes under `scope`.
+ *
+ * VSCode parity for the Changes group: tracked paths go back to their index
+ * content and untracked paths are deleted. The index must never be rewritten
+ * here — it holds the staged work the panel lists under its own group, and
+ * restoring a path from HEAD (or a `reset --hard`) would silently unstage it
+ * and, for a path changed on both sides, throw the staged half away.
+ *
+ * @param scope a repo-relative file or directory path, or undefined for the
+ * whole worktree (the `Discard All Changes` action).
+ */
+async function discardWorktree(
+  ctx: Context,
+  cwd: string,
+  scope: string | undefined,
+): Promise<string> {
+  const args = ['status', '--porcelain', '-z', '-uall']
+  if (scope !== undefined) args.push('--', scope)
+  const status = await gitText(ctx, cwd, args)
+  if (status.length === 0) return ''
+
+  const untracked: string[] = []
+  const restore: string[] = []
+  const unmerged: string[] = []
+  const renameSources: string[] = []
+  for (const entry of parsePorcelainEntries(status)) {
+    if (entry.y === '?') {
+      untracked.push(entry.path)
+      continue
+    }
+    if (entry.y === ' ') continue
+    if (UNMERGED.has(entry.x) || UNMERGED.has(entry.y)) unmerged.push(entry.path)
+    else restore.push(entry.path)
+    // A rename keeps its new path in the index only; the source path stays
+    // behind in the worktree as an ordinary file, so it has to go too.
+    if (entry.oldPath !== undefined) renameSources.push(entry.oldPath)
+  }
+
+  const out: string[] = []
+  for (const batch of batched(restore, PATH_BATCH)) {
+    out.push(await gitText(ctx, cwd, ['restore', '-W', '--', ...batch]))
+  }
+  // Unmerged paths have no index content to restore: HEAD is the only version
+  // that resolves them, and it is also the merge's "ours" side.
+  for (const batch of batched(unmerged, PATH_BATCH)) {
+    out.push(await gitText(ctx, cwd, ['checkout', '-f', 'HEAD', '--', ...batch]))
+  }
+  // Only the paths themselves, never `clean -fd` over the whole tree: a
+  // pathspec keeps the deletion to what the panel listed, while an unscoped
+  // clean would also take ignored-only neighbours and anything the status
+  // read missed. A path the index dropped is untracked to git now, so clean
+  // reaches it here too.
+  const removed = [...renameSources, ...untracked]
+  for (const batch of batched(removed, PATH_BATCH)) {
+    out.push(await gitText(ctx, cwd, ['clean', '-fd', '--', ...batch]))
+  }
+  return out.filter((part) => part.length > 0).join('\n')
+}
+
+/** Chunk paths so one git call never approaches the platform argv limit. */
+function batched(paths: readonly string[], size: number): string[][] {
+  const batches: string[][] = []
+  for (let index = 0; index < paths.length; index += size) {
+    batches.push(paths.slice(index, index + size))
+  }
+  return batches
 }
 
 /** True when the index differs from HEAD (git diff --cached --quiet). */

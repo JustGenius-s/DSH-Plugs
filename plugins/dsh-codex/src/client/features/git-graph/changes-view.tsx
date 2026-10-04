@@ -4,7 +4,6 @@ import {
   IconCheckOutline16,
   IconBranchOutline16,
   IconChevronDownOutline14,
-  IconEllipsisOutline16,
   IconLoadingOutline16,
   IconRefreshOutline14,
   IconSparkle16,
@@ -48,7 +47,7 @@ type CommitAction = Extract<
   'commit' | 'commit-push' | 'commit-amend' | 'commit-push-amend'
 >
 
-/** Overflow-menu actions that run directly (no message, no confirmation). */
+/** Git menu actions that run directly (no message, no confirmation). */
 type QuickAction = Extract<
   GitGraphActionName,
   'stage-all' | 'unstage-all' | 'pull' | 'push' | 'fetch' | 'stash' | 'stash-pop'
@@ -60,9 +59,8 @@ const MESSAGE_MAX_HEIGHT = 110
 /**
  * The Git tab's default body, modeled on VSCode's source-control panel: an
  * auto-growing multi-line commit box on top (Mod+Enter commits), a toolbar
- * with the view toggles, the segmented commit button (its chevron lists the
- * commit variants, including amend) and an overflow menu for the remaining
- * git operations, then the staged/changes file groups.
+ * with the view toggles and a segmented commit button whose dropdown groups
+ * commit variants and other Git operations, then the staged/changes files.
  */
 export function GitChangesView(props: GitChangesViewProps) {
   const { cwd, t, onOpenFile, onOpenPreview, onOpenGraph } = props
@@ -71,8 +69,7 @@ export function GitChangesView(props: GitChangesViewProps) {
   const [display, setDisplay] = useState<'flat' | 'tree'>('flat')
   const [busyAction, setBusyAction] = useState<GitGraphActionName | null>(null)
   const busy = busyAction !== null
-  const [commitMenuOpen, setCommitMenuOpen] = useState(false)
-  const [overflowOpen, setOverflowOpen] = useState(false)
+  const [actionsOpen, setActionsOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [generating, setGenerating] = useState(false)
   const [counts, setCounts] = useState({ staged: 0, total: 0 })
@@ -84,8 +81,7 @@ export function GitChangesView(props: GitChangesViewProps) {
   const [toast, setToast] = useState<{ seq: number; text: string; kind: 'ok' | 'error' } | null>(null)
   const toastSeq = useRef(0)
   const panelRef = useRef<HTMLDivElement>(null)
-  const commitMoreRef = useRef<HTMLButtonElement>(null)
-  const overflowRef = useRef<HTMLButtonElement>(null)
+  const actionsRef = useRef<HTMLButtonElement>(null)
   const messageRef = useRef<HTMLTextAreaElement>(null)
   /** In-flight AI generate; aborted on unmount / open-graph / supersede. */
   const generateAbortRef = useRef<AbortController | null>(null)
@@ -195,7 +191,7 @@ export function GitChangesView(props: GitChangesViewProps) {
 
   // Loading label inside the commit button while a commit/push/pull action
   // runs. Share the button between the commit variants and the standalone
-  // remote actions that live in the overflow menu: the button is the only
+  // remote actions in the dropdown: the button is the only
   // always-visible action surface in the toolbar, so the spinner reads there
   // even when the menu that launched `push`/`pull` has closed.
   const commitProgress = busyAction === 'commit' || busyAction === 'commit-amend'
@@ -246,15 +242,13 @@ export function GitChangesView(props: GitChangesViewProps) {
     onOpenGraph?.()
   }
 
-  const onSelectCommitVariant = (id: string): void => {
-    setCommitMenuOpen(false)
+  const onSelectAction = (id: string): void => {
+    setActionsOpen(false)
     if (busy) return
-    submitCommit(id as CommitAction)
-  }
-
-  const onSelectOverflow = (id: string): void => {
-    setOverflowOpen(false)
-    if (busy) return
+    if (id === 'commit' || id === 'commit-push' || id === 'commit-amend' || id === 'commit-push-amend') {
+      submitCommit(id)
+      return
+    }
     if (id === 'discard-all') {
       setAcknowledged(false)
       setDiscardOpen(true)
@@ -341,29 +335,19 @@ export function GitChangesView(props: GitChangesViewProps) {
               )}
             </button>
             <button
-              ref={commitMoreRef}
+              ref={actionsRef}
               type="button"
               className="dsh-git-changes-commit-more"
               disabled={busy}
-              aria-label={t('gitGraph.commitVariants')}
-              aria-expanded={commitMenuOpen}
-              title={t('gitGraph.commitVariants')}
-              onClick={() => setCommitMenuOpen((open) => !open)}
+              aria-label={t('gitGraph.moreActions')}
+              aria-haspopup="menu"
+              aria-expanded={actionsOpen}
+              title={t('gitGraph.moreActions')}
+              onClick={() => setActionsOpen((open) => !open)}
             >
               <IconChevronDownOutline14 size={14} />
             </button>
           </div>
-          <button
-            ref={overflowRef}
-            type="button"
-            className="dsh-git-changes-icon"
-            aria-label={t('gitGraph.moreActions')}
-            aria-expanded={overflowOpen}
-            title={t('gitGraph.moreActions')}
-            onClick={() => setOverflowOpen((open) => !open)}
-          >
-            <IconEllipsisOutline16 size={16} />
-          </button>
         </div>
       </div>
       {/* refreshSeq re-fetches in place (rows and tree state survive); the
@@ -382,7 +366,7 @@ export function GitChangesView(props: GitChangesViewProps) {
         onDiscard={(file) => setDiscardFile(file)}
         onStageDirChange={(path, stage) => void run(stage ? 'stage' : 'unstage', undefined, path)}
         onDiscardDir={(path) => setDiscardDir(path)}
-        // Same confirmed flow the overflow menu uses: the acknowledgement
+        // Same confirmed flow the dropdown uses: the acknowledgement
         // checkbox is the guard, so the header button cannot one-click it.
         onDiscardAll={() => {
           setAcknowledged(false)
@@ -391,28 +375,16 @@ export function GitChangesView(props: GitChangesViewProps) {
         onFilesChange={onFilesChange}
       />
       <Menu
-        open={visible && commitMenuOpen}
+        open={visible && actionsOpen}
         portal
         dense
         side="bottom"
         align="end"
         anchor={<span className="dsh-git-graph-menu-anchor" aria-hidden="true" />}
-        getAnchorRect={() => commitMoreRef.current?.getBoundingClientRect() ?? null}
-        items={commitVariantItems(t)}
-        onSelect={onSelectCommitVariant}
-        onClose={() => setCommitMenuOpen(false)}
-      />
-      <Menu
-        open={visible && overflowOpen}
-        portal
-        dense
-        side="bottom"
-        align="end"
-        anchor={<span className="dsh-git-graph-menu-anchor" aria-hidden="true" />}
-        getAnchorRect={() => overflowRef.current?.getBoundingClientRect() ?? null}
-        items={overflowItems(t)}
-        onSelect={onSelectOverflow}
-        onClose={() => setOverflowOpen(false)}
+        getAnchorRect={() => actionsRef.current?.getBoundingClientRect() ?? null}
+        items={actionItems(t, !busy && message.trim().length > 0)}
+        onSelect={onSelectAction}
+        onClose={() => setActionsOpen(false)}
       />
       <Modal
         open={visible && commitAll !== null}
@@ -559,20 +531,15 @@ function IconFolderTree(props: { size?: number }) {
   )
 }
 
-/** The commit button's chevron menu: every way to create the commit. */
-function commitVariantItems(t: (key: string) => string): readonly MenuEntry[] {
+/** One dropdown for commits, workdir batch actions, remotes, and the stash. */
+function actionItems(t: (key: string) => string, canCommit: boolean): readonly MenuEntry[] {
   return [
-    { id: 'commit', label: t('gitGraph.commit') },
-    { id: 'commit-push', label: t('gitGraph.commitPush') },
+    { id: 'commit', label: t('gitGraph.commit'), disabled: !canCommit },
+    { id: 'commit-push', label: t('gitGraph.commitPush'), disabled: !canCommit },
     { type: 'separator', id: 'sep-amend' },
-    { id: 'commit-amend', label: t('gitGraph.commitAmend') },
-    { id: 'commit-push-amend', label: t('gitGraph.commitPushAmend') },
-  ]
-}
-
-/** The overflow menu: workdir batch actions, remotes, and the stash. */
-function overflowItems(t: (key: string) => string): readonly MenuEntry[] {
-  return [
+    { id: 'commit-amend', label: t('gitGraph.commitAmend'), disabled: !canCommit },
+    { id: 'commit-push-amend', label: t('gitGraph.commitPushAmend'), disabled: !canCommit },
+    { type: 'separator', id: 'sep-workdir' },
     { id: 'stage-all', label: t('gitGraph.stageAll') },
     { id: 'unstage-all', label: t('gitGraph.unstageAll') },
     { id: 'discard-all', label: t('gitGraph.discardAll'), danger: true },

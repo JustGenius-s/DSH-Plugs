@@ -4,7 +4,7 @@ import { shouldWakeLeader } from '../lib/wake-policy.js'
 
 /**
  * Every settlement is a Leader review point. The next step does not start
- * until the Leader calls flow.next, so a silent success would stall the graph.
+ * until the Leader calls flow_next, so a silent success would stall the graph.
  */
 
 test('a success wakes even if other nodes could still run', () => {

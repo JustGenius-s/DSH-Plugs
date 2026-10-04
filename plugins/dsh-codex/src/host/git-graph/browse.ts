@@ -589,55 +589,82 @@ function parseNameStatusZ(raw: string, followRenames: boolean): GitChangeFile[] 
   return files
 }
 
-/** git status --porcelain -z output -> change files.
+/** One `git status --porcelain -z` entry, before the panel's grouping. */
+export interface PorcelainEntry {
+  /** Index side letter; ' ' when the index matches HEAD. */
+  x: string
+  /** Worktree side letter; ' ' when the worktree matches the index. */
+  y: string
+  /** Repo-relative path; the destination for a rename/copy. */
+  path: string
+  /** Source path of a rename/copy; undefined for every other entry. */
+  oldPath?: string
+}
+
+/**
+ * git status --porcelain -z output -> raw entries.
  *
  * With -z each entry is NUL-separated. A normal entry is one field XY path; a
- * rename/copy is TWO fields R newPath then oldPath (the target comes first).
- * Untracked directories are only shown collapsed (?? dir/) unless -uall was
- * passed; callers pass -uall so untracked files appear individually.
+ * rename/copy is TWO fields — the destination, then its source in its own
+ * field. Untracked directories are only shown collapsed (?? dir/) unless
+ * -uall was passed; callers pass -uall so untracked files appear individually.
  *
- * X is the index (staged) side, Y the worktree side; a path changed in both
- * (MM) yields one entry per side, flagged via staged, so the client can group
- * them the way VSCode does.
+ * X is the index (staged) side, Y the worktree side. Grouping for the panel
+ * reads `parsePorcelainZ`; an action that restores one side (a discard) needs
+ * the letters and reads these entries directly.
  */
-function parsePorcelainZ(raw: string): GitChangeFile[] {
+export function parsePorcelainEntries(raw: string): PorcelainEntry[] {
   const parts = raw.split('\0')
-  const files: GitChangeFile[] = []
+  const entries: PorcelainEntry[] = []
   for (let index = 0; index < parts.length; index += 1) {
     const token = parts[index]
     if (token === undefined || token.length === 0) continue
     const x = token[0] ?? ' '
     const y = token[1] ?? ' '
-    const body = token.length >= 3 ? token.slice(3) : ''
-    if (x === '?' && y === '?') {
-      files.push({ path: body, status: 'untracked', staged: false })
+    const path = token.length >= 3 ? token.slice(3) : ''
+    if (x === 'R' || x === 'C') {
+      const oldPath = parts[index + 1] ?? ''
+      index += 1
+      if (path.length > 0 && oldPath.length > 0) entries.push({ x, y, path, oldPath })
       continue
     }
-    if (x === 'R' || x === 'C') {
-      // Two fields: newPath then oldPath. The rename itself is staged; y may
-      // still flag further unstaged edits to the new path.
-      const newPath = body
-      const oldPath = parts[index + 1]
-      if (newPath.length > 0 && oldPath !== undefined) {
-        files.push({
-          path: newPath,
-          oldPath,
-          status: x === 'R' ? 'renamed' : 'copied',
-          staged: true,
-        })
-        index += 1
-        if (y !== ' ' && y !== '?') {
-          files.push({ path: newPath, status: STATUS_TO_CHANGE[y] ?? 'modified', staged: false })
-        }
-        continue
+    if (path.length === 0) continue
+    entries.push({ x, y, path })
+  }
+  return entries
+}
+
+/** Raw entries -> change files.
+ *
+ * A path changed in both (MM) yields one entry per side, flagged via staged,
+ * so the client can group them the way VSCode does.
+ */
+function parsePorcelainZ(raw: string): GitChangeFile[] {
+  const files: GitChangeFile[] = []
+  for (const entry of parsePorcelainEntries(raw)) {
+    if (entry.x === '?' && entry.y === '?') {
+      files.push({ path: entry.path, status: 'untracked', staged: false })
+      continue
+    }
+    if (entry.oldPath !== undefined) {
+      // The rename itself is staged; y may still flag further unstaged edits
+      // to the new path.
+      files.push({
+        path: entry.path,
+        oldPath: entry.oldPath,
+        status: entry.x === 'R' ? 'renamed' : 'copied',
+        staged: true,
+      })
+      if (entry.y !== ' ' && entry.y !== '?') {
+        files.push({ path: entry.path, status: STATUS_TO_CHANGE[entry.y] ?? 'modified', staged: false })
       }
+      continue
     }
-    if (body.length === 0) continue
-    if (x !== ' ' && x !== '?') {
-      files.push({ path: body, status: STATUS_TO_CHANGE[x] ?? 'modified', staged: true })
+    if (entry.x !== ' ' && entry.x !== '?') {
+      files.push({ path: entry.path, status: STATUS_TO_CHANGE[entry.x] ?? 'modified', staged: true })
     }
-    if (y !== ' ' && y !== '?') {
-      files.push({ path: body, status: STATUS_TO_CHANGE[y] ?? 'modified', staged: false })
+    if (entry.y !== ' ' && entry.y !== '?') {
+      files.push({ path: entry.path, status: STATUS_TO_CHANGE[entry.y] ?? 'modified', staged: false })
     }
   }
   return files

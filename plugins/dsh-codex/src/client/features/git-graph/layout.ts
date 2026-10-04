@@ -120,6 +120,7 @@ function destColumn(
 ): number {
   if (next === undefined) return fallback
   if (next.row.sha === sha) return next.column
+  if (next.lanesBefore[fallback] === sha) return fallback
   const found = next.lanesBefore.findIndex((value) => value === sha)
   return found === -1 ? fallback : found
 }

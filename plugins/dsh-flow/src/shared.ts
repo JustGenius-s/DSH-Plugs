@@ -14,17 +14,31 @@ export const MODE_PATH = '/api/dsh-flow/mode'
 /** The slash command that turns Flow mode on and off. */
 export const FLOW_COMMAND = 'flow'
 
+/** Tool registration and guards share names valid on provider function-call APIs. */
+export const FLOW_TOOL_NAMES = {
+  plan: 'flow_plan',
+  status: 'flow_status',
+  next: 'flow_next',
+  expand: 'flow_expand',
+  confirm: 'flow_confirm',
+  report: 'flow_report',
+  patch: 'flow_patch',
+  clear: 'flow_clear',
+} as const
+
 /**
  * Lifecycle of one graph node.
  *
  * - `pending`  — waiting on dependencies that have not settled yet
- * - `ready`    — dependencies settled, waiting for the Leader to call flow.next
+ * - `ready`    — dependencies settled, waiting for the Leader to call flow_next
  * - `running`  — a child agent owns this node right now
+ * - `paused`   — the user stopped this child from the canvas; resumable, and
+ *                 not a failure, so it blocks dependents without ending the plan
  * - `done`     — child settled with `stopReason: 'completed'`
  * - `failed`   — child settled any other way (`error`, `aborted`, `refusal`, `max-tokens`)
  * - `skipped`  — the Leader dropped this node; it never runs and never blocks
  */
-export type NodeStatus = 'pending' | 'ready' | 'running' | 'expanded' | 'done' | 'failed' | 'skipped'
+export type NodeStatus = 'pending' | 'ready' | 'running' | 'expanded' | 'paused' | 'done' | 'failed' | 'skipped'
 
 /** A node status that lets its dependents proceed. */
 export const SETTLED_STATUSES: readonly NodeStatus[] = ['done', 'skipped']
@@ -64,11 +78,19 @@ export interface FlowPlanSpec {
   readonly concurrency?: number
 }
 
-/** One progress note a running child posted through `flow.report`. */
+/** One progress note a running child posted through `flow_report`. */
 export interface FlowNote {
   readonly text: string
   /** ISO timestamp, so the canvas can render a timeline. */
   readonly at: string
+}
+
+/** Provider-reported tokens for one child run; input buckets do not overlap. */
+export interface FlowTokenUsage {
+  readonly uncachedInputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheWriteTokens: number
+  readonly outputTokens: number
 }
 
 /** A node as the canvas renders it: the spec plus everything execution added. */
@@ -76,6 +98,11 @@ export interface FlowNodeView extends FlowNodeSpec {
   readonly status: NodeStatus
   /** The child agent's session id, once dispatched. Stable for the node's life. */
   readonly childId: string | null
+  /** The current or last child attempt's wall-clock bounds. */
+  readonly startedAt: string | null
+  readonly endedAt: string | null
+  /** Actual provider usage, absent until the child reports it. */
+  readonly usage: FlowTokenUsage | null
   /** Truncated child output, present once the node settles. */
   readonly summary: string | null
   /** Provider-authored failure detail for a `failed` node. */
@@ -131,6 +158,8 @@ export type FlowAction =
   | { readonly kind: 'retry'; readonly nodeId: string }
   | { readonly kind: 'skip'; readonly nodeId: string }
   | { readonly kind: 'cancel'; readonly nodeId: string }
+  | { readonly kind: 'pause'; readonly nodeId: string }
+  | { readonly kind: 'resume'; readonly nodeId: string }
   | { readonly kind: 'next' }
   | { readonly kind: 'clear' }
 
@@ -163,22 +192,17 @@ export const SUMMARY_LIMIT = 2000
 export const PROMPT_PREVIEW_LIMIT = 2000
 /** Safety cap on host-held child output (one node). */
 export const OUTPUT_STORE_LIMIT = 200_000
-/** Per-node result size in `flow.status` (whole-graph view). */
+/** Per-node result size in `flow_status` (whole-graph view). */
 export const STATUS_RESULT_LIMIT = 12_000
-/** Cap for the entire `flow.status` report. */
+/** Cap for the entire `flow_status` report. */
 export const STATUS_TOTAL_LIMIT = 48_000
-/** Cap when `flow.status` focuses a single node. */
+/** Cap when `flow_status` focuses a single node. */
 export const STATUS_FOCUS_LIMIT = 80_000
 /** How much upstream output a child brief may carry. */
 export const UPSTREAM_LIMIT = 16_000
 /** One progress note is a headline, not a paragraph. */
 export const NOTE_TEXT_LIMIT = 200
-/**
- * Notes kept per node attempt; the oldest drop off beyond this.
- *
- * Sized for action-granularity narration (one note per meaningful tool call),
- * not milestone summaries — a long node can legitimately produce dozens.
- */
+/** Notes kept per node attempt; the oldest drop off beyond this. */
 export const NOTE_MAX = 50
 
 export function clampConcurrency(value: number | undefined): number {

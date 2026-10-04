@@ -7,7 +7,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
-import { HOST_SERVICES, Schema, errorMessage, installSettingsSection, readJsonBody, sendJson } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, Schema, errorMessage, installSettingsSection, readJsonBody, sendJson, settingsNamespace } from '@just-genius/dsh-plugin-runtime/host'
 import { generateMetadata } from './metadata.ts'
 import { applyAction, listSnapshot, notesRoot, readImage, saveImage } from './notes-store.ts'
 import {
@@ -48,8 +48,12 @@ export const ConfigSchema: Schema<QuickNotesConfig> = Schema.object({
 export function apply(ctx: Context): void {
   let source = (): QuickNotesConfig => DEFAULT_CONFIG
 
-  installSettingsSection(ctx, SETTINGS_NAMESPACE, ConfigSchema, DEFAULT_CONFIG, {
+  installSettingsSection(ctx, settingsNamespace(SETTINGS_NAMESPACE), ConfigSchema, DEFAULT_CONFIG, {
     setSource: (next) => { source = next },
+    // Routes and the metadata call read `source()` per request, so a change
+    // needs no cache invalidation here — the hook is the contract's required
+    // notification point, not a place to push a value.
+    onChange: () => {},
   })
 
   ctx.effect(

@@ -30,6 +30,14 @@ const CSS = `
 .dsh-ui-number:disabled{opacity:.4}
 .dsh-ui-number:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
 
+/* Full-width settings text field: same tokens as ModelsSection .input. */
+.dsh-ui-text-field{display:flex;flex-direction:column;gap:6px}
+.dsh-ui-text-label{display:inline-flex;align-items:center;gap:10px;font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-label-secondary)}
+.dsh-ui-text{box-sizing:border-box;width:100%;height:32px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;font:inherit;font-size:14px;line-height:22px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary)}
+.dsh-ui-text:focus{outline:none;border-color:var(--dsw-alias-brand-primary)}
+.dsh-ui-text::placeholder{color:var(--dsw-alias-label-dimmed)}
+.dsh-ui-text:disabled{opacity:.6;cursor:default}
+
 /* Text-only reset button sitting at the field head's right edge
  * (fields.module.css .reset). */
 .dsh-ui-reset{border:none;background:none;padding:0;font:inherit;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary);cursor:pointer}
@@ -159,20 +167,19 @@ const PAGE_CSS = `
 .dsh-ui-failure p{margin:0}
 `
 
-let injected = false
-
-/** Inject the stylesheet once; safe to call on every render. */
+/** Inject the stylesheet; refresh in place so a rebuilt plugin does not keep stale rules. */
 export function ensureStyles(): void {
-  if (injected || typeof document === 'undefined') return
-  if (document.head.querySelector('style[data-dsh-ui]') !== null) {
-    injected = true
+  if (typeof document === 'undefined') return
+  const css = CSS + PAGE_CSS
+  const existing = document.head.querySelector('style[data-dsh-ui]')
+  if (existing instanceof HTMLStyleElement) {
+    if (existing.textContent !== css) existing.textContent = css
     return
   }
   const tag = document.createElement('style')
   tag.setAttribute('data-dsh-ui', '')
-  tag.textContent = CSS + PAGE_CSS
+  tag.textContent = css
   document.head.appendChild(tag)
-  injected = true
 }
 
 /**

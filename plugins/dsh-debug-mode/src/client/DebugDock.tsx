@@ -3,7 +3,10 @@ import { Button, MarkdownText } from '@just-genius/dsh-plugin-ui'
 import type { PropsLocale, PropsRuntime } from '@just-genius/dsh-plugin-runtime/client'
 import type { DebugKey } from './locales.ts'
 import { useDebugState } from './useDebugState.ts'
+import { debugDockOpen, debugLogCardOpen } from '../view.ts'
+import type { DebugHypothesis } from '../hypotheses.ts'
 import type { DebugLogEntry, DebugReproAction } from '../shared.ts'
+import type { DebugRunSummary } from '../types.ts'
 import styles from './DebugDock.module.css'
 
 export interface DebugDockInjected {
@@ -18,12 +21,29 @@ export type DebugDockProps = PropsRuntime<'conversation.input.dock'>
 
 export function DebugDock({ sessionId, useInput, inputActions, resolveRepro, clearLogs, t }: DebugDockProps) {
   const debug = useDebugState(sessionId)
-  const on = debug.pending ? !debug.active : debug.active
+  const facts = {
+    active: debug.active,
+    logCount: debug.logs.length,
+    runCount: debug.runs.length,
+    hypothesisCount: debug.hypotheses.length,
+    waiting: debug.wait !== null,
+  }
+  const on = debugDockOpen(facts)
+  const showLogs = debugLogCardOpen(facts)
   if (!on) return null
 
   return (
     <div className={styles.dock}>
-      <LogCard logs={debug.logs} clearLogs={clearLogs} t={t} />
+      {showLogs && (
+      <LogCard
+        logs={debug.logs}
+        runId={debug.runId}
+        runs={debug.runs}
+        hypotheses={debug.hypotheses}
+        clearLogs={clearLogs}
+        t={t}
+      />
+      )}
       {debug.wait !== null && (
         <ReproCard
           waitId={debug.wait.id}
@@ -40,10 +60,16 @@ export function DebugDock({ sessionId, useInput, inputActions, resolveRepro, cle
 
 function LogCard({
   logs,
+  runId,
+  runs,
+  hypotheses,
   clearLogs,
   t,
 }: {
   logs: readonly DebugLogEntry[]
+  runId: string | null
+  runs: readonly DebugRunSummary[]
+  hypotheses: readonly DebugHypothesis[]
   clearLogs: () => Promise<string | null>
   t: (key: DebugKey) => string
 }) {
@@ -77,6 +103,12 @@ function LogCard({
           <LogGlyph />
         </span>
         {t('logs.title')}
+        {runId !== null && <span className={styles.runChip}>{runId}</span>}
+        {runs.length > 0 && (
+          <span className={styles.archived}>
+            {runs.map(run => `${run.id} · ${run.logCount}`).join(' · ')}
+          </span>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -89,6 +121,16 @@ function LogCard({
           {t('logs.clear')}
         </Button>
       </header>
+      {hypotheses.length > 0 && (
+        <div className={styles.hypotheses}>
+          {hypotheses.map((item) => (
+            <span key={item.id} className={styles.hypothesisChip + ' ' + styles[hypothesisClass(item.status)]}>
+              {item.id}
+              <span className={styles.hypothesisStatus}>{t(hypothesisKey(item.status))}</span>
+            </span>
+          ))}
+        </div>
+      )}
       <div className={styles.logBody} ref={scroller}>
         {logs.length === 0 ? (
           <div className={styles.empty}>{t('logs.empty')}</div>
@@ -101,6 +143,15 @@ function LogCard({
             <span className={styles.lineSource + ' ' + styles[sourceClass(entry.source)]}>
               {t(sourceKey(entry.source))}
             </span>
+            {entry.hypothesisId !== undefined && (
+              <span className={styles.lineHypothesis}>{entry.hypothesisId}</span>
+            )}
+            {entry.location !== undefined && (
+              <span className={styles.lineLocation}>{entry.location}</span>
+            )}
+            {entry.count !== undefined && entry.count > 1 && (
+              <span className={styles.lineCount}>×{entry.count}</span>
+            )}
             <span className={styles.lineText}>{entry.text}</span>
           </div>
         ))}
@@ -178,6 +229,20 @@ function ReproCard({
       {error !== null && <div className={styles.feedback} role="status">{error}</div>}
     </section>
   )
+}
+
+function hypothesisKey(status: DebugHypothesis['status']): DebugKey {
+  if (status === 'confirmed') return 'hypothesis.confirmed'
+  if (status === 'rejected') return 'hypothesis.rejected'
+  if (status === 'inconclusive') return 'hypothesis.inconclusive'
+  return 'hypothesis.open'
+}
+
+function hypothesisClass(status: DebugHypothesis['status']): string {
+  if (status === 'confirmed') return 'hypothesisConfirmed'
+  if (status === 'rejected') return 'hypothesisRejected'
+  if (status === 'inconclusive') return 'hypothesisInconclusive'
+  return 'hypothesisOpen'
 }
 
 function sourceKey(source: DebugLogEntry['source']): DebugKey {

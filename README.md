@@ -16,7 +16,7 @@ Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the
 
 ### [@just-genius/dsh-flow](plugins/dsh-flow)
 
-Leader-plans / subagent-executes orchestration, **off until you run `/flow`**. Once on, the main agent only plans — it lays work out as a DAG with `flow.plan`, each node is dispatched to its own child agent, and it reshapes the graph mid-flight with `flow.patch` (retry with a revised prompt, skip, insert a corrective step) as results land. Execution tools (`edit`/`write`/`bash`) are genuinely removed from the Leader while the mode is on; read-only tools stay. A dedicated **Flow** tab beside Chat draws the live graph with React Flow: node colour = status, edges = dependencies, click a node for its brief, result, and failure reason. Leave with `/flow off` (which also cancels running children).
+Leader-plans / subagent-executes orchestration, **off until you select or run `/flow`**. Once on, the main agent only plans — it lays work out as a DAG with `flow_plan`, each node is dispatched to its own child agent, and it reshapes the graph mid-flight with `flow_patch` (retry with a revised prompt, skip, insert a corrective step) as results land. The execution guard allows the Leader to call only `flow_plan`, `flow_status`, `flow_next`, `flow_patch`, and `flow_confirm`; investigation and execution are delegated to children. A dedicated **Flow** tab in the right sidebar draws the live graph with React Flow: node colour = status, edges = dependencies, click a node for its brief, result, and failure reason. Select `/flow` in the command menu to enable the mode and open the tab. The composer shows a **Flow chip**; click it or use `/flow off` to leave and cancel running children.
 
 ### [@just-genius/dsh-workspace-plus](plugins/dsh-workspace-plus)
 
@@ -36,10 +36,6 @@ Global markdown memory: **Settings → Memory** for manual CRUD, `memory_propose
 
 GitHub Device Flow + secret Gist config sync: **Settings → Sync** pushes/pulls `settings.yaml` and the web plugin list (portable specs + `cordis.patch.yml`) with no self-hosted sync server. State lives in `~/.dsh/sync/state.json`.
 
-### [@just-genius/dsh-desktop-update](plugins/dsh-desktop-update)
-
-Update badge for [DSH-Desktop](https://github.com/JustGenius-s/DSH-Desktop) next to the sidebar Settings button, driven by the `window.dshDesktop` Electron bridge. App updates jump to GitHub Releases; DSH runtime updates install in place. Renders nothing in a plain browser.
-
 ### [@just-genius/dsh-model-custom-ex](plugins/dsh-model-custom-ex)
 
 Replaces the official Models settings page (fork of `ui-settings-models`) to add per-model dropdown multi-selects for **vision** (`input`) and **thinking strength** (`reasoningEfforts`), plus a per-model **default thinking strength** and typeable **capacity combos** — the controls the stock page punts to `settings.yaml`.
@@ -54,7 +50,7 @@ Click a `dsh-notification` system banner to focus the window and open that sessi
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 
-**Settings → 插件管理** in one tab for two kinds: Cordis npm plugins (awesome-dsh-plugin marketplace + profile inventory) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis plugins still need restart. Replaces the official read-only Plugin list.
+**Settings → 插件 → 插件扩展** adds a tab alongside DSH's official plugin pages for Cordis npm plugins (awesome-dsh-plugin marketplace, profile inventory, and npm updates) and Agent capability packs (builtin catalog → `~/.dsh/agent-plugins`). Shared top search. Agent packs mount hosted MCP tools/skills on enable without a DSH restart; Cordis installs and updates require a restart. The official Plugin list and the DSH v0.1.6-alpha.2+ sidebar plugin manager remain available.
 
 ### [@just-genius/dsh-quick-notes](plugins/dsh-quick-notes)
 

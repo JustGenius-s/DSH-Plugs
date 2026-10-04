@@ -321,24 +321,8 @@ button.installSplitMore:focus-visible {
 .agentForm {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.agentForm label {
-  display: flex;
-  flex-direction: column;
   gap: 4px;
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary, #666);
-}
-
-.agentForm input {
-  border: 1px solid var(--dsw-alias-border-primary, #ddd);
-  border-radius: 6px;
-  padding: 6px 8px;
-  background: var(--dsw-alias-bg-primary, #fff);
-  color: inherit;
+  margin-top: 4px;
 }
 
 .agentFormActions {

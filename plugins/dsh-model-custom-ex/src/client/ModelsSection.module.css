@@ -596,6 +596,104 @@ select.input {
   background-size: 12px 12px;
 }
 
+/* Editable capacity combo: a typeable input plus a trailing preset-menu
+   chevron, drawn as ONE 32px field. It has to match the `.input` fields and
+   the multi-select triggers it shares the model row with — the frame carries
+   the border, and the input and the toggle are borderless cells inside it, so
+   the pair reads as a field rather than as a text box with a stray button
+   beside it. */
+.capacityCombo {
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  /* Clips the toggle's hover fill to the frame's corner radius. */
+  overflow: hidden;
+}
+
+.capacityCombo:focus-within {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+/* The frame owns the border, so the cells inside must not draw their own. */
+.capacityInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.capacityInput::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.capacityInput:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The Menu's own root span: a fixed cell beside the input, not a flex peer
+   that could drift as the preset list changes width. Scoped through the frame
+   so it outranks the Menu's own single-class `.root` (inline-flex) whatever
+   order the two stylesheets land in the head. */
+.capacityCombo .capacityMenu {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+}
+
+.capacityToggle {
+  box-sizing: border-box;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-caption);
+  cursor: pointer;
+}
+
+.capacityToggle:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.capacityToggle:focus-visible {
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.capacityToggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Same 14px chevron and open-state flip as the multi-select trigger beside
+   it, so the two rows of controls animate alike. */
+.capacityChevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  transition: transform 120ms ease;
+}
+
+.capacityChevron[data-open='true'] {
+  transform: rotate(180deg);
+}
+
 .error {
   margin: 0;
   font-size: 12px;

@@ -1,8 +1,8 @@
 /**
  * The Leader's tool surface.
  *
- * Five tools, deliberately few: the Leader plans, inspects, advances, reshapes,
- * and clears — it never executes. Every tool that needs the delegating Agent reads
+ * The Leader plans, inspects, advances, reshapes, and requests confirmation; children may
+ * expand, request confirmation, and report progress. Each tool that needs the Agent reads
  * it from its own execution context, so the orchestrator always knows whose
  * plan it is driving.
  *
@@ -19,6 +19,7 @@ import type { FlowOrchestrator, PlanOutcome } from './orchestrator.ts'
 import {
   CONCURRENCY_MAX,
   CONCURRENCY_MIN,
+  FLOW_TOOL_NAMES,
   type FlowAction,
   type FlowNodeSpec,
   type FlowPlanSpec,
@@ -43,7 +44,7 @@ interface ToolDeps {
 const MODE_OFF = 'Flow mode is off. Enter it with `/flow` before using flow tools.'
 
 /**
- * The node shape, shared by `flow.plan` and `flow.patch`.
+ * The node shape, shared by `flow_plan` and `flow_patch`.
  *
  * No `required` block on purpose. The schema DSL compiles an array's `items`
  * with `allowRequired: false`, so a `required` key inside an object that is
@@ -71,7 +72,7 @@ function renderPlan(outcome: PlanOutcome): string {
     return [
       `Plan rejected: ${outcome.rejection.message}`,
       '',
-      'Fix the graph and call flow.plan again. Nothing was dispatched.',
+      'Fix the graph and call flow_plan again. Nothing was dispatched.',
     ].join('\n')
   }
   const plan = outcome.plan
@@ -83,7 +84,7 @@ function renderPlan(outcome: PlanOutcome): string {
   lines.push(
     '',
     'The first ready step has started. Tell the user that step is running, then stop.',
-    'When it settles, inspect with flow.status. If the result is good, call flow.next.',
+    'When it settles, inspect with flow_status. If the result is good, call flow_next.',
     'Later steps do not start until you do.',
   )
   return lines.join('\n')
@@ -103,9 +104,9 @@ export function createFlowTools(deps: ToolDeps) {
   }
 
   const flowPlan = defineTool({
-    name: 'flow.plan',
+    name: FLOW_TOOL_NAMES.plan,
     description:
-      'Flow mode only. Replace the current workflow graph with a new plan and start the first ready step. Later steps stay pending until you accept a result and call flow.next. Use `parentId` to nest child steps under a node. A child that finds it owns several tasks can also call flow.expand. Each node needs a complete, self-contained prompt.',
+      'Flow mode only. Replace the current workflow graph with a new plan and start the first ready step. Later steps stay pending until you accept a result and call flow_next. Use `parentId` to nest child steps under a node. A child that finds it owns several tasks can also call flow_expand. Each node needs a complete, self-contained prompt.',
     parameters: {
       title: { type: 'string', description: 'Short name for this plan, shown on the Flow tab.' },
       nodes: {
@@ -126,7 +127,7 @@ export function createFlowTools(deps: ToolDeps) {
       const blocked = gate(exec)
       if (blocked !== null) return blocked
       const parent = parentOf(exec)
-      if (parent === undefined) return 'flow.plan requires a live agent context.'
+      if (parent === undefined) return 'flow_plan requires a live agent context.'
       const normalized = normalizePlanArgs(args)
       if (typeof normalized === 'string') return normalized
       return renderPlan(orchestrator.setPlan(normalized, parent))
@@ -134,9 +135,9 @@ export function createFlowTools(deps: ToolDeps) {
   })
 
   const flowStatus = defineTool({
-    name: 'flow.status',
+    name: FLOW_TOOL_NAMES.status,
     description:
-      'Flow mode only. Read the current workflow graph with each completed node\'s output. Call this after a child settles, before flow.next or flow.patch. Pass `nodeId` to read one node\'s full output.',
+      'Flow mode only. Read the current workflow graph with each completed node\'s output. Call this after a child settles, before flow_next or flow_patch. Pass `nodeId` to read one node\'s full output.',
     parameters: {
       nodeId: {
         type: 'string',
@@ -156,7 +157,7 @@ export function createFlowTools(deps: ToolDeps) {
   })
 
   const flowNext = defineTool({
-    name: 'flow.next',
+    name: FLOW_TOOL_NAMES.next,
     description:
       'Flow mode only. After you have inspected a settled child and accepted the result, start the next ready step. The Host does not auto-advance. Call this once per review unless a human confirmation is pending — then wait for the user (or they click 「通过并继续」). Do not start later work yourself.',
     parameters: {},
@@ -172,13 +173,13 @@ export function createFlowTools(deps: ToolDeps) {
   })
 
   const flowExpand = defineTool({
-    name: 'flow.expand',
+    name: FLOW_TOOL_NAMES.expand,
     description:
-      'Split one graph node into child steps. The running child of that node may call this when the assignment is actually several tasks (for example implementing a feature). The Leader may also call it. New children do not start until the Leader reviews and calls flow.next. After expanding, the child should stop — do not execute the subtree yourself.',
+      'Split the running child\'s graph node into smaller steps when the assignment is actually several tasks (for example implementing a feature). New children do not start until the Leader reviews and calls flow_next. After expanding, stop — do not execute the subtree yourself.',
     parameters: {
       parentId: {
         type: 'string',
-        description: 'Node to expand. Optional for a running child — inferred. The Leader must set it.',
+        description: 'Optional. Node to expand; inferred from the running child. If provided, it must be that child\'s own node.',
       },
       nodes: {
         type: 'array',
@@ -192,19 +193,15 @@ export function createFlowTools(deps: ToolDeps) {
     },
     execute: async (args, exec) => {
       const caller = parentOf(exec)
-      if (caller === undefined) return 'flow.expand requires a live agent context.'
+      if (caller === undefined) return 'flow_expand requires a live agent context.'
       const running = orchestrator.runningNodeFor(caller)
-      const leader = isEnabled(sessionIdOf(caller))
-      if (!leader && running === null) {
-        return 'flow.expand is for the Leader (after `/flow`) or the child that is currently running a node.'
-      }
+      if (running === null) return 'flow_expand is for the child that is currently running a node.'
       const requested = typeof args.parentId === 'string' ? args.parentId.trim() : ''
-      const parentId = running !== null ? running.spec.id : requested
-      if (parentId === '') return 'flow.expand needs `parentId` when the Leader calls it.'
-      if (running !== null && requested !== '' && requested !== parentId) {
+      const parentId = running.spec.id
+      if (requested !== '' && requested !== parentId) {
         return `A running child can only expand its own node (${parentId}).`
       }
-      if (!Array.isArray(args.nodes)) return 'flow.expand needs a `nodes` array.'
+      if (!Array.isArray(args.nodes)) return 'flow_expand needs a `nodes` array.'
       const nodes: FlowNodeSpec[] = []
       for (const raw of args.nodes) {
         const spec = readNode(raw)
@@ -216,7 +213,7 @@ export function createFlowTools(deps: ToolDeps) {
   })
 
   const flowConfirm = defineTool({
-    name: 'flow.confirm',
+    name: FLOW_TOOL_NAMES.confirm,
     description:
       'Pause the plan until a human answers. Use only when a real decision is needed — not after every step. The Leader or the running child may call it. After calling, stop. The Flow tab shows the question; the user clicks 「通过并继续」 or replies in chat.',
     parameters: {
@@ -235,11 +232,11 @@ export function createFlowTools(deps: ToolDeps) {
     },
     execute: async (args, exec) => {
       const caller = parentOf(exec)
-      if (caller === undefined) return 'flow.confirm requires a live agent context.'
+      if (caller === undefined) return 'flow_confirm requires a live agent context.'
       const running = orchestrator.runningNodeFor(caller)
       const leader = isEnabled(sessionIdOf(caller))
       if (!leader && running === null) {
-        return 'flow.confirm is for the Leader (after `/flow`) or the child that is currently running a node.'
+        return 'flow_confirm is for the Leader (after `/flow`) or the child that is currently running a node.'
       }
       const question = typeof args.question === 'string' ? args.question : ''
       const requested = typeof args.nodeId === 'string' ? args.nodeId.trim() : ''
@@ -252,13 +249,13 @@ export function createFlowTools(deps: ToolDeps) {
   })
 
   const flowReport = defineTool({
-    name: 'flow.report',
+    name: FLOW_TOOL_NAMES.report,
     description:
-      'Post a one-line progress note to the Flow canvas. For the child currently running a node: after a burst of tool calls produces a conclusion (a finding, a decision, a finished change, a verified result, a blocker), report that conclusion so the user can follow your work. Do not call it for individual tool calls.',
+      'For the child currently running a node: at each key milestone (a finding, a decision, a completed change, a verified result, or a blocker), report one sentence of no more than 50 characters in the user\'s language to the Flow canvas.',
     parameters: {
       note: {
         type: 'string',
-        description: 'Required. One line stating the conclusion, e.g. "鉴权模块读完，token 刷新逻辑需要改两处".',
+        description: 'Required. One sentence of no more than 50 characters, in the user\'s language, reporting the key milestone.',
       },
     },
     output: {
@@ -267,14 +264,14 @@ export function createFlowTools(deps: ToolDeps) {
     },
     execute: async (args, exec) => {
       const caller = parentOf(exec)
-      if (caller === undefined) return 'flow.report requires a live agent context.'
+      if (caller === undefined) return 'flow_report requires a live agent context.'
       const note = typeof args.note === 'string' ? args.note : ''
       return orchestrator.reportNote(caller, note)
     },
   })
 
   const flowPatch = defineTool({
-    name: 'flow.patch',
+    name: FLOW_TOOL_NAMES.patch,
     description:
       'Flow mode only. Adjust the current workflow graph in response to child results. `retry` re-dispatches a settled node (optionally with a revised prompt, title, or dependency set) and unblocks its dependents; `skip` marks it done-without-running so dependents can proceed; `cancel` stops a live node and marks it failed; `add` inserts new nodes — use it to insert a corrective step after a failure. You cannot change a node that is currently running.',
     parameters: {
@@ -311,7 +308,7 @@ export function createFlowTools(deps: ToolDeps) {
   })
 
   const flowClear = defineTool({
-    name: 'flow.clear',
+    name: FLOW_TOOL_NAMES.clear,
     description:
       'Flow mode only. Cancel every running child and drop the current plan. Use it when the plan is obsolete or the user changes direction.',
     parameters: {},
@@ -342,10 +339,10 @@ interface RawNode {
 }
 
 function normalizePlanArgs(args: unknown): FlowPlanSpec | string {
-  if (args === null || typeof args !== 'object') return 'flow.plan needs an object argument.'
+  if (args === null || typeof args !== 'object') return 'flow_plan needs an object argument.'
   const value = args as Record<string, unknown>
   const title = typeof value.title === 'string' ? value.title : 'Untitled plan'
-  if (!Array.isArray(value.nodes)) return 'flow.plan needs a `nodes` array.'
+  if (!Array.isArray(value.nodes)) return 'flow_plan needs a `nodes` array.'
 
   const nodes: FlowNodeSpec[] = []
   for (const raw of value.nodes) {
@@ -373,7 +370,7 @@ function normalizePlanArgs(args: unknown): FlowPlanSpec | string {
  * (skip a subtree, then add a corrective node behind it).
  */
 function applyPatch(orchestrator: FlowOrchestrator, ops: readonly unknown[]): string {
-  if (ops.length === 0) return 'flow.patch needs at least one op.'
+  if (ops.length === 0) return 'flow_patch needs at least one op.'
   const lines: string[] = []
 
   for (const raw of ops) {

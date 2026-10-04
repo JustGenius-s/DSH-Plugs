@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Field, FieldHead, Input, Modal } from '@just-genius/dsh-plugin-ui'
+import { Button, TextField, Modal } from '@just-genius/dsh-plugin-ui'
 import {
   ExpandableRow,
   FailureRow,
@@ -385,6 +385,10 @@ function variableLabel(spec: AgentVariableView, locale: 'zh' | 'en'): string {
   return locale === 'zh' ? spec.label.zh : spec.label.en
 }
 
+function secretLabel(secret: string): string {
+  return secret
+}
+
 function connectionLabel(status: AgentConnectionStatus | null, t: Translate): string {
   if (status === 'connected') return t('agentConnected')
   if (status === 'needs_auth') return t('agentNeedsAuth')
@@ -506,16 +510,16 @@ function InstalledAgentRow(props: {
       {secrets.length > 0 || textVars.length > 0 ? (
         <div className={styles.agentForm}>
           {secrets.map((secret) => (
-            <Field key={secret}>
-              <FieldHead htmlFor={`${pack.name}:${secret}`} label={secret} />
-              <Input
-                id={`${pack.name}:${secret}`}
-                type="password"
-                autoComplete="off"
-                value={authDraft[`${pack.name}:${secret}`] ?? ''}
-                onChange={(event) => props.onAuthDraft(`${pack.name}:${secret}`, event.currentTarget.value)}
-              />
-            </Field>
+            <TextField
+              key={secret}
+              id={`${pack.name}:${secret}`}
+              label={secretLabel(secret)}
+              type="password"
+              autoComplete="off"
+              placeholder={t('agentSecretPlaceholder')}
+              value={authDraft[`${pack.name}:${secret}`] ?? ''}
+              onChange={(value: string) => props.onAuthDraft(`${pack.name}:${secret}`, value)}
+            />
           ))}
           {secrets.length > 0 ? (
             <div className={styles.agentFormActions}>
@@ -523,14 +527,13 @@ function InstalledAgentRow(props: {
             </div>
           ) : null}
           {textVars.map(([key, spec]) => (
-            <Field key={key}>
-              <FieldHead htmlFor={`${pack.name}:${key}`} label={variableLabel(spec, locale)} />
-              <Input
-                id={`${pack.name}:${key}`}
-                value={varDraft[`${pack.name}:${key}`] ?? String(pack.variables[key] ?? '')}
-                onChange={(event) => props.onVarDraft(`${pack.name}:${key}`, event.currentTarget.value)}
-              />
-            </Field>
+            <TextField
+              key={key}
+              id={`${pack.name}:${key}`}
+              label={variableLabel(spec, locale)}
+              value={varDraft[`${pack.name}:${key}`] ?? String(pack.variables[key] ?? '')}
+              onChange={(value: string) => props.onVarDraft(`${pack.name}:${key}`, value)}
+            />
           ))}
           {textVars.length > 0 ? (
             <div className={styles.agentFormActions}>

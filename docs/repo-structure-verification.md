@@ -49,13 +49,12 @@
 
 ## 3. 清单与磁盘抽查
 
-### 3.1 插件 12 = 12
+### 3.1 插件 10 = 10
 
 | 目录 | name / version | 与正文 |
 | --- | --- | --- |
 | `dsh-codex` | `@just-genius/dsh-codex` 0.2.1 | 一致 |
 | `dsh-debug-mode` | `@just-genius/dsh-debug-mode` 0.1.0 | 一致 |
-| `dsh-desktop-update` | `@just-genius/dsh-desktop-update` 0.2.0 | 一致 |
 | `dsh-flow` | `@just-genius/dsh-flow` 0.1.0 | 一致 |
 | `dsh-memory` | `@just-genius/dsh-memory` 0.1.0 | 一致 |
 | `dsh-model-custom-ex` | `@just-genius/dsh-model-custom-ex` 0.1.0 | 一致 |
@@ -96,7 +95,7 @@ node scripts/check-client-modules.mjs  → 退出码 1
 原稿相对磁盘的事实错误 / 遗漏 / 误导：
 
 1. **依赖合约覆盖不全**：只写 synapse 会使合约失败。磁盘上 `dsh-codex/scripts/probe-commit.ts` 同样命中源码正则。已写入 §6.4、§7.2、§8.4、附录 R2/R5。
-2. **host `platform`**：写成「多数 node，仅 codex 为 neutral」。实际 `dsh-desktop-update`、`dsh-model-custom-ex` 的 host tsdown 也是 `neutral`。
+2. **host `platform`**：写成「多数 node，仅 codex 为 neutral」。实际 `dsh-model-custom-ex` 的 host tsdown 也是 `neutral`。
 3. **ui alwaysBundle**：写成各标准包 client 配置都 bundle ui。撰写当时 `dsh-wechat-chat` 只 bundle runtime，ui 仅用于 tsdown 的 `dshCssModules`（该插件已于 2026-09-10 删除，故此例外不再存在）。
 4. **门禁退出码**：原稿声明未跑。验证阶段已跑两道脚本并回写 R5 / §11（仍未跑完整 `pnpm build` / `-r tsc`）。
 

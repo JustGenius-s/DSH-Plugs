@@ -20,11 +20,10 @@ import { DeepSeekOnboardingDialog } from './DeepSeekOnboardingDialog.tsx'
 import type { DeepSeekOnboardingInjected } from './DeepSeekOnboardingDialog.tsx'
 import { WelcomeNotice } from './WelcomeNotice.tsx'
 import type { WelcomeNoticeInjected } from './WelcomeNotice.tsx'
-import { decodeWelcomeSection, WelcomeNoticeStore } from './welcome-store.ts'
+import { createWelcomeNoticeStore } from './welcome-store.ts'
 import { ModelsSettingsStore } from './store.ts'
 import { createSettingsSchemaOperations } from './schema-operations.ts'
 import { en, zh, type ModelsKey } from './locales.ts'
-import { WELCOME_NOTICE_SETTINGS_NAMESPACE } from '../onboarding-copy.ts'
 import { DEFAULTS_NAMESPACE } from '../shared.ts'
 
 export type { ModelsSectionInjected, ModelsSectionProps } from './ModelsSection.tsx'
@@ -63,7 +62,6 @@ export const inject = [
   CLIENT_SERVICES.remoteCredentials,
   CLIENT_SERVICES.remoteLlm,
   CLIENT_SERVICES.remoteSettings,
-  CLIENT_SERVICES.settingsScope,
   CLIENT_SERVICES.settingsSchema,
 ] as const
 
@@ -100,10 +98,7 @@ export function apply(ctx: ClientContext): void {
   })
   // The scope's own memory mode is what keeps a remote browser process-local,
   // so the store needs no isLoopback branch of its own.
-  const welcomeController = new WelcomeNoticeStore(settingsScope.bind({
-    namespace: WELCOME_NOTICE_SETTINGS_NAMESPACE,
-    decode: decodeWelcomeSection,
-  }))
+  const welcomeController = createWelcomeNoticeStore(settingsScope)
   // Binding is what puts the defaults namespace into the scope's describe
   // mirror, which is the only way the Models page can read and write it. The
   // handle itself stays unused: the page reaches the namespace through the
@@ -118,7 +113,7 @@ export function apply(ctx: ClientContext): void {
   })
 
   // Pushed invalidations converge every open surface without polling. The
-  // settingsScope injection makes ui-settings activate first, and remote
+  // settingsSchema injection makes ui-settings activate first, and remote
   // dispatch preserves listener order; its listener therefore starts the
   // mirror refresh before this store joins that refresh. The welcome notice
   // follows its settings scope, so it needs no subscription here.

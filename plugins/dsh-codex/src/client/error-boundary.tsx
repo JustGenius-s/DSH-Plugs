@@ -72,7 +72,7 @@ function safeJson(value: unknown): string {
 }
 
 const ERROR_BOUNDARY_CSS = `
-.dsh-sidepanel-error{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:auto;padding:10px 12px;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;background:var(--dsw-alias-interactive-bg-hover-danger,rgba(207,34,46,.08))}
+.dsh-sidepanel-error{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:auto;padding:10px 12px;color:var(--dsw-alias-label-primary,#e6e6e8);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;background:var(--dsw-alias-interactive-bg-hover-danger,rgba(207,34,46,.08))}
 .dsh-sidepanel-error-head{display:flex;align-items:center;gap:8px}
 .dsh-sidepanel-error-title{flex:1;min-width:0;color:var(--dsw-alias-state-error-primary,#cf222e);font-family:inherit;font-size:13px;font-weight:600;line-height:20px}
 .dsh-sidepanel-error-copy{flex:none;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:11px;line-height:16px;padding:2px 6px;cursor:pointer}

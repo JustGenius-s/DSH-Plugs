@@ -8,7 +8,7 @@
  * it; the promise we already hold settles either way.
  */
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
-import { createUserMessage } from '@just-genius/dsh-plugin-runtime/host'
+import { createUserMessage, sessionEventsOf } from '@just-genius/dsh-plugin-runtime/host'
 import type { Agent } from '@just-genius/dsh-plugin-runtime/host'
 
 import { depthOf, readyIds, validatePlan, type PlanRejection } from './graph.ts'
@@ -33,6 +33,7 @@ import {
   type NodeStatus,
 } from './shared.ts'
 import type { ChildOutcome, DispatchedRun, RuntimeNode, RuntimePlan } from './types.ts'
+import { tokenUsageOf } from './usage.ts'
 import { shouldWakeLeader } from './wake-policy.ts'
 
 /**
@@ -57,6 +58,8 @@ interface SubagentSeam {
 interface SubagentRunLike {
   /** The child's session id; for a local run this equals the child session. */
   readonly id: string
+  /** Published local child; remote providers do not expose its event log. */
+  readonly localAgent?: { readonly session: { readonly events?: unknown; readonly snapshotEvents?: () => unknown } }
   /**
    * Resolves with the child's terminal outcome. Does NOT reject on a
    * child-level failure — a model or transport failure resolves with
@@ -155,6 +158,9 @@ export class FlowOrchestrator {
         summary: null,
         diagnostic: null,
         notes: [],
+        startedAt: null,
+        endedAt: null,
+        usage: null,
         updatedAt: now,
         attempts: 0,
       })
@@ -201,11 +207,11 @@ export class FlowOrchestrator {
    * Attach child nodes under `parentId`.
    *
    * Used by the Leader and by the child that is currently running that parent.
-   * Does not start the new children — the Leader calls `flow.next` after review.
+   * Does not start the new children — the Leader calls `flow_next` after review.
    */
   expand(parentId: string, specs: readonly FlowNodeSpec[]): string {
     const plan = this.plan
-    if (plan === null) return 'No plan is active. Call flow.plan to create one.'
+    if (plan === null) return 'No plan is active. Call flow_plan to create one.'
     const parent = plan.nodes.get(parentId)
     if (parent === undefined) return `Unknown node "${parentId}".`
     if (parent.status === 'failed' || parent.status === 'skipped') {
@@ -214,7 +220,7 @@ export class FlowOrchestrator {
     if (this.parentDepth(parentId) >= 3) {
       return `Cannot expand "${parentId}": the tree is already 4 levels deep.`
     }
-    if (specs.length === 0) return 'flow.expand needs at least one child node.'
+    if (specs.length === 0) return 'flow_expand needs at least one child node.'
 
     const added: string[] = []
     for (const spec of specs) {
@@ -236,8 +242,8 @@ export class FlowOrchestrator {
     return [
       `Expanded "${parentId}" with ${added.length} child node(s): ${added.join(', ')}.`,
       parent.status === 'running'
-        ? 'The parent is still running. After it settles, inspect with flow.status, then flow.next.'
-        : 'Inspect with flow.status, then flow.next to start the first child.',
+        ? 'The parent is still running. After it settles, inspect with flow_status, then flow_next.'
+        : 'Inspect with flow_status, then flow_next to start the first child.',
       '',
       this.report(),
     ].join('\n')
@@ -247,14 +253,14 @@ export class FlowOrchestrator {
    * Pause dispatch until a human answers.
    *
    * Used only when the Leader or a child actually needs a decision — not after
-   * every settled step. The canvas shows the question; `flow.next` or the
+   * every settled step. The canvas shows the question; `flow_next` or the
    * 「通过并继续」 button clears the gate and continues.
    */
   requestConfirm(question: string, nodeId: string | null, opts?: { readonly wake?: boolean }): string {
     const plan = this.plan
-    if (plan === null) return 'No plan is active. Call flow.plan to create one.'
+    if (plan === null) return 'No plan is active. Call flow_plan to create one.'
     const trimmed = question.trim()
-    if (trimmed === '') return 'flow.confirm needs a non-empty `question`.'
+    if (trimmed === '') return 'flow_confirm needs a non-empty `question`.'
     if (nodeId !== null && nodeId !== '' && !plan.nodes.has(nodeId)) {
       return `Unknown node "${nodeId}".`
     }
@@ -265,7 +271,7 @@ export class FlowOrchestrator {
     return [
       `Human confirmation requested${plan.confirm.nodeId !== null ? ` for "${plan.confirm.nodeId}"` : ''}.`,
       plan.confirm.question,
-      'Stop. Do not call flow.next or continue the subtree. The user will answer on the Flow tab or in chat.',
+      'Stop. Do not call flow_next or continue the subtree. The user will answer on the Flow tab or in chat.',
     ].join('\n')
   }
 
@@ -281,10 +287,10 @@ export class FlowOrchestrator {
     if (plan === null) return 'No plan is active.'
     const node = this.runningNodeFor(agent)
     if (node === null) {
-      return 'flow.report is for the child that is currently running a node.'
+      return 'flow_report is for the child that is currently running a node.'
     }
     const trimmed = text.trim()
-    if (trimmed === '') return 'flow.report needs a non-empty `note`.'
+    if (trimmed === '') return 'flow_report needs a non-empty `note`.'
     node.notes.push({ text: truncate(trimmed, NOTE_TEXT_LIMIT), at: new Date().toISOString() })
     if (node.notes.length > NOTE_MAX) node.notes.splice(0, node.notes.length - NOTE_MAX)
     node.updatedAt = new Date().toISOString()
@@ -391,7 +397,7 @@ export class FlowOrchestrator {
     this.pump(plan.parent)
   }
 
-  /** Apply one mutation from the canvas or the Leader's `flow.patch` tool. */
+  /** Apply one mutation from the canvas or the Leader's `flow_patch` tool. */
   applyAction(action: FlowAction): { ok: boolean; message: string | null } {
     const plan = this.plan
     if (plan === null) return { ok: false, message: 'no plan is active' }
@@ -424,6 +430,9 @@ export class FlowOrchestrator {
       node.summary = null
       node.diagnostic = null
       node.notes = []
+      node.startedAt = null
+      node.endedAt = null
+      node.usage = null
       node.updatedAt = new Date().toISOString()
       plan.status = 'running'
       this.revision += 1
@@ -432,16 +441,51 @@ export class FlowOrchestrator {
     }
 
     if (action.kind === 'skip') {
+      const usage = node.run?.usage() ?? node.usage
       if (node.status === 'running') {
         void this.disposeNode(node)
       }
       if (node.status === 'done') {
         return { ok: false, message: `node "${action.nodeId}" already completed` }
       }
-      this.settle(node, 'skipped', null, null)
+      this.settle(node, 'skipped', null, null, usage)
       plan.updatedAt = new Date().toISOString()
       this.revision += 1
       this.refreshPlanStatus()
+      return { ok: true, message: null }
+    }
+
+    if (action.kind === 'pause') {
+      if (node.status !== 'running') {
+        return { ok: false, message: `node "${action.nodeId}" is ${node.status}; only a running node can be paused` }
+      }
+      const pausedUsage = node.run?.usage() ?? node.usage
+      void this.disposeNode(node)
+      this.settle(node, 'paused', null, 'paused by request', pausedUsage)
+      plan.updatedAt = new Date().toISOString()
+      this.revision += 1
+      this.refreshPlanStatus()
+      return { ok: true, message: null }
+    }
+
+    if (action.kind === 'resume') {
+      if (node.status !== 'paused') {
+        return { ok: false, message: `node "${action.nodeId}" is ${node.status}; only a paused node can be resumed` }
+      }
+      plan.confirm = null
+      node.status = 'pending'
+      node.run = null
+      node.output = null
+      node.summary = null
+      node.diagnostic = null
+      node.notes = []
+      node.startedAt = null
+      node.endedAt = null
+      node.usage = null
+      node.updatedAt = new Date().toISOString()
+      plan.status = 'running'
+      this.revision += 1
+      this.pump(plan.parent)
       return { ok: true, message: null }
     }
 
@@ -449,8 +493,9 @@ export class FlowOrchestrator {
     if (node.status !== 'running' && node.status !== 'ready') {
       return { ok: false, message: `node "${action.nodeId}" is ${node.status}; only a live node can be cancelled` }
     }
+    const usage = node.run?.usage() ?? node.usage
     void this.disposeNode(node)
-    this.settle(node, 'failed', null, 'cancelled by request')
+    this.settle(node, 'failed', null, 'cancelled by request', usage)
     plan.updatedAt = new Date().toISOString()
     this.revision += 1
     this.refreshPlanStatus()
@@ -465,7 +510,7 @@ export class FlowOrchestrator {
    */
   advance(): string {
     const plan = this.plan
-    if (plan === null) return 'No plan is active. Call flow.plan to create one.'
+    if (plan === null) return 'No plan is active. Call flow_plan to create one.'
     if (plan.status === 'settled') {
       return 'Every node has settled. Summarise the outcome for the user; there is nothing left to dispatch.'
     }
@@ -484,9 +529,9 @@ export class FlowOrchestrator {
     }
     const failed = [...plan.nodes.values()].filter((node) => node.status === 'failed')
     if (failed.length > 0) {
-      return `Nothing is ready. Failed node(s) block dependents: ${failed.map((node) => node.spec.id).join(', ')}. Patch them (retry / skip / add), then call flow.next.`
+      return `Nothing is ready. Failed node(s) block dependents: ${failed.map((node) => node.spec.id).join(', ')}. Patch them (retry / skip / add), then call flow_next.`
     }
-    return 'Nothing is ready to run yet. Call flow.status and inspect the graph.'
+    return 'Nothing is ready to run yet. Call flow_status and inspect the graph.'
   }
 
   /** The wire-safe projection consumed by the canvas. */
@@ -501,6 +546,9 @@ export class FlowOrchestrator {
         ...node.spec,
         status: node.status,
         childId: node.run?.childId ?? null,
+        startedAt: node.startedAt,
+        endedAt: node.endedAt,
+        usage: node.run?.usage() ?? node.usage,
         summary: node.summary,
         diagnostic: node.diagnostic,
         notes: [...node.notes],
@@ -528,7 +576,7 @@ export class FlowOrchestrator {
    */
   report(focusId?: string): string {
     const plan = this.plan
-    if (plan === null) return 'No plan is active. Call flow.plan to create one.'
+    if (plan === null) return 'No plan is active. Call flow_plan to create one.'
 
     if (focusId !== undefined && focusId !== '') {
       const node = plan.nodes.get(focusId)
@@ -564,7 +612,7 @@ export class FlowOrchestrator {
       }
     }
     lines.push('', 'Terminal statuses: done, skipped. A failed node blocks its dependents until you retry or skip it.')
-    lines.push('Pass `nodeId` to flow.status to read one node\'s full output.')
+    lines.push('Pass `nodeId` to flow_status to read one node\'s full output.')
     return truncate(lines.join('\n'), STATUS_TOTAL_LIMIT)
   }
 
@@ -629,7 +677,10 @@ export class FlowOrchestrator {
     // that. The signal covers the pre-publication window (start rejects), and
     // the run's own `dispose` covers everything after.
     const handle: { run: SubagentRunLike | null } = { run: null }
-    const state: { childId: string | null } = { childId: null }
+    const state: { childId: string | null; session: { readonly events?: unknown; readonly snapshotEvents?: () => unknown } | null } = {
+      childId: null,
+      session: null,
+    }
 
     const settlement = (async (): Promise<ChildOutcome> => {
       const started = await seam.start(DEFAULT_PROVIDER, {
@@ -642,11 +693,13 @@ export class FlowOrchestrator {
       })
       handle.run = started
       state.childId = started.id
+      state.session = started.localAgent?.session ?? null
       const outcome = await started.result
       return {
         stopReason: outcome.stopReason,
         output: textOf(outcome.output),
         diagnostic: outcome.diagnostic ?? null,
+        usage: tokenUsageOf(sessionEventsOf(state.session)),
       }
     })()
 
@@ -657,6 +710,7 @@ export class FlowOrchestrator {
       set childId(value: string | null) {
         state.childId = value
       },
+      usage: () => tokenUsageOf(sessionEventsOf(state.session)),
       dispose: async () => {
         controller.abort()
         const started = handle.run
@@ -673,9 +727,12 @@ export class FlowOrchestrator {
 
     node.run = run
     node.status = 'running'
+    node.startedAt = new Date().toISOString()
+    node.endedAt = null
+    node.usage = null
     node.attempts += 1
-    node.updatedAt = new Date().toISOString()
-    plan.updatedAt = new Date().toISOString()
+    node.updatedAt = node.startedAt
+    plan.updatedAt = node.startedAt
     this.revision += 1
 
     // A child-level failure resolves with a non-completed stop reason rather
@@ -684,14 +741,14 @@ export class FlowOrchestrator {
     // outright — its node no longer exists.
     void run.result
       .then((outcome) => {
-        if (generation !== this.generation) return
+        if (generation !== this.generation || node.run !== run) return
         const ok = outcome.stopReason === 'completed'
         const next = ok && this.childrenOf(node.spec.id).length > 0 ? 'expanded' : (ok ? 'done' : 'failed')
-        this.settle(node, next, outcome.output, outcome.diagnostic)
+        this.settle(node, next, outcome.output, outcome.diagnostic, outcome.usage)
         this.onSettled(node, outcome)
       })
       .catch((error: unknown) => {
-        if (generation !== this.generation) return
+        if (generation !== this.generation || node.run !== run) return
         this.settle(node, 'failed', null, `dispatch failed: ${messageOf(error)}`)
         this.onSettled(node, null)
       })
@@ -703,7 +760,7 @@ export class FlowOrchestrator {
    * After any node settles: refresh the graph and wake the Leader.
    *
    * Do not start the next step here. Sequential review is the point — the
-   * Leader inspects the result and calls `flow.next` when it wants to continue.
+   * Leader inspects the result and calls `flow_next` when it wants to continue.
    */
   private onSettled(node: RuntimeNode, _outcome: ChildOutcome | null): void {
     const plan = this.plan
@@ -766,7 +823,7 @@ export class FlowOrchestrator {
    * Hand the Leader a compact account of the current wave.
    *
    * Best effort: the canvas is the primary UI, and a failed wake must never
-   * strand the plan. Results stay in the graph for the next `flow.status`.
+   * strand the plan. Results stay in the graph for the next `flow_status`.
    */
   private wake(parent: Agent, text: string): void {
     try {
@@ -789,10 +846,10 @@ export class FlowOrchestrator {
     if (plan === null) return 'The flow plan was cleared.'
     const remaining = this.remainingCount()
     const confirmLine = plan.confirm !== null
-      ? `Human confirmation is pending${plan.confirm.nodeId !== null ? ` (${plan.confirm.nodeId})` : ''}: ${plan.confirm.question} Tell the user, then stop. Do not call flow.next until they answer.`
+      ? `Human confirmation is pending${plan.confirm.nodeId !== null ? ` (${plan.confirm.nodeId})` : ''}: ${plan.confirm.question} Tell the user, then stop. Do not call flow_next until they answer.`
       : remaining === 0
-        ? 'Every node has settled. Call flow.status, then summarise for the user in one reply.'
-        : `${remaining} node(s) still outstanding. Call flow.status, inspect the result, then flow.next to start the next ready step — or flow.patch if it failed. Call flow.confirm only when you need a human decision.`
+        ? 'Every node has settled. Call flow_status, then summarise for the user in one reply.'
+        : `${remaining} node(s) still outstanding. Call flow_status, inspect the result, then flow_next to start the next ready step — or flow_patch if it failed. Call flow_confirm only when you need a human decision.`
     const lines = [
       `Flow update — plan "${plan.title}" is ${plan.status}.`,
       confirmLine,
@@ -814,14 +871,16 @@ export class FlowOrchestrator {
     return [...plan.nodes.values()].filter((node) => !SETTLED_STATUSES.includes(node.status)).length
   }
 
-  private settle(node: RuntimeNode, status: NodeStatus, output: string | null, diagnostic: string | null): void {
+  private settle(node: RuntimeNode, status: NodeStatus, output: string | null, diagnostic: string | null, usage?: RuntimeNode['usage']): void {
     node.status = status
+    node.usage = usage ?? node.run?.usage() ?? node.usage
     node.run = null
     const stored = output === null || output.trim() === '' ? null : truncate(output, OUTPUT_STORE_LIMIT)
     node.output = stored
     node.summary = stored === null ? null : truncate(stored, SUMMARY_LIMIT)
     node.diagnostic = diagnostic
     node.updatedAt = new Date().toISOString()
+    if (node.startedAt !== null) node.endedAt = node.updatedAt
     if (this.plan !== null) this.plan.updatedAt = node.updatedAt
   }
 
@@ -829,7 +888,7 @@ export class FlowOrchestrator {
     const plan = this.plan
     if (plan === null) return
     const statuses = [...plan.nodes.values()].map((node) => node.status)
-    if (statuses.some((status) => status === 'running' || status === 'ready')) {
+    if (statuses.some((status) => status === 'running' || status === 'ready' || status === 'paused')) {
       plan.status = 'running'
       return
     }
@@ -961,6 +1020,9 @@ export class FlowOrchestrator {
       summary: null,
       diagnostic: null,
       notes: [],
+      startedAt: null,
+      endedAt: null,
+      usage: null,
       updatedAt: now,
       attempts: 0,
     })
@@ -1000,8 +1062,8 @@ export class FlowOrchestrator {
     lines.push('', CHILD_REPORT_HINT)
     lines.push(
       '',
-      '## Output contract',
-      'Answer with only the result of this one step. Do not plan beyond it and do not modify unrelated files.',
+      '## Task scope',
+      'Do not plan beyond this step or modify unrelated files.',
     )
     return lines.join('\n')
   }

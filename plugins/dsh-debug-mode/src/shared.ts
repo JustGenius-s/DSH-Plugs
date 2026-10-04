@@ -7,6 +7,14 @@ export const DEBUG_LOG = 'debug_log'
 /** HTTP path for appending or listing debug logs. */
 export const LOGS_PATH = '/dsh-debug-mode/logs'
 
+/**
+ * Stable browser ingest port. Desktop's GUI webServer port changes on every
+ * restart; probes that bake that port die after the next host rebuild.
+ */
+export const DEBUG_INGEST_PORT = 17318
+
+export const DEBUG_INGEST_HOST = '127.0.0.1'
+
 /** HTTP path for resolving a pending reproduction wait. */
 export const REPRO_PATH = '/dsh-debug-mode/repro'
 
@@ -16,11 +24,17 @@ export const STATE_PATH = '/dsh-debug-mode/state'
 /** HTTP path for clearing the live dock and the workspace log file. */
 export const CLEAR_PATH = '/dsh-debug-mode/clear'
 
+/** HTTP path for entering or leaving debug mode from the client command row. */
+export const COMMAND_PATH = '/dsh-debug-mode/command'
+
 /** Workspace-relative directory written when debug mode turns on. */
 export const DEBUG_KIT_DIR = '.dsh/debug'
 
 /** Workspace-relative JSONL log the host mirrors from memory. */
 export const DEBUG_LOG_FILE = `${DEBUG_KIT_DIR}/debug.log`
+
+/** Browser-safe helper written beside the Node kit (no `node:` imports). */
+export const DEBUG_BROWSER_LOG = `${DEBUG_KIT_DIR}/log.browser.js`
 
 /** Keep the projection small enough for frequent polls. */
 export const MAX_DEBUG_LOGS = 200
@@ -48,6 +62,12 @@ export interface DebugLogEntry {
   at: number
   source: DebugLogSource
   text: string
+  hypothesisId?: string
+  location?: string
+  data?: unknown
+  runId?: string
+  /** Folded identical ticks; omitted when the line was seen once. */
+  count?: number
 }
 
 export interface DebugReproWait {
@@ -59,8 +79,13 @@ export interface DebugReproWait {
 export interface DebugLogPost {
   sessionId: string
   text?: string
+  message?: string
   lines?: string[]
   source?: DebugLogSource
+  hypothesisId?: string
+  location?: string
+  data?: unknown
+  runId?: string
 }
 
 export interface DebugReproPost {

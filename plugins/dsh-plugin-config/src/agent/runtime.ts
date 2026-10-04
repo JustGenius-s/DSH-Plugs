@@ -43,6 +43,10 @@ import {
 } from '@just-genius/dsh-agent-plugin'
 import { builtinCatalogRoot } from './catalog-root.ts'
 
+function normalizeHeaderSecret(value: string): string {
+  return value.trim().replace(/^[`'"]+|[`'"]+$/g, '').trim()
+}
+
 type Disposer = () => void
 
 interface ActivePack {
@@ -227,7 +231,7 @@ export class AgentPackRuntime {
     } else if (pack.manifest.auth === 'headers') {
       const secrets = options.secrets ?? {}
       for (const name of pack.manifest.headerSecrets ?? []) {
-        const value = secrets[name]?.trim()
+        const value = normalizeHeaderSecret(secrets[name] ?? '')
         if (!value) throw new Error(`secret "${name}" is required`)
         await this.ctx.credentials.set(
           credentialRef(agentCredentialKey(options.pluginId, name)),

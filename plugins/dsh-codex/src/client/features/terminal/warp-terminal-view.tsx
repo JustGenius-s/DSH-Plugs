@@ -10,7 +10,7 @@
 // active, matching Warp's AltScreen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent, ClipboardEvent as ReactClipboardEvent } from 'react'
+import type { CSSProperties, ReactNode, MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent, ClipboardEvent as ReactClipboardEvent } from 'react'
 import { Menu, type MenuEntry } from '@just-genius/dsh-plugin-ui'
 import { Terminal } from '@xterm/xterm'
 import type {
@@ -20,6 +20,8 @@ import type {
   TerminalCompletionCandidate,
 } from '../../../shared/terminal-protocol'
 import type { TerminalShell } from '../../../shared/config'
+import { fontFamilyStack, TERMINAL_FONT_FALLBACK } from '../../../shared/fonts'
+import { whenFontReady } from '../fonts/controller'
 import type { TerminalControllerStore } from './controller'
 import { ensureWarpTerminalStyles } from './styles'
 import { createBlockGrid, writeToGrid, disposeGrid, resizeGrid, type StoreOptions, type BlockGrid } from './block-store'
@@ -48,7 +50,6 @@ import { useCursorBlink, useTerminalTheme } from './browser-lifecycle'
 
 ensureWarpTerminalStyles()
 
-const FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 const LINE_HEIGHT = 1.2
 
 interface Block {
@@ -175,6 +176,7 @@ export interface WarpTerminalViewProps {
   terminalShell: TerminalShell
   terminalScrollback: number
   terminalFontSize: number
+  codeFontFamily?: string
   controllerStore?: TerminalControllerStore
   controllerId?: string
   /** False while the retained official tab body is hidden or detached. */
@@ -191,6 +193,7 @@ export interface WarpTerminalViewProps {
 
 export function WarpTerminalView(props: WarpTerminalViewProps) {
   const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t, controllerStore, controllerId, onAddToContext } = props
+  const fontFamily = fontFamilyStack(props.codeFontFamily, TERMINAL_FONT_FALLBACK)
   const visible = props.visible !== false
   const sessionCwd = cwd
 
@@ -211,6 +214,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const terminalShellRef = useRef<TerminalShell>(terminalShell)
   const terminalScrollbackRef = useRef(terminalScrollback)
   const terminalFontSizeRef = useRef(terminalFontSize)
+  const fontFamilyRef = useRef(fontFamily)
   const [viewHeight, setViewHeight] = useState(600)
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -234,6 +238,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const altActiveRef = useRef(false)
   const docRef = useRef<ComposedDoc | null>(null)
   const metricsRef = useRef<CellMetrics>({ cellWidth: 8, cellHeight: 14 })
+  const remeasureRef = useRef(() => {})
   const stickToBottomRef = useRef(true)
   const dragRef = useRef<{ startRow: number; startCol: number } | null>(null)
   const paintRafRef = useRef(0)
@@ -290,6 +295,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   terminalShellRef.current = terminalShell
   terminalScrollbackRef.current = terminalScrollback
   terminalFontSizeRef.current = terminalFontSize
+  fontFamilyRef.current = fontFamily
 
   const storeOpts = (): StoreOptions => ({ cols: colsRef.current, scrollback: terminalScrollbackRef.current })
 
@@ -362,7 +368,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     if (altActiveRef.current && altTermRef.current !== null) {
       const term = altTermRef.current
       paintVisible({
-        ctx, theme, palette, metrics: m, fontFamily: FONT_STACK, fontSize: terminalFontSizeRef.current,
+        ctx, theme, palette, metrics: m, fontFamily: fontFamilyRef.current, fontSize: terminalFontSizeRef.current,
         topRow: 0, topRowOffsetPx: 0, visibleRows, cols: colsRef.current,
         rows: (row) => (row < term.rows ? { kind: 'cells', term, row } : undefined),
         selection: null,
@@ -373,13 +379,13 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
 
     if (d === null) return
     paintVisible({
-      ctx, theme, palette, metrics: m, fontFamily: FONT_STACK, fontSize: terminalFontSizeRef.current,
+      ctx, theme, palette, metrics: m, fontFamily: fontFamilyRef.current, fontSize: terminalFontSizeRef.current,
       topRow, topRowOffsetPx, visibleRows, cols: colsRef.current,
       rows: d.rowAt,
       selection: selectionRef.current,
       cursor: null,
     })
-  }, [cursorVisible, terminalFontSize, theme, palette])
+  }, [cursorVisible, terminalFontSize, fontFamily, theme, palette])
 
   const schedulePaint = useCallback(() => {
     cancelAnimationFrame(paintRafRef.current)
@@ -743,7 +749,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       const vpHeight = scrollEl.clientHeight
       const vpWidth = scrollEl.clientWidth
       if (vpHeight <= 0 || vpWidth <= 0) return
-      const m = measureCells(ctx, FONT_STACK, terminalFontSizeRef.current, LINE_HEIGHT)
+      const m = measureCells(ctx, fontFamilyRef.current, terminalFontSizeRef.current, LINE_HEIGHT)
       metricsRef.current = m
       setMetrics(m)
       // The viewport height comes from the scroll container (a stable,
@@ -763,11 +769,15 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       schedulePaint()
       sendResizeRef.current()
     }
+    remeasureRef.current = measure
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(scrollEl)
-    return () => observer.disconnect()
-  }, [rebuildDoc, schedulePaint, terminalFontSize])
+    return () => {
+      observer.disconnect()
+      if (remeasureRef.current === measure) remeasureRef.current = () => {}
+    }
+  }, [rebuildDoc, schedulePaint, terminalFontSize, fontFamily])
 
   useEffect(() => {
     if (altActive) schedulePaint()
@@ -1142,7 +1152,12 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
 
   useEffect(() => {
     adjustEditorHeight()
-  }, [draft, adjustEditorHeight])
+  }, [draft, adjustEditorHeight, fontFamily])
+
+  useEffect(() => whenFontReady(canvasRef.current?.ownerDocument.fonts, `${terminalFontSize}px ${fontFamily}`, () => {
+    remeasureRef.current()
+    adjustEditorHeight()
+  }), [fontFamily, terminalFontSize, adjustEditorHeight])
 
   // Soft wraps reflow when the panel width changes, so re-measure then too.
   useEffect(() => {
@@ -1209,7 +1224,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     return block.getBoundingClientRect().bottom + 200 > scroll.getBoundingClientRect().bottom
   })()
   return (
-    <div className="dsh-warp-terminal">
+    <div className="dsh-warp-terminal" style={{ '--dsh-codex-terminal-font-family': fontFamily } as CSSProperties}>
       {connState === 'reconnecting' && (
         <div className="dsh-warp-terminal-banner is-reconnecting">
           <span className="dsh-warp-terminal-reconnecting">{error ?? t('status.reconnecting')}</span>

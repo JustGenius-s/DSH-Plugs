@@ -107,7 +107,12 @@ export class TerminalConnectionController {
     if (config === null || this.stopped) return
     this.resetGates()
     this.callbacks.onState(state)
-    const socket = new WebSocket(buildWsUrl(config.cwd, config.shell, this.sessionToken))
+    const baseUrl = terminalTransportBaseUrl()
+    if (baseUrl === undefined) {
+      this.callbacks.onState('disconnected')
+      return
+    }
+    const socket = new WebSocket(buildTerminalWsUrl(config.cwd, config.shell, this.sessionToken, baseUrl))
     this.socket = socket
     socket.onmessage = event => {
       if (this.socket !== socket || this.stopped) return
@@ -166,15 +171,45 @@ export class TerminalConnectionController {
   }
 }
 
-function buildWsUrl(cwd: string | undefined, shell: TerminalShell, sessionToken: string): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const query = new URLSearchParams()
-  if (cwd) query.set('cwd', cwd)
-  if (shell !== 'auto') query.set('shell', shell)
-  query.set('session', sessionToken)
-  query.set('rows', '30')
-  query.set('cols', '100')
-  return `${protocol}//${window.location.host}/dsh-codex/terminal/ws?${query.toString()}`
+/** Registered absolutely by the Host; see `WS_PATH` in host/terminal/server.ts. */
+const TERMINAL_WS_PATH = '/dsh-codex/terminal/ws'
+
+interface TerminalTransport {
+  /** Host origin published by the Desktop shell for a document it owns. */
+  streamBaseUrl?: string
+}
+
+/**
+ * Origin the terminal WebSocket resolves against.
+ *
+ * The Desktop shell serves this UI from its own `dsh-app://app` document and
+ * proxies that document to the real Host. `window.location` is then the shell
+ * document, so `window.location.host` is the literal `app`: every attempt to
+ * dial `ws://app/...` fails DNS and the pane loops on "reconnecting" forever.
+ * DSH publishes the owned Host origin as `__DSH_TRANSPORT__.streamBaseUrl` for
+ * exactly this case, and a plain HTTP page keeps using its own document base.
+ */
+export function terminalTransportBaseUrl(
+  transport: TerminalTransport | undefined = (globalThis as { __DSH_TRANSPORT__?: TerminalTransport }).__DSH_TRANSPORT__,
+  documentBaseUrl: string | undefined = typeof document === 'undefined' ? undefined : document.baseURI,
+): string | undefined {
+  return transport?.streamBaseUrl ?? documentBaseUrl
+}
+
+export function buildTerminalWsUrl(
+  cwd: string | undefined,
+  shell: TerminalShell,
+  sessionToken: string,
+  baseUrl: string,
+): string {
+  const url = new URL(TERMINAL_WS_PATH, baseUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (cwd) url.searchParams.set('cwd', cwd)
+  if (shell !== 'auto') url.searchParams.set('shell', shell)
+  url.searchParams.set('session', sessionToken)
+  url.searchParams.set('rows', '30')
+  url.searchParams.set('cols', '100')
+  return url.href
 }
 
 const TERMINAL_RUNTIME_ID = newRuntimeId()

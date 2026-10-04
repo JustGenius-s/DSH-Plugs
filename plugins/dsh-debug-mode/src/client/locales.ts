@@ -1,4 +1,6 @@
 export type DebugKey =
+  | 'command.label'
+  | 'command.description'
   | 'chip.on.aria'
   | 'chip.on.title'
   | 'chip.failed'
@@ -13,8 +15,14 @@ export type DebugKey =
   | 'source.agent'
   | 'source.user'
   | 'source.ingest'
+  | 'hypothesis.open'
+  | 'hypothesis.confirmed'
+  | 'hypothesis.rejected'
+  | 'hypothesis.inconclusive'
 
 export const zh: Record<DebugKey, string> = {
+  'command.label': '调试',
+  'command.description': '进入或离开 debug 模式',
   'chip.on.aria': 'debug mode 已开启，按下关闭',
   'chip.on.title': 'debug mode 已开启 — 点击关闭（/debug off）',
   'chip.failed': '退出 debug mode 失败',
@@ -29,9 +37,15 @@ export const zh: Record<DebugKey, string> = {
   'source.agent': 'agent',
   'source.user': 'you',
   'source.ingest': 'runtime',
+  'hypothesis.open': 'open',
+  'hypothesis.confirmed': '已确认',
+  'hypothesis.rejected': '已否决',
+  'hypothesis.inconclusive': '未决',
 }
 
 export const en: Record<DebugKey, string> = {
+  'command.label': 'Debug',
+  'command.description': 'Enter or leave debug mode',
   'chip.on.aria': 'Debug mode on, press to turn off',
   'chip.on.title': 'Debug mode on — click to turn off (/debug off)',
   'chip.failed': 'failed to exit debug mode',
@@ -46,4 +60,8 @@ export const en: Record<DebugKey, string> = {
   'source.agent': 'agent',
   'source.user': 'you',
   'source.ingest': 'runtime',
+  'hypothesis.open': 'open',
+  'hypothesis.confirmed': 'confirmed',
+  'hypothesis.rejected': 'rejected',
+  'hypothesis.inconclusive': 'inconclusive',
 }

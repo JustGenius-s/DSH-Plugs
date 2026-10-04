@@ -1,6 +1,6 @@
 export const zh = {
-  tab: '插件管理',
-  hint: '同一页管理两类插件：Cordis npm 插件（写入 profile，通常需重启）与 Agent 能力包（落盘到 ~/.dsh/agent-plugins，启用后即时挂载 MCP/Skill）。',
+  tab: '插件扩展',
+  hint: '提供插件市场、npm 更新和 Agent 能力包。DSH v0.1.6-alpha.2 起可在侧栏「插件」中安装、配置和启停插件；设置中的「插件列表」保留官方清单。',
   search: '搜索插件',
   installed: '已安装',
   updates: '可更新',
@@ -125,11 +125,12 @@ export const zh = {
   agentLoggedOut: '凭证已清除。',
   agentSaveVars: '保存',
   agentComingSoon: '即将提供',
+  agentSecretPlaceholder: '粘贴令牌',
 }
 
 export const en = {
-  tab: 'Plugin Manager',
-  hint: 'One tab for two plugin kinds: Cordis npm plugins (profile writes, usually need restart) and Agent packs (~/.dsh/agent-plugins; enable mounts MCP/skills immediately).',
+  tab: 'Plugin extensions',
+  hint: 'Marketplace, npm updates, and Agent packs. In DSH v0.1.6-alpha.2 and later, use Plugins in the sidebar to install, configure, enable, and disable plugins; Plugin list in Settings keeps the official inventory.',
   search: 'Search plugins',
   installed: 'Installed',
   updates: 'Updates',
@@ -254,6 +255,7 @@ export const en = {
   agentLoggedOut: 'Credentials cleared.',
   agentSaveVars: 'Save',
   agentComingSoon: 'Coming soon',
+  agentSecretPlaceholder: 'Paste token',
 }
 
 export type PluginsKey = keyof typeof zh

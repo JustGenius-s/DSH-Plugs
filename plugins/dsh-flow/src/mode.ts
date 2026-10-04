@@ -2,7 +2,7 @@
  * Session-scoped Flow mode state.
  *
  * Flow mode is OFF by default and only ever turns on when the user asks — via
- * the `/flow` command or the canvas toggle. The alternative (a permanently
+ * the `/flow` command or its menu action. The alternative (a permanently
  * installed prompt section) made the model guess whether a request was "big
  * enough" to warrant a graph, which is both unreliable and invisible to the
  * user. Explicit entry is the whole point.
@@ -39,7 +39,7 @@ export interface FlowModeStore {
  * Mode, tools, and the Flow tab all share one key: the conversation session.
  *
  * `agent.id` is the live Agent, which is not what the canvas posts as
- * `sessionId`. Keying on that made `/flow` look on while `flow.plan` and the
+ * `sessionId`. Keying on that made `/flow` look on while `flow_plan` and the
  * tab still saw the mode as off.
  */
 export function sessionIdOf(agent: { readonly session: { readonly id: unknown } }): string {

@@ -48,19 +48,17 @@ import type {
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { ConfigForm as SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsScope } from './settings-scope.ts'
 import type {
   SessionEvent as CoreSessionEvent,
   SurfaceEvent,
   SurfaceOp,
 } from '@deepseek-ai/dsh-session/types'
-import type { SettingsDescribeFace, SettingsSchemaService } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {
+  SettingsSchemaService,
+} from '@deepseek-ai/dsh-client-ui-settings/client'
 
-/** Compatibility face over 0.1.7's ConfigForms for existing plugin cards. */
-export interface SettingsScopeBinder {
-  describe(): SettingsDescribeFace
-  bind<T>(spec: { namespace: string; decode?: (section: unknown) => T | undefined }): SettingsScope<T>
-}
+export { getSettingsScope, type SettingsScopeBinder } from './settings-scope.ts'
 
 /** Values accepted by the DSH right-Sidebar navigation contract. */
 export type SidebarRightNavigationParams = Readonly<Record<string, unknown>> | undefined
@@ -107,6 +105,8 @@ export interface SidebarRightService {
 
 /** A guide-page capsule contributed by a right-Sidebar tab type. */
 export interface SidebarRightGuideEntry {
+  /** Stable entry key used by DSH 0.1.6+ guide renderers. */
+  id?: string
   order: number
   title: () => string
   /** Kept structural so plugins need not import the official primitives package. */
@@ -117,6 +117,8 @@ export interface SidebarRightGuideEntry {
 export interface SidebarRightTabDefinition {
   id: string
   kind: string
+  /** Open independent page instances when supported by DSH 0.1.6+. */
+  multiple?: boolean
   patterns?: readonly string[]
   priority?: 'extension' | 'builtin' | 'fallback'
   canOpen?: (address: string) => boolean
@@ -518,24 +520,6 @@ export function getUiWorkspace(ctx: ClientContext): UiWorkspaceFace {
   const service = ctx.get(CLIENT_SERVICES.uiWorkspace) as UiWorkspaceFace | undefined
   if (service === undefined) throw new Error('uiWorkspace service is unavailable')
   return service
-}
-
-export function getSettingsScope(ctx: ClientContext): SettingsScopeBinder {
-  // DSH 0.1.7 replaced settingsScope.bind with configForms.get. Keep the
-  // plugin-facing scope contract while their settings cards move together.
-  const forms = (ctx as unknown as { configForms: {
-    describe(): ReturnType<SettingsScopeBinder['describe']>
-    get<T>(entryId: string): unknown
-  } }).configForms
-  const entryIds: Record<string, string> = {
-    'quick-notes': 'dsh-quick-notes',
-    'whale-girl': 'dsh-whale-girl',
-    'ui-onboarding': 'ui-settings-general',
-  }
-  return {
-    describe: () => forms.describe(),
-    bind: <T>(spec: { namespace: string }) => forms.get<T>(entryIds[spec.namespace] ?? spec.namespace),
-  } as unknown as SettingsScopeBinder
 }
 
 export function getSettingsSchema(ctx: ClientContext): SettingsSchemaService {

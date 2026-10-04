@@ -28,7 +28,7 @@ ${CONTENT_SCOPE} pre{white-space:pre-wrap}
 .dsh-codex-sidechat-error-message{display:block;overflow-wrap:anywhere}
 .dsh-codex-sidechat-error-stackwrap{margin-top:4px}
 .dsh-codex-sidechat-error-stackwrap summary{cursor:pointer;color:var(--dsw-alias-label-secondary,#b0b0b5);font-size:11px;font-weight:600}
-.dsh-codex-sidechat-error-stack{max-height:200px;margin:4px 0 0;padding:6px 8px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-overlay,rgba(0,0,0,.28));color:var(--dsw-alias-label-secondary,#b0b0b5);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:16px;white-space:pre;tab-size:2}
+.dsh-codex-sidechat-error-stack{max-height:200px;margin:4px 0 0;padding:6px 8px;overflow:auto;border-radius:6px;background:var(--dsw-alias-bg-overlay,rgba(0,0,0,.28));color:var(--dsw-alias-label-secondary,#b0b0b5);font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:11px;line-height:16px;white-space:pre;tab-size:2}
 .dsh-codex-sidechat-error-dismiss{flex:none;border:none;background:transparent;color:inherit;cursor:pointer;font-size:13px;line-height:20px;padding:0 4px}
 .dsh-codex-sidechat-empty-panel{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}
 .dsh-codex-sidechat-empty-panel p{margin:0}
@@ -243,14 +243,14 @@ ${CONTENT_SCOPE} pre{white-space:pre-wrap}
    wider card (max 420px / 360px scrollable list), provider group titles,
    options with model names, checkmark on the selected one. */
 .dsh-codex-sidechat-model-root{min-width:0;position:relative}
-.dsh-codex-sidechat-model-menu{z-index:20;border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);width:max-content;min-width:min(240px,100vw - 32px);max-width:min(420px,100vw - 32px);max-height:min(360px,100vh - 96px);box-shadow:var(--dsw-shadow-lv3);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;display:flex;flex-direction:column;padding:4px;position:absolute;bottom:calc(100% + 8px);right:0;overflow:hidden}
+.dsh-codex-sidechat-model-menu{z-index:20;border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter);backdrop-filter:var(--dsw-menu-backdrop-filter);width:max-content;min-width:min(240px,100vw - 32px);max-width:min(420px,100vw - 32px);max-height:min(360px,100vh - 96px);box-shadow:var(--dsw-shadow-lv3);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;display:flex;flex-direction:column;padding:4px;position:absolute;bottom:calc(100% + 8px);right:0;overflow:hidden}
 .dsh-codex-sidechat-model-error{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);border-radius:8px;margin-bottom:4px;padding:7px 8px;font-size:12px;line-height:18px}
 /* Provider failure detail under an empty-directory notice; secondary so the
    headline stays readable while the cause is still legible. */
 .dsh-codex-sidechat-model-error-detail{display:block;margin-top:3px;opacity:.85;font-size:11px;line-height:16px}
 .dsh-codex-sidechat-model-groups{min-height:0;overflow-y:auto}
 .dsh-codex-sidechat-model-group + .dsh-codex-sidechat-model-group{margin-top:4px}
-.dsh-codex-sidechat-model-group-title{z-index:1;background:var(--dsw-specific-menu);color:var(--dsw-alias-label-tertiary);padding:5px 8px 3px;font-size:12px;font-weight:500;line-height:18px;position:sticky;top:0}
+.dsh-codex-sidechat-model-group-title{z-index:1;background:var(--dsw-specific-menu);-webkit-backdrop-filter:var(--dsw-menu-backdrop-filter);backdrop-filter:var(--dsw-menu-backdrop-filter);color:var(--dsw-alias-label-tertiary);padding:5px 8px 3px;font-size:12px;font-weight:500;line-height:18px;position:sticky;top:0}
 .dsh-codex-sidechat-model-option{box-sizing:border-box;width:auto;min-width:100%;min-height:38px;color:inherit;text-align:left;cursor:pointer;background:transparent;border:none;border-radius:10px;outline:none;display:flex;align-items:center;gap:8px;padding:6px 8px}
 .dsh-codex-sidechat-model-option:hover:not(:disabled),.dsh-codex-sidechat-model-option:focus-visible{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-codex-sidechat-model-option-selected{background:transparent}
