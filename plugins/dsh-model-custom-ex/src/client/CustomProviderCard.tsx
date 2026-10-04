@@ -31,6 +31,7 @@ import { validateDeepSeekModels } from './DeepSeekModelsEditor.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
 import type { ModelDraft } from './ModelListEditor.tsx'
 import { deriveKeyRef, messageOf } from './store.ts'
+import { jsonValue } from './json-value.ts'
 import type { en } from './locales.ts'
 import styles from './ModelsSection.module.css'
 
@@ -155,7 +156,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
       }
       const response = await operations.writeSettings(
         NS,
-        [{ op: 'set', path: ['providers', route], value: profile }],
+        [{ op: 'set', path: ['providers', route], value: jsonValue(profile) }],
         // `taken` is a snapshot too, so the id check alone cannot see a route
         // declared after this card opened; the revision makes that race a
         // conflict instead of a write over the other profile.
