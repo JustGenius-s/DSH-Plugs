@@ -243,6 +243,22 @@ function adopt(candidate: DiscoveredModel): ModelDraft {
 }
 
 /**
+ * The candidates whose id contains the query, ignoring case and surrounding
+ * spaces. A blank query keeps every candidate.
+ * @param candidates - the models the provider reported.
+ * @param query - the search text typed into the picker.
+ * @returns the candidates to list, in the provider's order.
+ */
+function matchingCandidates(
+  candidates: readonly DiscoveredModel[],
+  query: string,
+): readonly DiscoveredModel[] {
+  const needle = query.trim().toLowerCase()
+  if (needle.length === 0) return candidates
+  return candidates.filter(candidate => candidate.id.toLowerCase().includes(needle))
+}
+
+/**
  * Render the model list with its fetch action.
  * @param props - the drafted rows, probe target, wire face, and copy.
  * @returns the model-list editor.
@@ -253,6 +269,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   const [failure, setFailure] = useState<string | undefined>(undefined)
   const [candidates, setCandidates] = useState<readonly DiscoveredModel[] | undefined>(undefined)
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const [query, setQuery] = useState('')
   // Rows carry an id and a name; capacities are the exception, so they stay
   // folded until asked for rather than crowding every row with four inputs.
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set())
@@ -376,11 +393,10 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         setFailure(t('fetchEmpty'))
         return
       }
-      // Everything already configured starts unchecked, so adopting a
-      // selection never silently rewrites a capacity the user corrected.
-      const known = new Set(models.map(model => textOf(model, 'id')))
+      // Nothing starts checked: the user picks what to add, and a model they
+      // already configured is never rewritten by a selection they did not make.
       setCandidates(found)
-      setPicked(new Set(found.filter(model => !known.has(model.id)).map(model => model.id)))
+      setPicked(new Set())
     } catch (error) {
       // The transport rejected rather than answering; without this the button
       // would stay busy with nothing shown.
@@ -393,6 +409,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   const closePicker = (): void => {
     setCandidates(undefined)
     setPicked(new Set())
+    setQuery('')
   }
 
   const adoptPicked = (): void => {
@@ -420,14 +437,20 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   }
 
   const activeCandidates = candidates ?? []
-  const allCandidatesPicked = activeCandidates.length > 0
-    && activeCandidates.every(candidate => picked.has(candidate.id))
+  const visibleCandidates = matchingCandidates(activeCandidates, query)
+  // Select-all acts on what the search shows, so a narrowed list is picked
+  // as a unit while selections hidden by the filter stay untouched.
+  const allVisiblePicked = visibleCandidates.length > 0
+    && visibleCandidates.every(candidate => picked.has(candidate.id))
 
   const toggleAllCandidates = (): void => {
     setPicked((current) => {
-      return activeCandidates.every(candidate => current.has(candidate.id))
-        ? new Set()
-        : new Set(activeCandidates.map(candidate => candidate.id))
+      const next = new Set(current)
+      for (const candidate of visibleCandidates) {
+        if (allVisiblePicked) next.delete(candidate.id)
+        else next.add(candidate.id)
+      }
+      return next
     })
   }
 
@@ -610,12 +633,25 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         )}
       >
         <div className={styles['candidateActions']}>
-          <Button variant="ghost" size="sm" onClick={toggleAllCandidates}>
-            {t(allCandidatesPicked ? 'fetchDeselectAll' : 'fetchSelectAll')}
+          <input
+            type="search"
+            className={`${styles['input']} ${styles['candidateSearch']}`}
+            value={query}
+            placeholder={t('fetchSearch')}
+            aria-label={t('fetchSearch')}
+            onChange={(event) => { setQuery(event.target.value) }}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={visibleCandidates.length === 0}
+            onClick={toggleAllCandidates}
+          >
+            {t(allVisiblePicked ? 'fetchDeselectAll' : 'fetchSelectAll')}
           </Button>
         </div>
         <ul className={styles['candidateList']}>
-          {(candidates ?? []).map(candidate => (
+          {visibleCandidates.map(candidate => (
             <li key={candidate.id} className={styles['candidate']}>
               <label className={styles['candidateLabel']}>
                 <input

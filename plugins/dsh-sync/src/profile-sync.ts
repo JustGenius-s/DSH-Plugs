@@ -9,7 +9,6 @@ const DSH_PLUGS_REPO = 'JustGenius-s/DSH-Plugs'
 const KNOWN_FOLDERS: Record<string, string> = {
   '@just-genius/dsh-codex': 'dsh-codex',
   '@just-genius/dsh-debug-mode': 'dsh-debug-mode',
-  '@just-genius/dsh-memory': 'dsh-memory',
   '@just-genius/dsh-model-custom-ex': 'dsh-model-custom-ex',
   '@just-genius/dsh-plugin-config': 'dsh-plugin-config',
   '@just-genius/dsh-sync': 'dsh-sync',

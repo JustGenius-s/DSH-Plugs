@@ -104,13 +104,13 @@ describe('dsh-model-custom-ex', () => {
     expect(config.reasoningEffort).toBeUndefined()
   })
 
-  it('leaves unpinned models untouched, so no level is invented for them', async () => {
+  it('sends the level the picker shows for an unpinned model, so label and wire agree', async () => {
     const { dispatch } = harness({
       defaults: { cursor: { 'cursor-grok-4.6-fast': 'xhigh' } },
       efforts: ['low', 'medium', 'high', 'xhigh'],
     })
     const config = await dispatch({ provider: 'cursor', model: 'gemini-3.8-flash' })
-    expect(config.reasoningEffort).toBeUndefined()
+    expect(config.reasoningEffort).toBe('low')
   })
 
   it('lets a deliberately chosen level beat the pin, then restores the pin on clear', async () => {
