@@ -70,8 +70,26 @@ test('activating a session from the map syncs DSH without closing the map', asyn
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   const activate = source.slice(source.indexOf("'synapse:activate-session'"), source.indexOf("'synapse:fork-session'"))
 
-  assert.match(activate, /ctx\.sessions\.open\(event\.data\.sessionId\)/)
+  // DSH 0.1.6 removed sessions.open; the bridge goes through openDshSession,
+  // which prefers uiWorkspace.openSession (main-view retention) and falls
+  // back to sessions.open on pre-0.1.6 hosts.
+  assert.match(activate, /openDshSession\(ctx, event\.data\.sessionId\)/)
   assert.doesNotMatch(activate, /close\(\)/)
+})
+
+test('the bridge reads the 0.1.6 current session and session status sources', async () => {
+  const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
+
+  // 0.1.6 dropped `current` from the sessions-list snapshot: the main-view
+  // session is projected onto uiSession.current (key = session id).
+  assert.match(source, /ctx\.uiSession\?\.current\?\.getSnapshot\?\.\(\)\?\.key/)
+  // 0.1.6 moved pendingInteraction/completed off the list summary onto
+  // uiSession.sessionStatus (a Map keyed by session id).
+  assert.match(source, /ctx\.uiSession\?\.sessionStatus\?\.getSnapshot\?\.\(\)\?\.get\?\.\(id\)/)
+  // Session switching is uiWorkspace.openSession (main-view retention).
+  assert.match(source, /uiWorkspace\?\.openSession === 'function'\) return uiWorkspace\.openSession\(sessionId\)/)
+  // Both services must be injected or cordis leaves them undefined on ctx.
+  assert.match(source, /module\.exports\.inject = \['sessions', 'workspaces', 'slots', 'uiSession', 'uiWorkspace'\]/)
 })
 
 test('a failed fork settles the matching canvas RPC immediately', async () => {
@@ -780,7 +798,12 @@ test('hides the host message rail and side panels only while the map view is mou
 
   // The codex rail and right-side panels are host chrome that would overlay
   // the canvas; they are hidden for the lifetime of the map view only.
-  assert.match(source, /CHROME_HIDE_SELECTORS = \['\.dsh-codex-nav-rail', '\.dsh-side-panels', '\.dsh-side-panels-launcher', '\[data-width-handle\]'\]/)
+  assert.match(source, /CHROME_HIDE_SELECTORS = \['\.dsh-codex-nav-rail', '\.dsh-side-panels', '\.dsh-side-panels-launcher', '\[data-width-handle\]', '\.dsh-codex-sticky-pin', '\.dsh-codex-sticky-preview'\]/)
+  // The sticky pin and its preview are <body> portals from dsh-codex, so they
+  // escape the conversation subtree the map hides. 详情 mounts the map while
+  // the host chat is still alive, which left the pin painted over the canvas.
+  assert.ok(source.indexOf("'.dsh-codex-sticky-pin'") !== -1)
+  assert.ok(source.indexOf("'.dsh-codex-sticky-preview'") !== -1)
   // DSH's composer dock is removed outright (display:none) so the canvas keeps
   // its space; the codex panels only go invisible to preserve their layout.
   assert.match(source, /COMPOSER_HIDE_SELECTORS = \['\[data-composer-seat\]'\]/)

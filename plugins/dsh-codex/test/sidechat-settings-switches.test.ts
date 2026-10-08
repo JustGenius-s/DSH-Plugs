@@ -9,14 +9,12 @@
  * real handlers against the same fake seam `sidechat-temp-session.test.ts`
  * uses and assert the switch actually holds.
  *
- * The context option is the other half: turning it off must NOT close the
- * feature, it must open a side chat that simply starts blank — and it must
- * report that as 'off', distinguishable from 'none' (the parent had nothing to
- * give), so the UI never blames the user's setting for an empty parent.
+ * The context option controls the parent link and scoped read tool. Turning it
+ * off leaves the side chat usable; turning it on does not preload parent turns.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDshCodexSideChatServer, inheritContextOf, sideCommandText } from '../src/host/side-chat/server'
 import { DEFAULT_CONFIG, type DshCodexConfig } from '../src/shared/config'
 
@@ -24,6 +22,7 @@ const registered = new Map<string, (req: IncomingMessage, res: ServerResponse) =
 const commands = new Map<string, (invocation: unknown) => unknown>()
 let created: Record<string, unknown>[] = []
 let injected: unknown[] = []
+let scopedTools: { name: string }[] = []
 
 /** One live parent session with a completed turn, so a digest CAN be built. */
 const parentId = 'session-parent-0000-0000-000000000000' as never
@@ -41,6 +40,7 @@ beforeEach(() => {
   commands.clear()
   created = []
   injected = []
+  scopedTools = []
 })
 
 function buildCtx(config: Partial<DshCodexConfig> = {}): any {
@@ -56,13 +56,18 @@ function buildCtx(config: Partial<DshCodexConfig> = {}): any {
     sessions: { get: (id: string) => (id === parentId ? parentSession : undefined) },
     agents: {
       create: async (options: Record<string, unknown>) => {
-        created.push(options)
-        return {
-          agent: {
-            status: 'idle',
-            inject: (message: unknown) => { injected.push(message) },
-          },
+        const agent = {
+          session: { id: options.sessionId, append: () => {} },
+          status: 'idle',
+          inject: (message: unknown) => { injected.push(message) },
         }
+        const setup = options.setup as (ctx: unknown, agent: unknown) => Promise<void>
+        await setup({ tools: { register: (tool: { name: string }) => {
+          scopedTools.push(tool)
+          return () => {}
+        } } }, agent)
+        created.push(options)
+        return { agent }
       },
       get: () => undefined, // deliberately unusable: injection must use the handle
     },
@@ -174,6 +179,22 @@ describe('side chat enabled switch', () => {
 })
 
 describe('side chat context switch', () => {
+  it('does not query modern parent history when context is off', async () => {
+    const ctx = buildCtx()
+    ctx.sessions.get = () => ({ id: parentId, header: parentSession.header })
+    const readSurface = vi.fn(async () => ({ events: parentSession.events }))
+    ctx.get = (name: string) => name === 'sessionQuery' ? { readSurface } : undefined
+    const { base, close } = await withServer(ctx, { sideChatContextEnabled: false })
+    try {
+      expect(await (await open(base)).json()).toMatchObject({ context: 'off' })
+      expect(readSurface).not.toHaveBeenCalled()
+      expect(injected).toHaveLength(0)
+      expect(scopedTools).toHaveLength(0)
+    } finally {
+      await close()
+    }
+  })
+
   it('opens a side chat but injects nothing when context is off', async () => {
     // The switch is NOT a second on/off for the feature: the side chat still
     // opens, it just starts blank on purpose.
@@ -183,6 +204,7 @@ describe('side chat context switch', () => {
       expect(response.status).toBe(200)
       expect(created).toHaveLength(1)
       expect(injected).toHaveLength(0)
+      expect(scopedTools).toHaveLength(0)
     } finally {
       await close()
     }
@@ -201,35 +223,34 @@ describe('side chat context switch', () => {
     }
   })
 
-  it('still inherits the digest while the context switch is on', async () => {
+  it('links the main session without copying its task when the switch is on', async () => {
     const { base, close } = await withServer(buildCtx(), { sideChatContextEnabled: true })
     try {
       const body = await (await open(base)).json() as { context?: string }
-      expect(body.context).toBe('inherited')
+      expect(body.context).toBe('linked')
       expect(injected).toHaveLength(1)
+      expect(scopedTools.map(tool => tool.name)).toEqual(['side_chat_read_main_session'])
+      expect(JSON.stringify(injected[0])).not.toContain('第一轮问题')
     } finally {
       await close()
     }
   })
 
-  it("keeps 'none' for a parent with nothing to give, even with context on", async () => {
-    // Regression guard: the two reasons must stay distinct.
+  it('links a blank parent too, so it can be queried later', async () => {
     const ctx = buildCtx({ sideChatContextEnabled: true })
     ctx.sessions.get = () => ({ header: { cwd: '/work' }, events: [] })
     const { base, close } = await withServer(ctx, { sideChatContextEnabled: true })
     try {
       const body = await (await open(base)).json() as { context?: string }
-      expect(body.context).toBe('none')
+      expect(body.context).toBe('linked')
     } finally {
       await close()
     }
   })
 
-  it('does not read the parent log for a digest when context is off', async () => {
-    // Not merely "built and discarded": the switch skips the work. Measured as
-    // a difference rather than an absolute count because the open path reads
-    // the parent log for other reasons too (preset resolution) — what matters
-    // is that turning context off removes the digest's own reads.
+  it('does not read the parent log for context on either open path', async () => {
+    // Preset resolution can still read the parent log. Parent linking adds no
+    // history read, whether enabled or disabled.
     const eventReads = async (contextEnabled: boolean): Promise<number> => {
       let reads = 0
       const parent = {
@@ -249,7 +270,7 @@ describe('side chat context switch', () => {
         await close()
       }
     }
-    expect(await eventReads(false)).toBeLessThan(await eventReads(true))
+    expect(await eventReads(false)).toBe(await eventReads(true))
   })
 })
 
@@ -266,8 +287,8 @@ describe('inheritContextOf', () => {
 })
 
 describe('sideCommandText', () => {
-  it('says the context came along when it did', () => {
-    expect(sideCommandText('session-1', 'inherited')).toContain('已带上当前对话上下文')
+  it('says the main session can be read when linked', () => {
+    expect(sideCommandText('session-1', 'linked')).toContain('可按需查看主对话')
   })
 
   it('says the setting kept it blank, not that the parent was empty', () => {
@@ -276,7 +297,7 @@ describe('sideCommandText', () => {
     expect(text).not.toContain('暂无可继承')
   })
 
-  it('says the parent had nothing to give', () => {
-    expect(sideCommandText('session-1', 'none')).toContain('暂无可继承')
+  it('reports an unavailable link', () => {
+    expect(sideCommandText('session-1', 'none')).toContain('关联不可用')
   })
 })

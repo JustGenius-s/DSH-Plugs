@@ -259,16 +259,19 @@ test('bridge effects can restart without losing or duplicating preview listeners
   const liveUnsubscribers = new Map()
   let previewCount = 0
   let liveDisposed = 0
+  let syncCreated = 0
+  let syncDisposed = 0
   const syncCurrentSession = () => {
     if (!liveUnsubscribers.has('fork')) liveUnsubscribers.set('fork', () => { liveDisposed++ })
   }
   const install = new Function(
-    'ctx', 'document', 'style', 'themeObserver', 'window', 'syncCurrentSession', 'onMessage', 'onKeyDown', 'onSpaceDown', 'onSpaceUp', 'frame', 'liveUnsubscribers',
-    `${section(clientSource, 'function installMapBridge', '// The map view:')}\nreturn installMapBridge`,
+    'ctx', 'document', 'style', 'themeObserver', 'window', 'syncCurrentSession', 'onMessage', 'onKeyDown', 'onSpaceDown', 'onSpaceUp', 'frame', 'liveUnsubscribers', 'createSessionSync',
+    `let sessionSync = null;\n${section(clientSource, 'function installMapBridge', '// The map view:')}\nreturn installMapBridge`,
   )(
     { sessions: { list: { subscribe } }, workspaces: { list: { subscribe } } },
     document, style, themeObserver, window, syncCurrentSession,
     () => { previewCount++ }, () => {}, () => {}, () => {}, {}, liveUnsubscribers,
+    () => { syncCreated++; return { dispose: () => { syncDisposed++ } } },
   )
   for (let round = 1; round <= 2; round++) {
     const dispose = install()
@@ -285,4 +288,6 @@ test('bridge effects can restart without losing or duplicating preview listeners
   assert.equal(attachments, 2)
   assert.equal(removals, 2)
   assert.equal(liveDisposed, 2)
+  assert.equal(syncCreated, 2)
+  assert.equal(syncDisposed, 2)
 })

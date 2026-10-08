@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+export { repairProfileScopeIdentity, repairWebProfileScopeIdentity } from './profile-singletons.ts'
 
 // Host service declaration merging is deliberately loaded here. Plugins only
 // import this adapter, while their Context type still carries every service
@@ -6,7 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-credentials'
@@ -14,6 +15,16 @@ import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-llm'
+
+// DSH 0.1.7 requires producers to declare their own message-source kind.
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-codex': { kind: 'dsh-codex' }
+    'dsh-cua-pip': { kind: 'dsh-cua-pip' }
+    'dsh-debug-mode': { kind: 'dsh-debug-mode' }
+    'dsh-flow': { kind: 'dsh-flow' }
+  }
+}
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-title'
@@ -28,7 +39,7 @@ import type {} from '@deepseek-ai/dsh-workspace'
 export type {} from '@deepseek-ai/cordis-plugin-loader'
 export type {} from '@deepseek-ai/dsh-agent'
 export type {} from '@deepseek-ai/dsh-agent-default-model'
-export type {} from '@deepseek-ai/dsh-agent-presets'
+export type {} from '@deepseek-ai/dsh-agent-preset-registry'
 export type {} from '@deepseek-ai/dsh-commands'
 export type {} from '@deepseek-ai/dsh-client-connection'
 export type {} from '@deepseek-ai/dsh-credentials'
@@ -70,6 +81,9 @@ export type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 export { credentialRef } from '@deepseek-ai/dsh-credentials'
 export { fallbackSessionTitle } from '@deepseek-ai/dsh-session-title'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
+export { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+export type { ReasoningEffortId as ReasoningEffortIdType } from '@deepseek-ai/dsh-llm'
+export { formatSessionReferenceMention } from '@deepseek-ai/dsh-session-reference'
 export type { StreamChunk } from '@deepseek-ai/dsh-llm'
 export type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 export { SessionId } from '@deepseek-ai/dsh-session'
@@ -82,7 +96,8 @@ export type { Session, SessionEvent, SessionHeader, UserMessage } from '@deepsee
  */
 export type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 export { installSettingsSection, settingsNamespace } from './settings-section.ts'
-export type { SettingsProvider } from '@deepseek-ai/dsh-settings'
+export { readVolatileConfig } from './volatile-config.ts'
+export type { SettingsProvider } from './settings-section.ts'
 export { defineDomain } from '@deepseek-ai/dsh-storage-domain'
 export type { Domain } from '@deepseek-ai/dsh-storage-domain'
 export type {
@@ -136,15 +151,29 @@ export function sendJson(
   res.end(JSON.stringify(value))
 }
 
+/**
+ * Read and parse a JSON request body, refusing anything past `limit`.
+ *
+ * The body is always drained to the end, even after the limit is exceeded.
+ * Breaking out of `IncomingMessage`'s async iterator early destroys the
+ * socket: the unread remainder stays in the receive buffer, so the next
+ * response written on that keep-alive connection is read by the client as a
+ * truncated reply. Node's own parser then aborts the connection with
+ * `ERR_CONNECTION_RESET`, which surfaces in the browser as a failed fetch for
+ * a completely unrelated request that happened to share the socket. Past the
+ * limit the accumulated chunks are dropped (`chunks.length = 0`) so the memory
+ * admitted by a rejected body stays bounded.
+ */
 export async function readJsonBody(req: IncomingMessage, limit = 256 * 1024): Promise<unknown> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of req) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += bytes.length
-    if (size > limit) throw new HttpInputError('body too large', 413)
-    chunks.push(bytes)
+    if (size <= limit) chunks.push(bytes)
+    else chunks.length = 0
   }
+  if (size > limit) throw new HttpInputError('body too large', 413)
   if (chunks.length === 0) return {}
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'))

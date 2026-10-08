@@ -26,6 +26,9 @@ export interface CopyLabels {
 
 /** Collapse/expand chrome for a height-capped card. */
 export interface FoldLabels extends CopyLabels {
+  codeLabel: string
+  wrapLabel: string
+  unwrapLabel: string
   collapseAria: string
   collapse: string
   expandAria: (hidden: number) => string
@@ -71,6 +74,7 @@ export interface SearchCardLabels extends FoldLabels {
 export interface TerminalCardLabels extends FoldLabels {
   signal: (signal: string) => string
   exitCode: (exitCode: number) => string
+  noExitCode: string
   running: string
   failed: string
   done: string
@@ -83,6 +87,9 @@ const COPY_LABELS: Readonly<CopyLabels> = Object.freeze({ copy: '复制', copied
 function foldLabels(): FoldLabels {
   return {
     ...COPY_LABELS,
+    codeLabel: '代码',
+    wrapLabel: '自动换行',
+    unwrapLabel: '不换行',
     collapseAria: '折叠',
     collapse: '折叠',
     expandAria: (hidden: number) => `展开其余 ${hidden} 行`,
@@ -121,6 +128,7 @@ export const TERMINAL_LABELS: Readonly<TerminalCardLabels> = Object.freeze({
   ...foldLabels(),
   signal: (signal: string) => `信号 ${signal}`,
   exitCode: (exitCode: number) => `退出码 ${exitCode}`,
+  noExitCode: '无退出码',
   running: '运行中',
   failed: '失败',
   done: '完成',

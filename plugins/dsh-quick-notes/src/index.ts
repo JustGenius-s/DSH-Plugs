@@ -7,7 +7,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
-import { HOST_SERVICES, Schema, errorMessage, installSettingsSection, readJsonBody, sendJson, settingsNamespace } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, Schema, errorMessage, readJsonBody, readVolatileConfig, sendJson } from '@just-genius/dsh-plugin-runtime/host'
 import { generateMetadata } from './metadata.ts'
 import { applyAction, listSnapshot, notesRoot, readImage, saveImage } from './notes-store.ts'
 import {
@@ -34,27 +34,19 @@ import {
 } from './shared.ts'
 
 export const name = 'dsh-quick-notes'
-export const inject = [HOST_SERVICES.webServer, HOST_SERVICES.settings, HOST_SERVICES.llm, HOST_SERVICES.agentDefaultModel] as const
+export const inject = [HOST_SERVICES.webServer, HOST_SERVICES.llm, HOST_SERVICES.agentDefaultModel] as const
 
 /** Host-side schema for the one plugin settings namespace. */
-export const ConfigSchema: Schema<QuickNotesConfig> = Schema.object({
-  enabled: Schema.boolean().default(DEFAULT_CONFIG.enabled),
-  newNoteShortcut: Schema.string().default(DEFAULT_CONFIG.newNoteShortcut),
-  searchShortcut: Schema.string().default(DEFAULT_CONFIG.searchShortcut),
-  metadataProvider: Schema.string().default(DEFAULT_CONFIG.metadataProvider),
-  metadataModel: Schema.string().default(DEFAULT_CONFIG.metadataModel),
+export const Config = Schema.object({
+  enabled: Schema.boolean().default(DEFAULT_CONFIG.enabled).volatile(),
+  newNoteShortcut: Schema.string().default(DEFAULT_CONFIG.newNoteShortcut).volatile(),
+  searchShortcut: Schema.string().default(DEFAULT_CONFIG.searchShortcut).volatile(),
+  metadataProvider: Schema.string().default(DEFAULT_CONFIG.metadataProvider).volatile(),
+  metadataModel: Schema.string().default(DEFAULT_CONFIG.metadataModel).volatile(),
 })
 
-export function apply(ctx: Context): void {
-  let source = (): QuickNotesConfig => DEFAULT_CONFIG
-
-  installSettingsSection(ctx, settingsNamespace(SETTINGS_NAMESPACE), ConfigSchema, DEFAULT_CONFIG, {
-    setSource: (next) => { source = next },
-    // Routes and the metadata call read `source()` per request, so a change
-    // needs no cache invalidation here — the hook is the contract's required
-    // notification point, not a place to push a value.
-    onChange: () => {},
-  })
+export function apply(ctx: Context, config?: unknown): void {
+  const source = (): QuickNotesConfig => readVolatileConfig(config, DEFAULT_CONFIG)
 
   ctx.effect(
     () => ctx.webServer.register({

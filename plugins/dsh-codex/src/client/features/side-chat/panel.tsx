@@ -3,7 +3,8 @@
  * a new "侧聊" tab creates an independent occurrence; this component mounts,
  * forks a fresh blank side
  * session on the host (sharing the parent's cwd/sandbox, preset and model but
- * never loading the parent's history), binds it through `sessions.binding()`,
+ * never loading the parent's history), binds it through a retained
+ * `sessions.retain()` scope (0.1.6 only materializes bindings for retained sessions),
  * renders its Chat presentation nodes with the same Markdown / Think / tool
  * row primitives as the main conversation, and posts through the standard
  * `prompt`/conversation verbs so the side agent runs concurrently without
@@ -15,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { ConversationSnapshot } from '@just-genius/dsh-plugin-runtime/client'
+import type { SessionSnapshot } from '@just-genius/dsh-plugin-runtime/client'
 import { sideChatApi, SideChatDisabledError } from './api'
 import { chatRowsOf } from './snapshot'
 import type {
@@ -40,17 +41,27 @@ export interface SideChatSession {
   sessionId?: string
   open(): Promise<void>
   subscribe(fn: () => void): () => void
-  getSnapshot(): ConversationSnapshot
+  getSnapshot(): SessionSnapshot
+  beginSubmission(input: unknown): unknown
   prompt(content: readonly unknown[], mode: 'queue' | 'steer'): Promise<unknown>
   cancel(): Promise<unknown>
   command?(line: string): Promise<unknown>
   projections?: import('./permission-select').PermissionProjectionFace
 }
 
+/**
+ * A retained session scope. The binding stays live until `release()` — DSH
+ * 0.1.6 materializes a session's scope only while a reference holds it.
+ */
+export interface SideChatSessionReference {
+  readonly binding: { session: SideChatSession }
+  release(): void
+}
+
 /** The runtime `sessions` face the panel needs (structural subset of ISessions). */
 export interface SideChatSessionsFace {
   list: Observable<{ current?: string; byId: Record<string, { displayTitle?: string }> }>
-  binding(id: string): { session: SideChatSession } | undefined
+  retain(id: string, options: { source: string }): SideChatSessionReference
 }
 
 /** How long to wait for a freshly opened side session to appear in the list. */
@@ -104,9 +115,8 @@ export interface SideChatPanelProps {
   /** The validated `ctx.conversation` draft-attachment face. */
   conversation?: SideChatConversationFace
   /**
-   * The session-keyed pending-interaction store (`uiSession.pendingInteractions`).
-   * DSH 0.1.5 answers approvals and questions through this store instead of a
-   * `snapshot.pending` array, so a side chat without it never takes over.
+   * The session-status observable (`uiSession.sessionStatus`), whose rows carry
+   * pending approvals and questions.
    */
   pendingInteractions?: PendingInteractionsFace | undefined
   t: (key: string) => string
@@ -203,16 +213,44 @@ export function SideChatPanel({
     }
   }, [parentSessionId, sessions, sideSessionId])
 
-  // Resolve the side session and open its event window once.
-  const binding = sideSessionId === null ? undefined : sessions.binding(sideSessionId)
+  // Resolve the side session and open its event window once. DSH 0.1.6 only
+  // materializes a session's binding while a scope is retained — borrowing
+  // `sessions.binding(id)` without retaining yields undefined for any session
+  // the main view does not show, which left every side chat on the loading
+  // hero forever. Retain our own scope instead (the same pattern the official
+  // subagent panel uses); `retain` itself opens the session's history window,
+  // and the release on cleanup pairs with the side chat's disposal below.
+  const [binding, setBinding] = useState<{ session: SideChatSession } | null>(null)
+  useEffect(() => {
+    if (sideSessionId === null) return
+    let reference: SideChatSessionReference
+    try {
+      // Safe only after `waitForListed`: retain throws on an unknown id, so
+      // the fork effect must publish the id before this effect runs.
+      reference = sessions.retain(sideSessionId, { source: 'sideChat' })
+    } catch (cause) {
+      setError(describePanelError(cause))
+      return
+    }
+    setBinding(reference.binding)
+    return () => {
+      setBinding(null)
+      reference.release()
+    }
+  }, [sideSessionId, sessions])
   const session = binding?.session
   useEffect(() => {
     if (session !== undefined) void session.open()
   }, [session])
 
-  const snapshot = useSyncExternalStore<ConversationSnapshot | undefined>(
+  const snapshot = useSyncExternalStore<SessionSnapshot | undefined>(
     (fn) => (session === undefined ? () => {} : session.subscribe(fn)),
     () => (session === undefined ? undefined : session.getSnapshot()),
+  )
+  const inboxSource = useMemo(() => session?.projections?.faceOf('inbox'), [session])
+  const inbox = useSyncExternalStore<import('./snapshot').InboxLike | undefined>(
+    (fn) => (inboxSource === undefined ? () => {} : inboxSource.subscribe(fn)),
+    () => (inboxSource?.getSnapshot() as import('./snapshot').InboxLike | undefined),
   )
 
   // The conversation content (order/nodes) is NOT on `session.getSnapshot()` —
@@ -221,7 +259,14 @@ export function SideChatPanel({
   // never rendered. Chat rows come from the uiConversation service's chat
   // target instead — the same source the main conversation's `useChat` reads.
   const chatTarget = useMemo<Observable<unknown> | undefined>(() => {
-    if (sideSessionId === null) return undefined
+    // Gate on the retained binding, not just the id: `uiConversation.binding`
+    // internally calls `sessions.binding(id)`, which 0.1.6 materializes only
+    // after the retain effect above has run. A useMemo keyed on the id alone
+    // evaluates during the render that PRECEDES that effect, the call throws
+    // "unknown session" into the catch below, and — its deps never changing
+    // again — the chat target stays undefined forever: sent messages vanished
+    // the moment their turn claimed the queue, and no reply ever rendered.
+    if (sideSessionId === null || session === undefined) return undefined
     const svc = uiConversation as
       | { binding(id: string): { target(name: string): Observable<unknown> } | undefined }
       | undefined
@@ -232,7 +277,7 @@ export function SideChatPanel({
       // throws, and the empty hero below is the correct stand-in until it lands.
       return undefined
     }
-  }, [sideSessionId, uiConversation])
+  }, [sideSessionId, session, uiConversation])
   const chatSnapshot = useSyncExternalStore<import('./snapshot').ChatLike | undefined>(
     (fn) => (chatTarget === undefined ? () => {} : chatTarget.subscribe(fn)),
     () => (chatTarget === undefined ? undefined : chatTarget.getSnapshot() as import('./snapshot').ChatLike | undefined),
@@ -319,6 +364,7 @@ export function SideChatPanel({
         <div className="dsh-codex-sidechat-conversation">
           <SideChatTranscript
             snapshot={snapshot}
+            inbox={inbox}
             chat={chatSnapshot}
             t={t}
             sessionId={sideSessionId ?? undefined}
@@ -330,6 +376,8 @@ export function SideChatPanel({
           <SideChatComposer
             session={{
               sessionId: sideSessionId ?? '',
+              getSnapshot: session.getSnapshot.bind(session),
+              beginSubmission: session.beginSubmission.bind(session),
               prompt: session.prompt.bind(session),
               cancel: session.cancel.bind(session),
               command: session.command === undefined ? undefined : session.command.bind(session),

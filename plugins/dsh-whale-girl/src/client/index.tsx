@@ -105,11 +105,14 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, 'en', en), 'dsh-whale-girl: en dictionary')
 
   const scope = getSettingsScope(ctx).bind<WhaleGirlConfig>({ namespace: NAMESPACE })
-  ctx.slots.inject('settings.plugin.item', () =>
+  // DSH 0.1.6 moved plugin configuration to the sidebar Plugins page:
+  // `plugins.bundle.config` is keyed by the bundle's package name (must
+  // match package.json `name`) and renders on the bundle's own page.
+  ctx.slots.inject('plugins.bundle.config', () =>
     ctx.slots.register(
       {
-        name: 'settings.plugin.item',
-        key: NAMESPACE,
+        name: 'plugins.bundle.config',
+        key: '@just-genius/dsh-whale-girl',
         locale: NS as never,
         inject: () => ({ scope }),
       },

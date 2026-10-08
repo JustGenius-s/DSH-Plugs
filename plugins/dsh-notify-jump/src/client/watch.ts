@@ -1,4 +1,4 @@
-import type { SessionListState } from '@just-genius/dsh-plugin-runtime/client'
+import type { SessionListState, SessionStatusSnapshot } from '@just-genius/dsh-plugin-runtime/client'
 import { pendingAdvance, pendingCopy, type ObservedPending, type PendingKind } from './pending'
 import { notificationTag } from './tag'
 
@@ -9,6 +9,15 @@ export interface SessionsListFace {
   }
 }
 
+export interface PendingStatusFace {
+  getSnapshot(): SessionStatusSnapshot
+  subscribe(listener: () => void): () => void
+}
+
+export interface CurrentSessionFace {
+  getSnapshot(): { key: string | undefined }
+}
+
 /**
  * Watch the session list for approval / ask / plan-review waits and show a
  * desktop notification on the rising edge. Uses the same tag as turn-end
@@ -16,6 +25,8 @@ export interface SessionsListFace {
  */
 export function startPendingWatcher(
   sessions: SessionsListFace,
+  statuses: PendingStatusFace,
+  current: CurrentSessionFace,
   onConnectionReset: (listener: () => void) => () => void,
 ): () => void {
   const observed = new Map<string, ObservedPending>()
@@ -25,17 +36,19 @@ export function startPendingWatcher(
   }
 
   const stopReset = onConnectionReset(reseed)
-  const off = sessions.list.subscribe(() => {
+  const scan = () => {
     const state = sessions.list.getSnapshot()
+    const statusById = statuses.getSnapshot()
+    const currentSessionId = current.getSnapshot().key
     for (const id of state.ids) {
       const summary = state.byId[id]
       if (summary === undefined) continue
-      const next = asPendingKind(summary.pendingInteraction)
+      const next = asPendingKind(statusById.get(id)?.pendingInteraction?.kind)
       const { observed: nextObserved, fresh } = pendingAdvance(observed.get(id), next)
       observed.set(id, nextObserved)
       if (!fresh) continue
       if (summary.origin === 'subagent') continue
-      if (!shouldShow(id, state.current)) continue
+      if (!shouldShow(id, currentSessionId)) continue
       const kind = next as PendingKind
       const copy = pendingCopy(kind, summary.title ?? summary.displayTitle ?? '')
       show(copy.title, copy.body, id)
@@ -44,15 +57,18 @@ export function startPendingWatcher(
     for (const id of [...observed.keys()]) {
       if (!live.has(id)) observed.delete(id)
     }
-  })
+  }
+  const offList = sessions.list.subscribe(scan)
+  const offStatus = statuses.subscribe(scan)
 
   return () => {
-    off()
+    offList()
+    offStatus()
     stopReset()
   }
 }
 
-function asPendingKind(value: string | undefined): PendingKind | undefined {
+function asPendingKind(value: unknown): PendingKind | undefined {
   if (value === 'approval' || value === 'plan-review' || value === 'question') return value
   return undefined
 }

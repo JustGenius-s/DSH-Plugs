@@ -144,6 +144,42 @@ export function listBindings(): WorkspaceBinding[] {
   return load().bindings.slice().sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+/**
+ * Drop bindings whose workspace no longer exists, returning what was removed.
+ *
+ * A binding is keyed by its DIRECTORY, not by the official workspace id, so the
+ * plugin cannot notice a deletion by itself — deleting a workspace through the
+ * official row menu removes the registration but leaves this store entry behind,
+ * and re-adding the same directory would then silently resurrect the old extra
+ * folders.
+ *
+ * The caller supplies the authoritative set of live workspace paths (read from
+ * the Host's registry), and every binding not matching one is removed. Pruning
+ * by directory rather than by id is what keeps this correct without a migration:
+ * a binding IS its directory as far as the official side is concerned.
+ *
+ * An EMPTY live set prunes nothing. That is not a nicety: the caller reads the
+ * live set from a client snapshot, and an empty snapshot means "not connected
+ * yet", not "every workspace was deleted". Treating it as the latter would wipe
+ * the user's bindings on any startup or reconnect race.
+ */
+export function pruneBindings(livePaths: readonly string[]): WorkspaceBinding[] {
+  if (livePaths.length === 0) return []
+  const file = load()
+  const live = livePaths.map((path) => tryRealpath(path))
+  // Both sides are realpath'd. Comparing a realpath'd live path against a RAW
+  // stored one would treat the same directory as two wherever a path has a
+  // symlinked ancestor — `/var` vs `/private/var` on macOS is the everyday case —
+  // and delete bindings that are perfectly live.
+  const isLive = (binding: WorkspaceBinding): boolean =>
+    live.some((path) => samePath(path, tryRealpath(binding.primaryPath)))
+  const removed = file.bindings.filter((binding) => !isLive(binding))
+  if (removed.length === 0) return []
+  const kept = file.bindings.filter((binding) => !removed.includes(binding))
+  save({ version: 1, bindings: kept })
+  return removed.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
 export function getBinding(root: string): WorkspaceBinding | null {
   const key = tryRealpath(root)
   const alt = root

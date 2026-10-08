@@ -3,7 +3,7 @@ import { apply } from '../src/index'
 
 /**
  * Minimal stand-in for the cordis host context, wiring only what the plugin
- * touches: a settings scope, an llm service, an effect hook, and an event bus
+ * touches: a live plugin config, an llm service, an effect hook, and an event bus
  * that composes listeners in Cordis waterfall order (outermost-first, and a
  * listener registered with `prepend` wraps later plain registrations).
  */
@@ -14,7 +14,7 @@ function harness(options: {
   inner?: (config: any) => any
 }) {
   const listeners: { callback: any, prepend: boolean }[] = []
-  const scope = { get: () => ({ defaults: options.defaults }) }
+  const config = { defaults: { get: () => options.defaults } }
   const llm = {
     resolveModelInfo: async (provider: string, model: string) => ({
       provider,
@@ -25,7 +25,6 @@ function harness(options: {
     }),
   }
   const ctx = {
-    settings: { register: () => scope },
     llm,
     logger: () => ({ warn: vi.fn() }),
     effect: (fn: () => () => void) => { fn() },
@@ -35,7 +34,7 @@ function harness(options: {
       else listeners.push({ callback, prepend: false })
     },
   }
-  apply(ctx as any)
+  apply(ctx as any, config)
 
   /** Dispatch the waterfall the way Cordis does: outermost first, last arg is next. */
   const dispatch = async (config: any) => {

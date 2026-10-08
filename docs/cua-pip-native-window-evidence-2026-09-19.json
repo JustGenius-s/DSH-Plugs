@@ -1,0 +1,62 @@
+{
+  "verifiedAt": "2026-09-19T11:31:48.021Z",
+  "runtimeVersion": "2026-09-19-native-window-stream-v4",
+  "capture": "screencapturekit-window",
+  "launch": "launchservices",
+  "screenRecordingPermission": true,
+  "backgroundPolicy": "strict-window-v1",
+  "target": {
+    "pid": 89831,
+    "windowId": 68120
+  },
+  "sessionId": "session-874d68b2-fdfd-449f-85ed-9fd5cbbeb894",
+  "transport": {
+    "path": "Native SCStream -> DSH Host -> SSE -> local HTTP reader",
+    "framesReceived": 848,
+    "width": 1024,
+    "height": 768,
+    "meanFrameIntervalMs": 35.15348288075561,
+    "distinctImages": 1,
+    "errors": []
+  },
+  "lifecycle": {
+    "openedAt": 1789817474723,
+    "closeAt": 1789817504724,
+    "closedAt": 1789817504725,
+    "closeLatenessMs": 1,
+    "terminalEventReceived": true,
+    "activeStreamsAfterClose": 0,
+    "helperProcessAfterClose": false
+  },
+  "focus": {
+    "samples": 1650,
+    "targetFrontmostSamples": 0,
+    "targetActivationNotifications": 0,
+    "initialFrontmostPid": 2535,
+    "finalFrontmostPid": 33209,
+    "otherApplicationSwitchObserved": true
+  },
+  "readOnlyActionProbe": {
+    "attempts": 2,
+    "tool": "get_window_state",
+    "includeScreenshot": false,
+    "exactWindowStatus": "ax_unresolved",
+    "accessibilityRoute": "refused",
+    "windowPointerRoute": "refused",
+    "pidKeyboardRoute": "refused",
+    "reason": "off_space_or_ax_unresolved",
+    "driverPermissions": {
+      "source": "driver-daemon",
+      "accessibility": true,
+      "screenRecording": true
+    }
+  },
+  "visualReview": {
+    "windowSharingMarkVisible": true,
+    "firstStopwatchReading": "00:42.13",
+    "lastStopwatchReading": "00:42.13",
+    "stopwatchProgressVerified": false
+  },
+  "scope": "No application launch, input, reset, resize, foreground activation, or browser rendering. Native window samples and host transport/lifecycle verified. Full background Computer Use and stopwatch progression remain unverified.",
+  "localArtifacts": ".tmp/native-window-capture-authorized/"
+}

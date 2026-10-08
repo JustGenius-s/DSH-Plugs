@@ -1,13 +1,10 @@
 /**
  * Reading a side chat's pending host interaction.
  *
- * DSH 0.1.5 replaced the old `snapshot.pending` array with a session-keyed
- * interaction store (`uiSession.pendingInteractions`), and the carriers it
- * holds changed shape with it — `PendingApproval` / `PendingQuestion` are
- * answerable objects carrying their own `answer` / `cancel` verbs, not
- * `PendingWait`-style `respond(result)` envelopes. Side Chat was still reading
- * the old array, so every approval and every ask_user_question in a side chat
- * rendered nothing: the takeover never saw a wait.
+ * DSH 0.1.7 exposes pending requests through
+ * `uiSession.sessionStatus.getSnapshot().get(sessionId)?.pendingInteraction`.
+ * Earlier releases exposed a direct `pendingInteractions` map. The side chat
+ * accepts either source, so the composer sees the host's current request.
  *
  * Pure and injectable per AGENTS.md (UI logic in a plain function) so the
  * recognition rules are testable without React, CSS, or a live client context.
@@ -19,8 +16,13 @@ export interface PendingObservable<T> {
   subscribe(fn: () => void): () => void
 }
 
-/** The session-keyed pending-interaction store (`ctx.uiSession.pendingInteractions`). */
-export type PendingInteractionsFace = PendingObservable<ReadonlyMap<string, SideChatWaitLike>>
+/** One entry in the current session-status map. */
+interface SessionStatusLike {
+  pendingInteraction?: SideChatWaitLike
+}
+
+/** The current status map or the older direct interaction map. */
+export type PendingInteractionsFace = PendingObservable<ReadonlyMap<string, SessionStatusLike | SideChatWaitLike>>
 
 /**
  * One pending interaction, structurally.
@@ -83,15 +85,14 @@ export interface SideChatWait {
 /**
  * Whether an unknown value is one of the carriers the cards can answer.
  *
- * `answer` and `cancel` are the discriminant because they are the verbs the
- * cards call — a value that carries both is answerable, and one that does not
- * would fail at click time rather than at render time, which is exactly the
- * failure this module exists to prevent.
+ * Approvals use `answer`; questions also need `cancel` for the dismiss action.
  */
 export function isAnswerableWait(value: unknown): value is SideChatWaitLike {
   if (value === null || typeof value !== 'object') return false
-  const record = value as { answer?: unknown; cancel?: unknown }
-  return typeof record.answer === 'function' && typeof record.cancel === 'function'
+  const record = value as SideChatWaitLike
+  const kind = waitKindOf(record)
+  if (kind === undefined || typeof record.answer !== 'function') return false
+  return kind === 'approval' || typeof record.cancel === 'function'
 }
 
 /** Normalize one carrier's kind into the three a side chat presents. */
@@ -120,7 +121,7 @@ export function rawPendingOf(
   if (store === undefined) return undefined
   if (sessionId === undefined || sessionId === '') return undefined
   try {
-    return store.getSnapshot().get(sessionId as never)
+    return interactionOf(store.getSnapshot().get(sessionId as never))
   } catch {
     // A store read must never take down the panel it feeds.
     return undefined
@@ -146,12 +147,19 @@ export function pendingWaitOf(
   if (sessionId === undefined || sessionId === '') return undefined
   let value: unknown
   try {
-    value = store.getSnapshot().get(sessionId as never)
+    value = interactionOf(store.getSnapshot().get(sessionId as never))
   } catch {
     // A store read must never take down the panel it feeds.
     return undefined
   }
   return recognizeWait(value)
+}
+
+/** Unwrap a current status row, while accepting the older direct map value. */
+function interactionOf(entry: SessionStatusLike | SideChatWaitLike | undefined): SideChatWaitLike | undefined {
+  if (entry === undefined) return undefined
+  if ('pendingInteraction' in entry) return entry.pendingInteraction
+  return entry as SideChatWaitLike
 }
 
 /**
@@ -197,7 +205,7 @@ function questionItemsOf(value: unknown): WaitQuestionItem[] {
 }
 
 /**
- * Resolve the pending-interaction store off a client context.
+ * Resolve the host's pending-interaction observable off a client context.
  *
  * Read through `ctx.get` — the accessor that never throws for an undeclared
  * service — because a side chat must render even when this service has not
@@ -214,7 +222,8 @@ export function pendingInteractionsOf(ctx: object): PendingInteractionsFace | un
     return undefined
   }
   if (service === null || typeof service !== 'object') return undefined
-  const store = (service as { pendingInteractions?: unknown }).pendingInteractions
+  const source = service as { sessionStatus?: unknown; pendingInteractions?: unknown }
+  const store = source.sessionStatus ?? source.pendingInteractions
   if (store === null || typeof store !== 'object') return undefined
   const face = store as { getSnapshot?: unknown; subscribe?: unknown }
   if (typeof face.getSnapshot !== 'function' || typeof face.subscribe !== 'function') {

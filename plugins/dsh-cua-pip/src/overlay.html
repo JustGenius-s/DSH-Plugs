@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>画中画</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #111;
+      color: #eee;
+      font: 12px system-ui, sans-serif;
+    }
+    #root {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      -webkit-app-region: no-drag;
+      app-region: no-drag;
+    }
+    #bar {
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      opacity: 0.7;
+    }
+    #title {
+      min-width: 0;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #close {
+      flex: none;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 2px 6px;
+    }
+    #view {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      background: #000;
+    }
+    #shot {
+      max-width: 100%;
+      max-height: 100%;
+      display: none;
+      cursor: pointer;
+    }
+    #empty {
+      opacity: 0.5;
+      padding: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="bar">
+      <span id="title">画中画</span>
+      <button type="button" id="close" aria-label="关闭">×</button>
+    </div>
+    <div id="view">
+      <img id="shot" alt="" draggable="false" />
+      <div id="empty">等待 Computer Use 操作窗口…</div>
+    </div>
+  </div>
+  <script src="/cua-pip/overlay.js"></script>
+</body>
+</html>

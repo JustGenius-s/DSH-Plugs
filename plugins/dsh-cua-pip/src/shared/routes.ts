@@ -1,0 +1,13 @@
+export const ROUTE_PREFIX = '/cua-pip'
+export const WINDOWS_PATH = `${ROUTE_PREFIX}/windows`
+export const WATCH_PATH = `${ROUTE_PREFIX}/watch`
+export const CLOSE_PATH = `${ROUTE_PREFIX}/close`
+export const SCHEDULE_PATH = `${ROUTE_PREFIX}/schedule-close`
+export const RESIZE_PATH = `${ROUTE_PREFIX}/resize`
+export const UNWATCH_PATH = `${ROUTE_PREFIX}/unwatch`
+export const FRAME_PATH = `${ROUTE_PREFIX}/frame`
+export const STREAM_PATH = `${ROUTE_PREFIX}/stream`
+export const HEALTH_PATH = `${ROUTE_PREFIX}/health`
+export const FOCUS_PATH = `${ROUTE_PREFIX}/focus`
+export const ACTIVITY_PATH = `${ROUTE_PREFIX}/activity`
+export const OVERLAY_PATH = `${ROUTE_PREFIX}/overlay`

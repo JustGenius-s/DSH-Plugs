@@ -10,7 +10,7 @@ export interface TaskView {
 export function collectTasks(jobs: JobRegistry, agents: AgentRegistry): TaskView[] {
   const seen = new Set<string>()
   const tasks: TaskView[] = []
-  for (const agent of agents.list()) append(jobs.list(agent), seen, tasks)
+  for (const agent of agents.list()) append(jobs.list(agent.id), seen, tasks)
   append(jobs.list(), seen, tasks)
   return tasks
 }

@@ -1,9 +1,16 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type {
-  SettingsScope,
-  SettingsScopeSnapshot,
-  SettingsScopeSpec as LegacySettingsScopeSpec,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConfigFormSnapshot as SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+export type { ConfigFormSnapshot as SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+export interface SettingsScope<T> {
+  getSnapshot(): SettingsScopeSnapshot<T>
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<void>
+  unset(field: string): Promise<void>
+}
+interface LegacySettingsScopeSpec<T> {
+  namespace: string
+  decode?: (section: unknown) => T | undefined
+}
 import type { SettingsDescribeFace } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 export interface SettingsScopeSpec<T> extends LegacySettingsScopeSpec<T> {
@@ -34,12 +41,18 @@ type SettingsContext = Pick<Context, 'get' | 'effect'>
  * with their transport, so neither version waits for a removed service name.
  * ctx.get resolves the version-specific service without a property injection.
  */
+const CONFIG_ENTRY_IDS: Readonly<Record<string, string>> = {
+  'quick-notes': 'dsh-quick-notes',
+  'whale-girl': 'dsh-whale-girl',
+  'ui-onboarding': 'ui-settings-general',
+}
+
 export function getSettingsScope(ctx: SettingsContext): SettingsScopeBinder {
   const forms = ctx.get('configForms') as ConfigForms | undefined
   if (forms !== undefined) {
     return {
       describe: () => forms.describe(),
-      bind: <T>(spec: SettingsScopeSpec<T>) => bindForm(ctx, forms.get<T>(spec.entryId ?? spec.namespace), spec),
+      bind: <T>(spec: SettingsScopeSpec<T>) => bindForm(ctx, forms.get<T>(spec.entryId ?? CONFIG_ENTRY_IDS[spec.namespace] ?? spec.namespace), spec),
     }
   }
   const legacy = ctx.get('settingsScope') as SettingsScopeBinder | undefined

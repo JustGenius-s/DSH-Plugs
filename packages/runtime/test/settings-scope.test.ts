@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
-import type { SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScopeSnapshot } from '../src/settings-scope'
 import { getSettingsScope } from '../src/settings-scope'
 
 function formFixture() {
@@ -105,6 +105,20 @@ describe('settings service compatibility', () => {
     legacy.provide('settingsScope', { bind, describe: () => fixture.mirror })
     getSettingsScope(legacy).bind(spec)
     expect(bind).toHaveBeenCalledWith(expect.objectContaining({ namespace: 'ui-onboarding' }))
+  })
+
+  it.each([
+    ['quick-notes', 'dsh-quick-notes'],
+    ['whale-girl', 'dsh-whale-girl'],
+    ['ui-onboarding', 'ui-settings-general'],
+  ])('maps the legacy %s namespace to its current Config entry', (namespace, entryId) => {
+    const fixture = formFixture()
+    const ctx = new Context()
+    ctx.provide('configForms', fixture.forms)
+    getSettingsScope(ctx).bind({ namespace })
+    expect(fixture.forms.get).toHaveBeenCalledWith(entryId)
+    getSettingsScope(ctx).bind({ namespace, entryId: 'explicit-entry' })
+    expect(fixture.forms.get).toHaveBeenLastCalledWith('explicit-entry')
   })
 
   it('keeps memory-mode preferences unavailable and does not decode missing values', () => {

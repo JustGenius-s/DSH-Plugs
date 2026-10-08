@@ -18,17 +18,19 @@ Cursor-style debug mode: `/debug`, a red Debug chip, a Debug Logs dock above the
 
 Leader-plans / subagent-executes orchestration, **off until you select or run `/flow`**. Once on, the main agent only plans — it lays work out as a DAG with `flow_plan`, each node is dispatched to its own child agent, and it reshapes the graph mid-flight with `flow_patch` (retry with a revised prompt, skip, insert a corrective step) as results land. The execution guard allows the Leader to call only `flow_plan`, `flow_status`, `flow_next`, `flow_patch`, and `flow_confirm`; investigation and execution are delegated to children. A dedicated **Flow** tab in the right sidebar draws the live graph with React Flow: node colour = status, edges = dependencies, click a node for its brief, result, and failure reason. Select `/flow` in the command menu to enable the mode and open the tab. The composer shows a **Flow chip**; click it or use `/flow off` to leave and cancel running children.
 
-### [@just-genius/dsh-multi-repo](plugins/dsh-multi-repo)
-
-Multi-folder workspaces (Codex-style, no git scan): add folders one by one, pick one as the **primary** — the official workspace, session cwd, and workspace-write scope — while the rest stay readable and coordinatable. Bindings live in `~/.dsh/multi-repo/projects.json` and are injected into the system prompt.
-
 ### [@just-genius/dsh-workspace-plus](plugins/dsh-workspace-plus)
 
-Workspace enhancement that supersedes installing `dsh-multi-repo` plus a row-menu plugin together: attach multiple folders to one workspace (primary folder is the official cwd / workspace-write scope), and add double-click / right-click menus on workspace and session rows — pin, rename, unread, archive, fork, open folder. Bindings live in `~/.dsh/workspace-plus/bindings.json`. Session menus do not offer permanent delete.
+Sidebar enhancement that only ADDS to the official UI. A **pinned area** above the sidebar list where both **projects and sessions** can be pinned — session pins are DSH's own `pinnedSessionIds`, so the panel and the official row button are one write, while project pins live in `~/.dsh/workspace-plus/pins.json`. Extra entries are appended to the official workspace and session row menus (the session ones through DSH's own `sidebar.workspaces.session.menu.item` slot, the workspace ones injected into the menu DSH hardcodes), on top of **multi-folder workspaces** (add folders one by one, pick one as the **primary** — the official workspace, session cwd, and workspace-write scope — while the rest stay readable and coordinatable, with the folder list injected into the system prompt) and Markdown session export. Rows are identified by DSH's `data-row-key`/`data-slot` contract; nothing claims a slot or reorders the official list. Session menus do not offer permanent delete.
+
+Supersedes the former `dsh-multi-repo`, which was renamed into this plugin; that package name is gone, and a first load still copies `~/.dsh/multi-repo/projects.json` forward when `bindings.json` is missing.
 
 ### [@just-genius/dsh-computer-tools](plugins/dsh-computer-tools)
 
 **Settings → 浏览器与桌面**: one card per capability — Browser Use (Playwright MCP) and Computer Use (Cua MCP or Native) — each with its own save. Saving writes a managed `cordis.patch.yml` insert; defaults work out of the box and the knobs live under 高级选项. The capability packages are separate opt-in installs, so a card whose packages are absent offers **一键安装** (with a copyable command as fallback). It does not restart the host or drive the computer. Needs `dsh-plugin-config`.
+
+### [@just-genius/dsh-cua-pip](plugins/dsh-cua-pip)
+
+Agent-controlled, session-scoped Computer Use picture-in-picture. On macOS, a native ScreenCaptureKit helper streams one explicitly selected application window into the current conversation. PiP is optional: direct Cua calls keep using their configured provider independently.
 
 ### [@just-genius/dsh-sync](plugins/dsh-sync)
 
@@ -44,7 +46,7 @@ Click a `dsh-notification` system banner to focus the window and open that sessi
 
 ### [@just-genius/dsh-session-archive](plugins/dsh-session-archive)
 
-**Settings → 会话归档**: archived sessions grouped by workspace, with a confirmed delete. The sidebar keeps its one-click **归档会话** entry.
+**Settings → 会话归档**: archived sessions grouped by workspace, with restore and confirmed delete. On DSH 0.1.7, the official archive view is in the sidebar's **视图选项 → 显示已归档／仅显示已归档** filter; there is no separate official archive settings page to reappear when this plugin is disabled.
 
 ### [@just-genius/dsh-plugin-config](plugins/dsh-plugin-config)
 

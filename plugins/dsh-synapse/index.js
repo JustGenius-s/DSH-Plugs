@@ -1896,9 +1896,12 @@ async function readJson(req) {
   let length = 0
   for await (const chunk of req) {
     length += chunk.length
-    if (length > MAX_BODY_BYTES) throw new InputError('请求内容过大')
-    chunks.push(chunk)
+    // Leaving IncomingMessage's iterator early destroys the shared HTTP
+    // connection. Drain rejected bodies without retaining oversized data.
+    if (length <= MAX_BODY_BYTES) chunks.push(chunk)
+    else chunks.length = 0
   }
+  if (length > MAX_BODY_BYTES) throw new InputError('请求内容过大')
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { throw new InputError('请求不是有效 JSON') }
 }
 

@@ -1,0 +1,87 @@
+{
+  "runtimeVersion": "2026-09-19-bound-window-control-v7",
+  "windowControl": {
+    "tool": "computer_window",
+    "binding": "session-window-v1",
+    "visualClick": "ax-hit-test-only",
+    "maxBatchSteps": 6,
+    "rawPointer": false
+  },
+  "verification": {
+    "testFiles": 29,
+    "testsPassed": 642,
+    "typecheck": "passed",
+    "nativeContract": "passed",
+    "build": "passed",
+    "clientModuleContracts": "passed",
+    "runningHostVersionVerified": true,
+    "helperChangedOrResigned": false,
+    "screenRecordingPermission": true
+  },
+  "nativeInput": {
+    "verifiedAt": "2026-09-19T15:16:33.748Z",
+    "target": "owned synthetic AppKit fixture",
+    "inputCount": 1,
+    "imageCoordinates": { "x": 260, "y": 264 },
+    "targeting": "pip-pixels-to-ax",
+    "driverRoute": "accessibility",
+    "deliveryMode": "background",
+    "driverEffect": "unverifiable",
+    "independentVerification": {
+      "counterBefore": 0,
+      "counterAfter": 1,
+      "fixtureEventCount": 1,
+      "axReadbackConfirmed": true,
+      "nativeImageChanged": true,
+      "imagesVisuallyInspected": true
+    },
+    "focusSamples": 1000,
+    "targetFrontmostSamples": 0,
+    "activationChanges": [],
+    "passed": true,
+    "rawReport": "../.tmp/window-actions-v7/report.json",
+    "beforeImage": "../.tmp/window-actions-v7/before.jpg",
+    "afterImage": "../.tmp/window-actions-v7/after.jpg"
+  },
+  "liveHostStream": {
+    "verifiedAt": "2026-09-19T15:17:41.727Z",
+    "sessionId": "session-417d65d6-b29f-4a11-b9fb-c04393495fb4",
+    "target": { "pid": 35074, "windowId": 37901 },
+    "framesReceived": 841,
+    "dimensions": { "width": 1024, "height": 748 },
+    "meanFrameIntervalMs": 35.49285714285714,
+    "errors": [],
+    "retryCount": 0,
+    "closeAt": 1789831058605,
+    "closedAt": 1789831058605,
+    "terminalEventReceived": true,
+    "activeStreamsAfterClose": 0,
+    "focusSamples": 1650,
+    "targetFrontmostSamples": 0,
+    "activationChanges": [],
+    "rawReport": "../.tmp/grok-bound-window-v7/session-report.json"
+  },
+  "existingAppReadOnlyCheck": {
+    "app": "Grok Bot",
+    "pid": 35074,
+    "windowId": 37901,
+    "exactWindowStatus": "ax_unresolved",
+    "accessibility": "refused",
+    "windowPointer": "refused",
+    "pidKeyboard": "refused",
+    "reason": "off_space_or_ax_unresolved",
+    "applicationInputPerformed": false
+  },
+  "scope": {
+    "nativeInputAndImageVerification": "Real owned fixture, coordinate mapping, Cua AX dispatch and ScreenCaptureKit frames.",
+    "hostPolicyVerification": "Host-interface tests verify scoped nested dispatch, approvals/guards, image delivery and bounded batches.",
+    "productionModelConversationEndToEnd": false,
+    "browserE2EPerformed": false,
+    "limitations": [
+      "No generic raw pixel or drag backend.",
+      "AX route availability is evaluated per exact window.",
+      "Frame delivery is not proof of task completion.",
+      "No existing application contents were changed."
+    ]
+  }
+}

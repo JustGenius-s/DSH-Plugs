@@ -117,7 +117,7 @@ export function installNotificationJump(openSession: OpenSession): () => void {
     try {
       openSession(id)
     } catch (error) {
-      console.warn('[dsh-notify-jump] sessions.open failed', error)
+      console.warn('[dsh-notify-jump] uiWorkspace.openSession failed', error)
     }
     notification.close()
   })
@@ -137,7 +137,7 @@ export function installNotificationJump(openSession: OpenSession): () => void {
       try {
         openSession(id)
       } catch (error) {
-        console.warn('[dsh-notify-jump] sessions.open failed', error)
+        console.warn('[dsh-notify-jump] uiWorkspace.openSession failed', error)
       }
       notification.close()
     })
