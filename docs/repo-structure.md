@@ -132,21 +132,20 @@ packages:
 | `plugins/dsh-codex` | 无覆盖 |
 | `dsh-multi-repo` | `types: ["node"]` |
 | `dsh-model-custom-ex` | `allowImportingTsExtensions: true` |
-| `dsh-debug-mode`、`dsh-memory`、`dsh-plugin-config`、`dsh-sync`、`dsh-whale-girl`、`packages/runtime`、`packages/ui` | `allowImportingTsExtensions` + `types: ["node"]` |
+| `dsh-debug-mode`、`dsh-plugin-config`、`dsh-sync`、`dsh-whale-girl`、`packages/runtime`、`packages/ui` | `allowImportingTsExtensions` + `types: ["node"]` |
 | `dsh-flow` | 上两项 + 再写 `jsx: "react-jsx"` |
 
 ---
 
 ## 2. 源码区二级树
 
-### 2.1 `plugins/`（10 个一级目录，一行一个）
+### 2.1 `plugins/`（9 个一级目录，一行一个）
 
 ```
 plugins/
 ├── dsh-codex/
 ├── dsh-debug-mode/
 ├── dsh-flow/
-├── dsh-memory/
 ├── dsh-model-custom-ex/
 ├── dsh-multi-repo/
 ├── dsh-plugin-config/
@@ -155,9 +154,9 @@ plugins/
 └── dsh-whale-girl/
 ```
 
-标准 TS 插件（除 synapse 外 9 个）一级可见项：`package.json`、`tsconfig.json`、`tsdown.config.ts`、`tsdown.client.config.ts`、`cordis.patch.yml`、`src/`、`README.md`。构建后另有被 gitignore 的 `lib/`。
+标准 TS 插件（除 synapse 外 8 个）一级可见项：`package.json`、`tsconfig.json`、`tsdown.config.ts`、`tsdown.client.config.ts`、`cordis.patch.yml`、`src/`、`README.md`。构建后另有被 gitignore 的 `lib/`。
 
-标准插件 `src/` 二级（以 `dsh-memory` 为典型）：
+标准插件 `src/` 二级（以 `dsh-debug-mode` 为典型）：
 
 ```
 src/
@@ -227,7 +226,6 @@ Client 三项（缺一须标明）：① `package.json` 有 `dsh.client`；② b
 | `dsh-codex` | `@just-genius/dsh-codex` | `0.2.1` | plugin | 是：① `dsh.client.platform=web` + inject；② `src/client/index.tsx` → `lib/client.js` + `exports["./client"]`；③ `cordis.patch.yml` | `main`/`exports["."]` → `lib/index.js`（`src/index.ts`） | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
 | `dsh-debug-mode` | `@just-genius/dsh-debug-mode` | `0.1.0` | plugin | 是（同上三项，入口 `src/client/index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-flow` | `@just-genius/dsh-flow` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 另有 `test/` + `test` script |
-| `dsh-memory` | `@just-genius/dsh-memory` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 标准模板 |
 | `dsh-model-custom-ex` | `@just-genius/dsh-model-custom-ex` | `0.1.0` | plugin | 是；browser 源为 `src/client/index.ts`（非 tsx） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 入口扩展名变体 |
 | `dsh-multi-repo` | `@just-genius/dsh-multi-repo` | `0.1.0` | plugin | 是（`index.tsx`） | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | inject 含官方 primitives；client tsdown **未** alwaysBundle runtime |
 | `dsh-plugin-config` | `@just-genius/dsh-plugin-config` | `0.1.0` | plugin | 是；browser 源为 `src/client/index.ts` | `lib/index.js` | `lib/client.js` | 双 tsdown | `tsc --noEmit` | 入口扩展名变体 |
@@ -265,7 +263,6 @@ README「Plugins」列出 13 个名字（含两个幽灵）；未点名 synapse�
 | `dsh-codex` | Codex 风格导航、侧栏与终端集成壳 |
 | `dsh-debug-mode` | Cursor 风格 debug：`/debug`、复现卡片、运行时日志码头 |
 | `dsh-flow` | Leader 规划 / 子代理执行的 DAG，React Flow 页签 |
-| `dsh-memory` | 全局 markdown 记忆：设置页、AI 提议确认、系统提示注入 |
 | `dsh-model-custom-ex` | 替换官方 Models 设置页，补 vision / reasoning-effort 选择器 |
 | `dsh-multi-repo` | 多文件夹工作区选择器 |
 | `dsh-plugin-config` | 设置 → 插件：已装清单、npm 更新、awesome-dsh-plugin 市场 |
@@ -545,7 +542,7 @@ plugins/<folder>/
 ## 9. 对新插件作者的导航建议
 
 1. 先读根 `README.md` 的「What a plugin is」和 `AGENTS.md`，再读 `packages/ui/README.md`。
-2. 抄最近的标准包（如 `dsh-memory` / `dsh-debug-mode`）做骨架，不要抄 `dsh-synapse`。
+2. 抄最近的标准包（如 `dsh-debug-mode` / `dsh-sync`）做骨架，不要抄 `dsh-synapse`。
 3. host 逻辑从 `@just-genius/dsh-plugin-runtime/host` 取类型与适配；browser 从 `…/client` 取，UI 从 `@just-genius/dsh-plugin-ui` 取。
 4. 改完后在仓库根跑 `pnpm typecheck`（先合约再 tsc）和 `pnpm build`（先构建再 client 表）。确保本包产出 `lib/client.js`，否则 client 门禁会跳过你。
 5. 需要 overlay / 额外 export / 测试目录时，对照 §8.4 已有变体，而不是另起一套入口约定。

@@ -102,6 +102,29 @@ async function pinnedEffort(
 }
 
 /**
+ * The level the picker shows for a model with no stored pin.
+ *
+ * Reads the patched catalog lookup rather than the adapter: that lookup already
+ * stamps the recommended level or the first enabled level, so the request
+ * carries exactly what the composer labels. The adapter reports no default for
+ * a custom route, which is why the label and the wire used to disagree.
+ * @param ctx - host context carrying the llm service.
+ * @param provider - the request's provider route.
+ * @param model - the request's provider-owned model id.
+ * @returns the displayed effort id, or undefined when the model offers none.
+ */
+async function displayedDefaultEffort(
+  ctx: Context,
+  provider: string,
+  model: string,
+): Promise<OfferedEffort | undefined> {
+  const reasoning = (await ctx.llm.resolveModelInfo(provider, model)).reasoning
+  const displayed = reasoning?.defaultEffort
+  if (displayed === undefined) return undefined
+  return reasoning?.efforts.find((level) => level.id === displayed)?.id
+}
+
+/**
  * Install the defaults namespace and apply it to both the catalog and the wire.
  * @param ctx - host context carrying the settings and llm services.
  */
@@ -134,8 +157,9 @@ export function apply(ctx: Context, config: LiveConfig): void {
     const { provider, model } = resolved
     try {
       const wanted = pickProviderDefaults(defaults(), provider)[model]
-      if (wanted === undefined) return resolved
-      const effort = await pinnedEffort(ctx, provider, model, wanted, warned)
+      const effort = wanted === undefined
+        ? await displayedDefaultEffort(ctx, provider, model)
+        : await pinnedEffort(ctx, provider, model, wanted, warned)
       if (effort === undefined) return resolved
       return { ...resolved, reasoningEffort: effort }
     } catch (error) {

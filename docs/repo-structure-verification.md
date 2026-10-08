@@ -49,20 +49,20 @@
 
 ## 3. 清单与磁盘抽查
 
-### 3.1 插件 10 = 10
+### 3.1 插件 9 = 9
 
 | 目录 | name / version | 与正文 |
 | --- | --- | --- |
 | `dsh-codex` | `@just-genius/dsh-codex` 0.2.1 | 一致 |
 | `dsh-debug-mode` | `@just-genius/dsh-debug-mode` 0.1.0 | 一致 |
 | `dsh-flow` | `@just-genius/dsh-flow` 0.1.0 | 一致 |
-| `dsh-memory` | `@just-genius/dsh-memory` 0.1.0 | 一致 |
 | `dsh-model-custom-ex` | `@just-genius/dsh-model-custom-ex` 0.1.0 | 一致 |
 | `dsh-multi-repo` | `@just-genius/dsh-multi-repo` 0.1.0 | 一致 |
 | `dsh-plugin-config` | `@just-genius/dsh-plugin-config` 0.1.0 | 一致 |
 | `dsh-synapse` | `dsh-synapse` 0.4.1 | 一致 |
 | `dsh-sync` | `@just-genius/dsh-sync` 0.1.0 | 一致 |
 | ~~`dsh-wechat-chat`~~ | ~~`@just-genius/dsh-wechat-chat` 0.1.0~~ | **已删除**（无人使用，于 2026-09-10 移除；正文与 requirements 枚举已同步） |
+| ~~`dsh-memory`~~ | ~~`@just-genius/dsh-memory` 0.1.0~~ | **已删除**（于 2026-10-08 移除；正文与 requirements 枚举已同步） |
 | `dsh-whale-girl` | `@just-genius/dsh-whale-girl` 0.1.0 | 一致 |
 
 无 `dsh-notify-jump` / `dsh-session-archive` 目录。
