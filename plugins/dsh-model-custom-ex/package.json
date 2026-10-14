@@ -43,6 +43,8 @@
     "lib/**/*.d.ts"
   ],
   "scripts": {
+    "build:desktop": "node scripts/build-desktop.mjs",
+    "test:desktop": "node --experimental-strip-types --test test/*.test.ts",
     "build": "tsdown -c tsdown.config.ts && tsdown -c tsdown.client.config.ts",
     "watch": "tsdown -c tsdown.config.ts --watch & tsdown -c tsdown.client.config.ts --watch",
     "typecheck": "tsc --noEmit",
