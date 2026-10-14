@@ -10,6 +10,7 @@
     "typecheck": "pnpm check:dependency-contracts && pnpm -r typecheck",
     "check:dependency-contracts": "node scripts/check-dependency-contracts.mjs",
     "check:client-modules": "node scripts/check-client-modules.mjs",
+    "check:file-icons": "node scripts/gen-file-icons.mjs --check",
     "clean": "pnpm -r clean"
   },
   "devDependencies": {
