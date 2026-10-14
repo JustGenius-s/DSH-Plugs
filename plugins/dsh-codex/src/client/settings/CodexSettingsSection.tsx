@@ -96,6 +96,8 @@ function ShellMenu(props: { label: string; value: TerminalShell; t: (key: CodexK
   const [open, setOpen] = useState(false)
   const items: readonly MenuItem[] = [
     { id: 'auto', label: t('terminalShellAuto') },
+    { id: 'pwsh', label: t('terminalShellPwsh') },
+    { id: 'powershell', label: t('terminalShellPowerShell') },
     { id: 'bash', label: t('terminalShellBash') },
     { id: 'zsh', label: t('terminalShellZsh') },
   ]

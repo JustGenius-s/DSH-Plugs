@@ -4,6 +4,7 @@
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { readFile } from 'node:fs/promises'
+import { environmentValue, terminalShellKind } from './shell'
 
 const MAX_HISTORY = 2000
 const ZSH_META = 0x83
@@ -28,8 +29,31 @@ export async function loadShellHistory(shell: string): Promise<string[]> {
   return []
 }
 
-export function historyFileCandidates(shell: string, home: string): string[] {
-  const histfile = process.env.HISTFILE?.trim()
+/**
+ * Candidate history files for a shell, most specific first.
+ *
+ * PowerShell keeps PSReadLine's history in the per-user profile directory
+ * rather than a dotfile, so HISTFILE and the Bash/Zsh candidates are irrelevant
+ * there — a configured HISTFILE must not shadow it.
+ */
+export function historyFileCandidates(
+  shell: string,
+  home: string,
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  if (terminalShellKind(shell) === 'powershell') {
+    return platform === 'win32'
+      ? [join(
+          environmentValue(env, 'APPDATA') ?? join(home, 'AppData', 'Roaming'),
+          'Microsoft', 'Windows', 'PowerShell', 'PSReadLine', 'ConsoleHost_history.txt',
+        )]
+      : [join(
+          environmentValue(env, 'XDG_DATA_HOME') ?? join(home, '.local', 'share'),
+          'powershell', 'PSReadLine', 'ConsoleHost_history.txt',
+        )]
+  }
+  const histfile = env.HISTFILE?.trim()
   const name = basename(shell).toLowerCase()
   const defaults = name.includes('zsh')
     ? [join(home, '.zsh_history'), join(home, '.zhistory')]
@@ -54,6 +78,7 @@ export function parseHistoryFile(file: string, bytes: Buffer): string[] {
   const lower = file.toLowerCase()
   if (lower.includes('zsh') || lower.endsWith('.zhistory')) return parseZshHistory(bytes)
   if (lower.includes('fish')) return parseFishHistory(bytes)
+  if (lower.includes('psreadline')) return parsePowerShellHistory(bytes)
   return parseLineHistory(bytes)
 }
 
@@ -87,10 +112,33 @@ function parseFishHistory(bytes: Buffer): string[] {
 
 function parseLineHistory(bytes: Buffer): string[] {
   const commands: string[] = []
-  for (const line of bytes.toString('utf8').split('\n')) {
+  for (const line of bytes.toString('utf8').split(/\r?\n/)) {
     if (line.length === 0 || line.startsWith('#')) continue
     pushHistoryCommand(commands, line)
   }
+  return commands
+}
+
+/**
+ * PSReadLine writes one record per line and marks a continued command with a
+ * trailing backtick, which the next line's text follows. The console host
+ * history is usually UTF-8 with a BOM, but Windows PowerShell 5.1 can write
+ * UTF-16LE, so sniff the byte-order mark before decoding.
+ */
+function parsePowerShellHistory(bytes: Buffer): string[] {
+  const text = bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.toString('utf16le') : bytes.toString('utf8')
+  const commands: string[] = []
+  let command = ''
+  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    command += line
+    if (line.endsWith('`')) {
+      command = command.slice(0, -1) + '\n'
+      continue
+    }
+    pushHistoryCommand(commands, command)
+    command = ''
+  }
+  pushHistoryCommand(commands, command)
   return commands
 }
 
@@ -108,6 +156,7 @@ export function isInternalHistoryCommand(command: string): boolean {
   if (trimmed.includes('warp-block-end') || trimmed.includes('warp-node-version')) return true
   if (trimmed.includes('warp-caps')) return true
   if (trimmed.includes('dsh_block_mark')) return true
+  if (trimmed.startsWith('. __dsh_run ')) return true
   if (trimmed === 'stty -echo') return true
   if (trimmed === 'export TERM=xterm-256color') return true
   if (trimmed === 'export COLORTERM=truecolor') return true

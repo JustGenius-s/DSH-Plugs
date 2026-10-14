@@ -127,6 +127,12 @@ export class TerminalConnectionController {
         } else if (message.type === 'exit') {
           this.exited = true
           this.callbacks.onState('disconnected')
+        } else if (message.type === 'error') {
+          // Startup failures need an explicit retry after configuration is
+          // fixed; repeatedly respawning a missing shell cannot recover.
+          this.exited = true
+          this.rejectGates(new Error(message.message))
+          this.callbacks.onState('disconnected')
         }
         this.callbacks.onMessage(message)
       } catch (error) {
@@ -191,9 +197,21 @@ interface TerminalTransport {
  */
 export function terminalTransportBaseUrl(
   transport: TerminalTransport | undefined = (globalThis as { __DSH_TRANSPORT__?: TerminalTransport }).__DSH_TRANSPORT__,
-  documentBaseUrl: string | undefined = typeof document === 'undefined' ? undefined : document.baseURI,
+  documentBaseUrl: string | undefined = defaultTransportBaseUrl(),
 ): string | undefined {
   return transport?.streamBaseUrl ?? documentBaseUrl
+}
+
+/**
+ * Document base URL when one exists. A document-less runtime (the host-side
+ * unit tests) has only `window.location` to fall back on, which is also what
+ * this controller used before the Desktop shell needed `__DSH_TRANSPORT__`.
+ */
+function defaultTransportBaseUrl(): string | undefined {
+  if (typeof document !== 'undefined') return document.baseURI
+  if (typeof window === 'undefined') return undefined
+  const { protocol, host } = window.location
+  return protocol === undefined || host === undefined ? undefined : `${protocol}//${host}`
 }
 
 export function buildTerminalWsUrl(
