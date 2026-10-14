@@ -83,8 +83,8 @@ export type { Session, SessionEvent, SessionHeader, UserMessage } from '@deepsee
 export type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 export { installSettingsSection, settingsNamespace } from './settings-section.ts'
 export type { SettingsProvider } from '@deepseek-ai/dsh-settings'
-export { defineDomain } from '@deepseek-ai/dsh-storage-domain'
-export type { Domain } from '@deepseek-ai/dsh-storage-domain'
+export { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
+export type { Domain, DomainSpec } from '@deepseek-ai/dsh-storage-domain'
 export type {
   SubprocessTerminalHandle,
   SubprocessTerminalSignal,

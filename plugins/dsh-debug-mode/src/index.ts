@@ -24,11 +24,10 @@ import { effectiveDebugOn } from './view.ts'
 import { corsHeaders } from './cors.ts'
 import { browserIngestUrl, startIngestSidecar } from './ingest-server.ts'
 import {
-  appendDebugMode,
-  foldDebugActive,
-  sessionCanPersistDebug,
-  type IgnorableAppendSession,
-} from './persist.ts'
+  NO_STANCE,
+  openStanceStore,
+  type StanceAccess,
+} from './stance-store.ts'
 import {
   CLEAR_PATH,
   COMMAND_PATH,
@@ -60,12 +59,14 @@ export const inject = [
   HOST_SERVICES.tools,
   HOST_SERVICES.systemPrompt,
   HOST_SERVICES.sessions,
+  HOST_SERVICES.storageDomain,
   HOST_SERVICES.webServer,
 ] as const
 
 /**
  * Live debug collaboration state for one session.
- * Mode stance may persist as ignorable `debug/mode` on 0.1.6+.
+ * Mode stance persists in the `debug_stance` storage domain, keyed by session
+ * id; the session log is never written (see stance-store.ts).
  * Runs, hypotheses, and the open wait stay process-local.
  */
 interface SessionDebugState {
@@ -115,9 +116,12 @@ const EMPTY_VIEW: DebugProjection = {
   hypotheses: [],
 }
 
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context): Promise<void> {
   const store = new Map<string, SessionDebugState>()
   const waits = new Map<string, LiveWait>()
+  // The durable stance seam. A host whose storage hub cannot serve it degrades
+  // to memory-only instead of failing the mount.
+  const stance = await openStanceStore(ctx)
   let disposed = false
 
   ctx.effect(() => () => {
@@ -129,17 +133,19 @@ export function apply(ctx: Context): void {
     store.clear()
   }, 'dsh-debug-mode: close lifetime')
 
+  ctx.effect(() => () => stance.close(), 'dsh-debug-mode: stance store')
+
   ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
     const decision = await next()
     if (decision.kind === 'reject' || signal.aborted) return decision
     const sessionId = String(agent.session.id)
     const session = agent.session
-    hydrate(store, session, ingestSink(ctx, sessionId))
+    hydrate(store, session, ingestSink(ctx, sessionId), stance)
     const state = store.get(sessionId)
     if (state === undefined || state.wanted === null) return decision
     const target = state.wanted
     const narration = narrationFor(state, target, ingestSink(ctx, sessionId))
-    commitWanted(state, session)
+    commitWanted(state, session, stance)
     return narration === undefined
       ? decision
       : { ...decision, messages: [...decision.messages, narration] }
@@ -152,8 +158,8 @@ export function apply(ctx: Context): void {
       if (context.agent === undefined) return ''
       const session = context.agent.session
       const sessionId = String(session.id)
-      const state = hydrate(store, session, ingestSink(ctx, sessionId))
-      const on = state.wanted ?? loggedActive(session, state)
+      const state = hydrate(store, session, ingestSink(ctx, sessionId), stance)
+      const on = state.wanted ?? loggedActive(session, state, stance)
       return on ? DEBUG_POLICY : ''
     },
   })
@@ -166,8 +172,8 @@ export function apply(ctx: Context): void {
       const session = context.agent.session
       const sessionId = String(session.id)
       const sink = ingestSink(ctx, sessionId)
-      const state = hydrate(store, session, sink)
-      const on = state.wanted ?? loggedActive(session, state)
+      const state = hydrate(store, session, sink, stance)
+      const on = state.wanted ?? loggedActive(session, state, stance)
       return on ? formatIngestBlock(sink, state.kit) : ''
     },
   })
@@ -175,7 +181,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: COMMAND_PATH,
-    handler: (req, res) => handleCommand(ctx, store, waits, req, res),
+    handler: (req, res) => handleCommand(ctx, store, waits, stance, req, res),
   }), 'dsh-debug-mode: command route')
 
   ctx.tools.register(defineTool({
@@ -210,7 +216,7 @@ export function apply(ctx: Context): void {
     execute: async (args, exec) => {
       const agent = exec.agent
       if (agent === undefined) throw new Error(`${WAIT_FOR_REPRO} requires a calling agent`)
-      if (!isActive(store, agent.session)) {
+      if (!isActive(store, agent.session, stance)) {
         throw new Error(`${WAIT_FOR_REPRO} is only available in debug mode`)
       }
       const steps = toolString(args.steps)
@@ -297,7 +303,7 @@ export function apply(ctx: Context): void {
     execute: async (args, exec) => {
       const agent = exec.agent
       if (agent === undefined) throw new Error(`${DEBUG_LOG} requires a calling agent`)
-      if (!isActive(store, agent.session)) {
+      if (!isActive(store, agent.session, stance)) {
         throw new Error(`${DEBUG_LOG} is only available in debug mode`)
       }
       const message = toolString(args.message)
@@ -326,30 +332,30 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: STATE_PATH,
-    handler: (req, res) => handleState(ctx, store, req, res),
+    handler: (req, res) => handleState(ctx, store, stance, req, res),
   }), 'dsh-debug-mode: state route')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: LOGS_PATH,
-    handler: (req, res) => handleLogs(ctx, store, req, res),
+    handler: (req, res) => handleLogs(ctx, store, stance, req, res),
   }), 'dsh-debug-mode: logs route')
 
   ctx.effect(() => {
-    const sidecar = startIngestSidecar((req, res) => handleLogs(ctx, store, req, res))
+    const sidecar = startIngestSidecar((req, res) => handleLogs(ctx, store, stance, req, res))
     return () => sidecar.close()
   }, 'dsh-debug-mode: ingest sidecar')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: REPRO_PATH,
-    handler: (req, res) => handleRepro(ctx, store, waits, req, res),
+    handler: (req, res) => handleRepro(ctx, store, waits, stance, req, res),
   }), 'dsh-debug-mode: repro route')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: CLEAR_PATH,
-    handler: (req, res) => handleClear(ctx, store, req, res),
+    handler: (req, res) => handleClear(ctx, store, stance, req, res),
   }), 'dsh-debug-mode: clear route')
 }
 
@@ -375,22 +381,23 @@ function hydrate(
   store: Map<string, SessionDebugState>,
   session: Session,
   sink: IngestSink,
+  stance: StanceAccess,
 ): SessionDebugState {
   const state = ensureState(store, String(session.id))
-  if (sessionCanPersistDebug(session) && foldDebugActive(sessionEvents(session))) {
+  if (stance.active(String(session.id))) {
     state.active = true
   }
   if (state.active && state.kit === null) attachKit(store, session, sink)
   return state
 }
 
-function loggedActive(session: Session, state: SessionDebugState): boolean {
+function loggedActive(session: Session, state: SessionDebugState, stance: StanceAccess): boolean {
   if (state.active) return true
-  return sessionCanPersistDebug(session) && foldDebugActive(sessionEvents(session))
+  return stance.active(String(session.id))
 }
 
-function viewOf(state: SessionDebugState, session?: Session): DebugProjection {
-  const logged = session === undefined ? state.active : loggedActive(session, state)
+function viewOf(state: SessionDebugState, session?: Session, stance: StanceAccess = NO_STANCE): DebugProjection {
+  const logged = session === undefined ? state.active : loggedActive(session, state, stance)
   const active = effectiveDebugOn(state.wanted, logged)
   return {
     active,
@@ -408,14 +415,14 @@ function viewOf(state: SessionDebugState, session?: Session): DebugProjection {
   }
 }
 
-function isActive(store: Map<string, SessionDebugState>, session: Session): boolean {
+function isActive(store: Map<string, SessionDebugState>, session: Session, stance: StanceAccess): boolean {
   const state = store.get(String(session.id))
   const wanted = state?.wanted
   if (wanted !== null && wanted !== undefined) return wanted
   if (state === undefined) {
-    return sessionCanPersistDebug(session) && foldDebugActive(sessionEvents(session))
+    return stance.active(String(session.id))
   }
-  return loggedActive(session, state)
+  return loggedActive(session, state, stance)
 }
 
 function hasOpenTurn(events: readonly SessionEvent[]): boolean {
@@ -432,10 +439,11 @@ function setDebugMode(
   agent: Agent,
   active: boolean,
   sink: IngestSink,
+  stance: StanceAccess,
 ): 'committed' | 'queued' | 'cancelled' | 'noop' {
   const session = agent.session
-  const state = hydrate(store, session, sink)
-  const logged = loggedActive(session, state)
+  const state = hydrate(store, session, sink, stance)
+  const logged = loggedActive(session, state, stance)
   const target = state.wanted ?? logged
   if (active === target) return 'noop'
   if (hasOpenTurn(sessionEvents(session))) {
@@ -446,7 +454,7 @@ function setDebugMode(
     state.wanted = null
     return 'cancelled'
   }
-  commitMode(session, state, active)
+  commitMode(session, state, active, stance)
   if (active) attachKit(store, session, sink)
   const narration = narrationFor(state, active, sink)
   if (narration !== undefined) {
@@ -464,13 +472,14 @@ function runDebugSlash(
   waits: Map<string, LiveWait>,
   agent: Agent,
   rawInput: string,
+  stance: StanceAccess,
 ): { kind: 'success'; text: string } {
   const message = rawInput.trim()
   const sink = ingestSink(ctx, String(agent.session.id))
   if (message === 'off') {
     cancelWait(waits, String(agent.session.id), new Error('The user left debug mode.'))
     closeOpenWait(store, agent.session)
-    switch (setDebugMode(store, agent, false, sink)) {
+    switch (setDebugMode(store, agent, false, sink, stance)) {
       case 'committed':
         return { kind: 'success', text: 'Debug mode off.' }
       case 'queued':
@@ -478,12 +487,12 @@ function runDebugSlash(
       case 'cancelled':
         return { kind: 'success', text: 'Debug mode entry cancelled.' }
       case 'noop':
-        return isActive(store, agent.session)
+        return isActive(store, agent.session, stance)
           ? { kind: 'success', text: 'Leaving debug mode (applies from the next step).' }
           : { kind: 'success', text: 'Debug mode is already inactive.' }
     }
   }
-  const outcome = setDebugMode(store, agent, true, sink)
+  const outcome = setDebugMode(store, agent, true, sink, stance)
   attachKit(store, agent.session, sink)
   if (message !== '') {
     agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
@@ -494,10 +503,13 @@ function runDebugSlash(
   }
 }
 
-function commitMode(session: Session, state: SessionDebugState, active: boolean): void {
-  if (sessionCanPersistDebug(session)) {
-    appendDebugMode(session as unknown as IgnorableAppendSession, active)
-  }
+function commitMode(
+  session: Session,
+  state: SessionDebugState,
+  active: boolean,
+  stance: StanceAccess,
+): void {
+  stance.set(String(session.id), active)
   state.active = active
 }
 
@@ -515,14 +527,14 @@ function attachKit(
   return kit
 }
 
-function commitWanted(state: SessionDebugState, session: Session): void {
+function commitWanted(state: SessionDebugState, session: Session, stance: StanceAccess): void {
   if (state.wanted === null) return
-  const logged = loggedActive(session, state)
+  const logged = loggedActive(session, state, stance)
   if (state.wanted === logged) {
     state.wanted = null
     return
   }
-  commitMode(session, state, state.wanted)
+  commitMode(session, state, state.wanted, stance)
   state.wanted = null
   state.toldActive = state.active
 }
@@ -642,11 +654,12 @@ function beginRun(
 function activeDebugSessionIds(
   ctx: Context,
   store: Map<string, SessionDebugState>,
+  stance: StanceAccess,
 ): string[] {
   const ids: string[] = []
   for (const [sessionId] of store) {
     const session = ctx.sessions.get(sessionId as never)
-    if (session !== undefined && isActive(store, session)) ids.push(sessionId)
+    if (session !== undefined && isActive(store, session, stance)) ids.push(sessionId)
   }
   return ids
 }
@@ -687,6 +700,7 @@ function renderReproResult(value: ReproResult): string {
 function handleState(
   ctx: Context,
   store: Map<string, SessionDebugState>,
+  stance: StanceAccess,
   req: IncomingMessage,
   res: ServerResponse,
 ): void {
@@ -706,8 +720,8 @@ function handleState(
     json(res, 200, { ok: true, value: state === undefined ? EMPTY_VIEW : viewOf(state) })
     return
   }
-  const state = hydrate(store, session, ingestSink(ctx, sessionId))
-  json(res, 200, { ok: true, value: viewOf(state, session) })
+  const state = hydrate(store, session, ingestSink(ctx, sessionId), stance)
+  json(res, 200, { ok: true, value: viewOf(state, session, stance) })
 }
 
 function logsJson(
@@ -723,11 +737,12 @@ function logsJson(
 async function handleLogs(
   ctx: Context,
   store: Map<string, SessionDebugState>,
+  stance: StanceAccess,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
-  const activeIds = activeDebugSessionIds(ctx, store)
+  const activeIds = activeDebugSessionIds(ctx, store, stance)
   if (req.method === 'OPTIONS') {
     res.writeHead(204, corsHeaders(origin))
     res.end()
@@ -771,8 +786,8 @@ async function handleLogs(
     logsJson(req, res, 404, { ok: false, message: 'session not found' })
     return
   }
-  hydrate(store, session, ingestSink(ctx, sessionId))
-  if (!isActive(store, session)) {
+  hydrate(store, session, ingestSink(ctx, sessionId), stance)
+  if (!isActive(store, session, stance)) {
     logsJson(req, res, 409, { ok: false, message: 'debug mode is not active' })
     return
   }
@@ -789,6 +804,7 @@ async function handleCommand(
   ctx: Context,
   store: Map<string, SessionDebugState>,
   waits: Map<string, LiveWait>,
+  stance: StanceAccess,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -819,12 +835,13 @@ async function handleCommand(
     json(res, 404, { ok: false, message: 'session not found' })
     return
   }
-  json(res, 200, { ok: true, value: runDebugSlash(ctx, store, waits, agent, rawInput).text })
+  json(res, 200, { ok: true, value: runDebugSlash(ctx, store, waits, agent, rawInput, stance).text })
 }
 
 async function handleClear(
   ctx: Context,
   store: Map<string, SessionDebugState>,
+  stance: StanceAccess,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -855,8 +872,8 @@ async function handleClear(
     json(res, 404, { ok: false, message: 'session not found' })
     return
   }
-  hydrate(store, session, ingestSink(ctx, sessionId))
-  if (!isActive(store, session)) {
+  hydrate(store, session, ingestSink(ctx, sessionId), stance)
+  if (!isActive(store, session, stance)) {
     json(res, 409, { ok: false, message: 'debug mode is not active' })
     return
   }
@@ -868,6 +885,7 @@ async function handleRepro(
   ctx: Context,
   store: Map<string, SessionDebugState>,
   waits: Map<string, LiveWait>,
+  stance: StanceAccess,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {

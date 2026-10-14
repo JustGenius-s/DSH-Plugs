@@ -353,6 +353,9 @@ importers:
       '@just-genius/dsh-plugin-runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@just-genius/dsh-plugin-ui':
         specifier: workspace:*

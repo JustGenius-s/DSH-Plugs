@@ -48,7 +48,8 @@
     "clean": "rm -rf lib"
   },
   "dependencies": {
-    "@just-genius/dsh-plugin-runtime": "workspace:*"
+    "@just-genius/dsh-plugin-runtime": "workspace:*",
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "react": "^18.2.0",

@@ -6,9 +6,20 @@ This is the human-in-the-loop shell. Evidence lives in **runs**, not one wipeabl
 
 ## Persistence
 
-On DSH 0.1.6+ (hosts whose `Session.append` accepts `{ ignorable: true }`), `/debug` appends a log-only `debug/mode` event. Reload / reopen folds that event, so the chip, policy, and kit come back without typing `/debug` again. Pending `wanted` switches, the open wait, run archives, and hypothesis status stay process-local.
+`/debug` records the session's stance in the `debug_stance` storage domain (`ctx.storageDomain`, one record per session id — `$DSH_HOME/storages`). Reload / reopen reads it back, so the chip, policy, and kit come back without typing `/debug` again. Pending `wanted` switches, the open wait, run archives, and hypothesis status stay process-local.
 
-Older hosts cannot mark plugin events ignorable without poisoning the session log. There the stance stays in process memory only.
+The session log is **never** written. An earlier build appended a log-only `debug/mode` event with `{ ignorable: true }`, but no shipped `Session.append` accepts that option — it reads only `surfaceOp` and `sourceEventSeqs` — so the marker was silently dropped and the record landed as an *unknown, non-ignorable* event. A reader that meets one must refuse the whole log:
+
+```text
+SessionFormatUnsupportedError: … contains event type "debug/mode" (seq …)
+unknown to this harness and not marked ignorable; refusing to interpret the log
+```
+
+Logs written by that build stay unloadable until the `debug/mode` record is removed; nothing in this plugin does that rewriting for you.
+
+A host whose storage hub cannot serve the domain (unroutable backend, version mismatch) logs a warning and keeps the stance in process memory only.
+
+`.dsh/debug/debug.log` is the **live** run. `wait_for_repro` archives it to `.dsh/debug/debug.<runId>.log` (first wait `pre-fix`, next `post-fix`) and starts a new live file. Clear empties the live dock only — archived runs stay. Cleared is never proof of a fix.
 
 `.dsh/debug/debug.log` is the **live** run. `wait_for_repro` archives it to `.dsh/debug/debug.<runId>.log` (first wait `pre-fix`, next `post-fix`) and starts a new live file. Clear empties the live dock only — archived runs stay. Cleared is never proof of a fix.
 
@@ -26,7 +37,7 @@ Older hosts cannot mark plugin events ignorable without poisoning the session lo
 
 | Half | Source | Role |
 | --- | --- | --- |
-| host | `src/index.ts`, `src/policy.ts`, `src/kit.ts`, `src/persist.ts`, `src/runs.ts`, `src/dedup.ts`, `src/hypotheses.ts` | Mode fold; run archive; ingest fold; `wait_for_repro` / `debug_log` |
+| host | `src/index.ts`, `src/policy.ts`, `src/kit.ts`, `src/stance-store.ts`, `src/runs.ts`, `src/dedup.ts`, `src/hypotheses.ts` | Mode fold; run archive; ingest fold; `wait_for_repro` / `debug_log` |
 | client | `src/client/*` | Chip + dock poll `/dsh-debug-mode/state`; styles via CSS Modules |
 | shared | `src/shared.ts`, `src/types.ts` | Paths and payload types shared by both halves |
 
