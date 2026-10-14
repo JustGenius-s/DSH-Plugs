@@ -6,30 +6,152 @@ window.__ModuleLoader__.load({
     let primitives = null
     try { primitives = require('@deepseek-ai/dsh-client-ui-primitives') } catch { primitives = null }
     const module = { exports: {} }
-    // Card state-machine inputs. DSH already carries every signal on its
-    // session summary: `running` (the agent is working), `pendingInteraction`
-    // (blocked on a human — approval / plan-review / question, which is the
-    // sidebar's amber dot), and `completed` (finished while not selected, the
-    // green done reminder).
-    const statusOf = session => ({
-      running: session.running === true,
-      pendingInteraction: typeof session.pendingInteraction === 'string' ? session.pendingInteraction : null,
-      completed: session.completed === true,
-      blank: session.blank === true,
-    })
+    // Card state-machine inputs. DSH 0.1.6 moved the live signals off the
+    // list summary onto `uiSession.sessionStatus` (a Map keyed by session id):
+    // `running` (the agent is working), `pendingInteraction` (blocked on a
+    // human — an object whose `kind` is approval / plan-review / question,
+    // which is the sidebar's amber dot), and `completionUnread` (finished
+    // while not selected, the green done reminder). Pre-0.1.6 hosts carried
+    // `pendingInteraction` (string) and `completed` on the summary itself, so
+    // both shapes are read here.
+    const statusOf = (ctx, id, session) => {
+      const status = ctx.uiSession?.sessionStatus?.getSnapshot?.()?.get?.(id)
+      const pending = status?.pendingInteraction
+      return {
+        running: status?.running === true || session.running === true,
+        pendingInteraction: typeof pending === 'string' ? pending
+          : typeof pending?.kind === 'string' ? pending.kind
+          : (typeof session.pendingInteraction === 'string' ? session.pendingInteraction : null),
+        completed: status?.completionUnread === true || session.completed === true,
+        blank: session.blank === true,
+      }
+    }
+    // DSH 0.1.6 dropped `current` from the sessions-list snapshot; the
+    // main-view session is projected onto `uiSession.current` (its `key` is
+    // the session id). Fall back to the pre-0.1.6 list field on older hosts.
+    const currentSessionIdOf = ctx => {
+      const fromUi = ctx.uiSession?.current?.getSnapshot?.()?.key
+      if (typeof fromUi === 'string' && fromUi !== '') return fromUi
+      return ctx.sessions.list.getSnapshot().current
+    }
     const currentSession = ctx => {
       const snapshot = ctx.sessions.list.getSnapshot()
-      const id = snapshot.current
+      const id = currentSessionIdOf(ctx)
       if (id === undefined) return null
       const session = snapshot.byId[id]
-      return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, ...statusOf(session) }
+      return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, ...statusOf(ctx, id, session) }
     }
     const sessionSnapshot = ctx => {
       const snapshot = ctx.sessions.list.getSnapshot()
       return snapshot.ids.map(id => {
         const session = snapshot.byId[id]
-        return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, blank: session.blank, ...statusOf(session) }
+        return session === undefined ? null : { id, title: session.displayTitle, cwd: session.cwd ?? null, parentId: session.parentId ?? null, blank: session.blank, ...statusOf(ctx, id, session) }
       }).filter(Boolean)
+    }
+    const SESSION_SYNC_MAX_BYTES = 24 * 1024
+    function sessionSyncBatches(sessions, removedSessionIds, maxBytes = SESSION_SYNC_MAX_BYTES) {
+      const encoder = new TextEncoder()
+      const empty = () => ({ sessions: [], removedSessionIds: [] })
+      const baseBytes = encoder.encode(JSON.stringify(empty())).length
+      const batches = []
+      let batch = empty()
+      let bytes = baseBytes
+      const append = (field, value) => {
+        const size = encoder.encode(JSON.stringify(value)).length
+        if (baseBytes + size > maxBytes) throw new Error('Synapse session metadata exceeds the sync request limit')
+        const added = size + (batch[field].length > 0 ? 1 : 0)
+        if (bytes + added > maxBytes) {
+          batches.push(batch)
+          batch = empty()
+          bytes = baseBytes
+        }
+        bytes += size + (batch[field].length > 0 ? 1 : 0)
+        batch[field].push(value)
+      }
+      for (const session of sessions) append('sessions', session)
+      for (const id of removedSessionIds) append('removedSessionIds', id)
+      if (bytes > baseBytes) batches.push(batch)
+      return batches
+    }
+    function createSessionSync(readSnapshot, options = {}) {
+      const send = options.send ?? ((path, init) => fetch(path, init))
+      const schedule = options.setTimeout ?? setTimeout
+      const cancel = options.clearTimeout ?? clearTimeout
+      const report = options.onError ?? (error => console.warn('[dsh-synapse] session sync failed', error))
+      const known = new Map()
+      const controller = new AbortController()
+      let timer = null
+      let running = false
+      let dirty = false
+      let disposed = false
+      let retryDelay = 2000
+      const queue = (delay = 150) => {
+        if (disposed || running || timer !== null) return
+        timer = schedule(() => { timer = null; void flush() }, delay)
+      }
+      const flush = async () => {
+        if (disposed) return
+        running = true
+        dirty = false
+        let failed = false
+        try {
+          // Status ticks still update the canvas, but only persistent metadata
+          // belongs in the Host sync. Commit each batch only after its ACK.
+          const snapshot = new Map(readSnapshot().map(session => {
+            const { id, title, cwd, parentId, blank } = session
+            return [id, JSON.stringify({ id, title, cwd, parentId, blank })]
+          }))
+          const changed = [...snapshot].filter(([id, value]) => known.get(id) !== value).map(([, value]) => JSON.parse(value))
+          const removed = [...known.keys()].filter(id => !snapshot.has(id))
+          for (const batch of sessionSyncBatches(changed, removed)) {
+            if (disposed) break
+            const response = await send('/synapse/api/sessions/sync', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(batch),
+              signal: controller.signal,
+            })
+            await response.text()
+            if (disposed) break
+            if (!response.ok) throw new Error(`Synapse session sync: HTTP ${response.status}`)
+            for (const session of batch.sessions) known.set(session.id, snapshot.get(session.id))
+            for (const id of batch.removedSessionIds) known.delete(id)
+          }
+          retryDelay = 2000
+        } catch (error) {
+          failed = true
+          dirty = true
+          if (!disposed) report(error)
+        } finally {
+          running = false
+          if (dirty && !disposed) {
+            queue(failed ? retryDelay : 150)
+            if (failed) retryDelay = Math.min(retryDelay * 2, 30_000)
+          }
+        }
+      }
+      return {
+        schedule() {
+          if (disposed) return
+          dirty = true
+          queue()
+        },
+        dispose() {
+          disposed = true
+          controller.abort()
+          if (timer !== null) cancel(timer)
+          timer = null
+        },
+      }
+    }
+    // DSH 0.1.6 removed `sessions.open`: selecting a session is retaining it
+    // as the main view, exposed as `uiWorkspace.openSession`. Older hosts keep
+    // `sessions.open`; neither present means the session is genuinely gone.
+    const openDshSession = (ctx, sessionId) => {
+      const uiWorkspace = ctx.uiWorkspace ?? (typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined)
+      if (typeof uiWorkspace?.openSession === 'function') return uiWorkspace.openSession(sessionId)
+      if (typeof ctx.sessions.open === 'function') return ctx.sessions.open(sessionId)
+      throw new Error('关联的会话已不可用')
     }
     const rootIdsOf = (sessions, ids) => ids.filter(id => sessions.byId[id]?.parentId == null)
     const workspaceSnapshot = ctx => {
@@ -1049,7 +1171,7 @@ window.__ModuleLoader__.load({
       React.useEffect(() => subscribeWatchedSession(
         props.ctx, props.watch.sessionId, () => setLiveTick(value => value + 1), props.uiConversation,
       ), [props.ctx, props.watch.sessionId, props.uiConversation])
-      const currentSessionId = props.ctx.sessions.list.getSnapshot().current
+      const currentSessionId = currentSessionIdOf(props.ctx)
       const source = turnPaneSource(
         props.watch.sessionId,
         currentSessionId,
@@ -1149,7 +1271,12 @@ window.__ModuleLoader__.load({
     // Host chrome hidden while the map is the active session view: the codex
     // message rail and the right-side terminal/files panels. They are portalled
     // into <body> by that plugin, so they are addressed by its own class names.
-    const CHROME_HIDE_SELECTORS = ['.dsh-codex-nav-rail', '.dsh-side-panels', '.dsh-side-panels-launcher', '[data-width-handle]']
+    // The sticky question pin and its image preview belong to that same family:
+    // both are <body> portals, so hiding an ancestor in the conversation tree
+    // cannot reach them — they float over the canvas on their own z-index. The
+    // pin stays mounted here because 详情 keeps the host chat alive, it just
+    // must not paint.
+    const CHROME_HIDE_SELECTORS = ['.dsh-codex-nav-rail', '.dsh-side-panels', '.dsh-side-panels-launcher', '[data-width-handle]', '.dsh-codex-sticky-pin', '.dsh-codex-sticky-preview']
     const CHROME_HIDE_CLASS = 'dsh-synapse-chrome-hidden'
     // The map has its own composer inside the canvas, so DSH's dock is removed
     // outright: display:none (unlike the panels above) reclaims its space.
@@ -1592,7 +1719,9 @@ window.__ModuleLoader__.load({
       doc.body.append(script)
     }
 
-    module.exports.inject = ['sessions', 'workspaces', 'slots']
+    // uiSession/uiWorkspace are 0.1.6's homes for the current-session binding
+    // and session switching; both ship with the web profile's core bundles.
+    module.exports.inject = ['sessions', 'workspaces', 'slots', 'uiSession', 'uiWorkspace']
     module.exports.apply = ctx => {
       const runOperation = createOperationRunner()
       // The live iframe element, present only while the map view is mounted.
@@ -1650,8 +1779,7 @@ window.__ModuleLoader__.load({
         SIDECHAT_TURN_CSS,
       ].join('\n')
       const send = (type, payload) => { frame?.contentWindow?.postMessage({ source: 'dsh-synapse', type, ...payload }, location.origin) }
-      let syncQueued = false
-      let knownSessionIds = new Set()
+      let sessionSync = null
       const liveUnsubscribers = new Map()
       const syncLiveSessions = () => {
         const snapshot = ctx.sessions.list.getSnapshot()
@@ -1673,18 +1801,7 @@ window.__ModuleLoader__.load({
         }
         for (const [id, unsubscribe] of liveUnsubscribers) if (!snapshot.ids.includes(id)) { unsubscribe(); liveUnsubscribers.delete(id) }
       }
-      const syncSessions = () => {
-        if (syncQueued) return
-        syncQueued = true
-        queueMicrotask(() => {
-          syncQueued = false
-          const sessions = sessionSnapshot(ctx)
-          const sessionIds = new Set(sessions.map(session => session.id))
-          const removedSessionIds = [...knownSessionIds].filter(id => !sessionIds.has(id))
-          knownSessionIds = sessionIds
-          void fetch('/synapse/api/sessions/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessions, removedSessionIds }) }).catch(() => {})
-        })
-      }
+      const syncSessions = () => sessionSync?.schedule()
       const syncTheme = () => {
         const dark = document.body?.hasAttribute?.('data-ds-dark-theme') === true
         send('synapse:theme', { dark })
@@ -1718,7 +1835,7 @@ window.__ModuleLoader__.load({
           return send('synapse:current-session', { session: currentSession(ctx) })
         }
         if (event.data.type === 'synapse:open-session') {
-          try { ctx.sessions.open(event.data.sessionId); switchToDialogTab() } catch { send('synapse:bridge-error', { message: '关联的会话已不可用' }) }
+          try { openDshSession(ctx, event.data.sessionId); switchToDialogTab() } catch { send('synapse:bridge-error', { message: '关联的会话已不可用' }) }
           // Best-effort anchor to the requested turn: chat nodes expose their
           // source event seq (anchorSeq) and render with data-chat-anchor-key,
           // so resolve seq -> node key -> scroll once the view materializes.
@@ -1779,7 +1896,7 @@ window.__ModuleLoader__.load({
           // Bidirectional current-session sync: switch DSH's current session
           // without leaving the map; the sessions-list subscription re-sends
           // synapse:current-session so the map follows the new highlight.
-          try { ctx.sessions.open(event.data.sessionId) } catch { send('synapse:bridge-error', { message: '关联的会话已不可用' }) }
+          try { openDshSession(ctx, event.data.sessionId) } catch { send('synapse:bridge-error', { message: '关联的会话已不可用' }) }
           return
         }
         if (event.data.type === 'synapse:fork-session') {
@@ -1864,18 +1981,28 @@ window.__ModuleLoader__.load({
         ? null
         : new MutationObserver(() => syncTheme())
       function installMapBridge() {
+        const sync = createSessionSync(() => sessionSnapshot(ctx))
+        sessionSync = sync
         document.head.append(style)
         if (themeObserver !== null && document.body) {
           themeObserver.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] })
         }
         const unsubscribeSessions = ctx.sessions.list.subscribe(syncCurrentSession)
         const unsubscribeWorkspaces = ctx.workspaces.list.subscribe(syncCurrentSession)
+        // 0.1.6: the current session lives on uiSession.current and card
+        // states on uiSession.sessionStatus; list ticks still cover both via
+        // retention projection, but subscribe directly so a switch that
+        // touches nothing else still syncs the map.
+        const unsubscribeCurrent = ctx.uiSession?.current?.subscribe?.(syncCurrentSession) ?? (() => {})
+        const unsubscribeStatus = ctx.uiSession?.sessionStatus?.subscribe?.(syncCurrentSession) ?? (() => {})
         window.addEventListener('message', onMessage)
         window.addEventListener('keydown', onKeyDown)
         window.addEventListener('keydown', onSpaceDown)
         window.addEventListener('keyup', onSpaceUp)
         if (frame !== null) syncCurrentSession()
         return () => {
+          sync.dispose()
+          if (sessionSync === sync) sessionSync = null
           window.removeEventListener('message', onMessage)
           window.removeEventListener('keydown', onKeyDown)
           window.removeEventListener('keydown', onSpaceDown)
@@ -1883,6 +2010,8 @@ window.__ModuleLoader__.load({
           themeObserver?.disconnect()
           unsubscribeSessions()
           unsubscribeWorkspaces()
+          unsubscribeCurrent()
+          unsubscribeStatus()
           for (const unsubscribe of liveUnsubscribers.values()) unsubscribe()
           liveUnsubscribers.clear()
           style.remove()
@@ -1915,7 +2044,7 @@ window.__ModuleLoader__.load({
         }, [])
         const openTurnInDialog = () => {
           if (watch === null) return
-          try { ctx.sessions.open(watch.sessionId); switchToDialogTab() } catch { send('synapse:bridge-error', { message: '关联的会话已不可用' }) }
+          try { openDshSession(ctx, watch.sessionId); switchToDialogTab() } catch { send('synapse:bridge-error', { message: '关联的会话已不可用' }) }
           const seq = watch.seq
           if (!Number.isInteger(seq)) return
           const tryScroll = attempt => {

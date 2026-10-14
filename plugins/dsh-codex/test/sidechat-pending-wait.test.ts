@@ -1,8 +1,6 @@
 /**
- * A side chat's approval and ask_user_question takeovers read DSH 0.1.5's
- * session-keyed pending-interaction store — not the old `snapshot.pending`
- * array, which 0.1.5 removed. Reading the removed field is why every approval
- * and question in a side chat rendered nothing: the composer never saw a wait.
+ * A side chat's approval and ask_user_question takeovers read the current
+ * `uiSession.sessionStatus` rows and their `pendingInteraction` values.
  *
  * These tests pin the recognition rules that decide whether a wait is shown at
  * all, and the answer verbs the cards call — a wait that renders but answers
@@ -30,20 +28,20 @@ function carrier(extra: Record<string, unknown> = {}): SideChatWaitLike {
   } as unknown as SideChatWaitLike
 }
 
-function storeOf(entries: [string, SideChatWaitLike][] = []): PendingInteractionsFace {
+function storeOf(entries: [string, SideChatWaitLike | { pendingInteraction?: SideChatWaitLike }][] = []): PendingInteractionsFace {
   const listeners = new Set<() => void>()
-  let map: ReadonlyMap<string, SideChatWaitLike> = new Map(entries)
+  let map: ReadonlyMap<string, SideChatWaitLike | { pendingInteraction?: SideChatWaitLike }> = new Map(entries)
   return {
     getSnapshot: () => map,
     subscribe: (fn) => {
       listeners.add(fn)
       return () => listeners.delete(fn)
     },
-    replace(next: ReadonlyMap<string, SideChatWaitLike>) {
+    replace(next: ReadonlyMap<string, SideChatWaitLike | { pendingInteraction?: SideChatWaitLike }>) {
       map = next
       for (const listener of [...listeners]) listener()
     },
-  } as PendingInteractionsFace & { replace(next: ReadonlyMap<string, SideChatWaitLike>): void }
+  } as PendingInteractionsFace & { replace(next: ReadonlyMap<string, SideChatWaitLike | { pendingInteraction?: SideChatWaitLike }>): void }
 }
 
 describe('waitKindOf', () => {
@@ -61,8 +59,9 @@ describe('waitKindOf', () => {
 })
 
 describe('isAnswerableWait', () => {
-  it('recognizes a carrier carrying both answer verbs', () => {
-    expect(isAnswerableWait(carrier())).toBe(true)
+  it('recognizes an approval with answer and a question with answer and cancel', () => {
+    expect(isAnswerableWait({ kind: 'approval', answer: vi.fn() })).toBe(true)
+    expect(isAnswerableWait(carrier({ kind: 'question' }))).toBe(true)
   })
 
   it('rejects a value that would fail at click time', () => {
@@ -72,6 +71,7 @@ describe('isAnswerableWait', () => {
     expect(isAnswerableWait({ kind: 'approval' })).toBe(false)
     expect(isAnswerableWait({ answer: () => {} })).toBe(false)
     expect(isAnswerableWait({ cancel: () => {} })).toBe(false)
+    expect(isAnswerableWait({ kind: 'question', answer: () => {} })).toBe(false)
   })
 })
 
@@ -144,8 +144,14 @@ describe('recognizeWait', () => {
 describe('pendingWaitOf', () => {
   it('returns the wait pending for the side chat’s own session', () => {
     const wait = carrier({ kind: 'approval', key: 'a:1', sessionId: 'side-1' })
-    const store = storeOf([['side-1', wait]])
+    const store = storeOf([['side-1', { pendingInteraction: wait }]])
     expect(pendingWaitOf(store, 'side-1')?.key).toBe('a:1')
+  })
+
+  it('recognizes an approval that exposes answer without cancel', () => {
+    const wait = { kind: 'approval', key: 'a:2', sessionId: 'side-1', answer: vi.fn() }
+    const store = storeOf([['side-1', { pendingInteraction: wait }]])
+    expect(pendingWaitOf(store, 'side-1')?.wait).toBe(wait)
   })
 
   it('never shows another session’s wait', () => {
@@ -176,7 +182,7 @@ describe('pendingWaitOf', () => {
 describe('rawPendingOf', () => {
   it('returns the carrier itself so a uSES snapshot stays referentially stable', () => {
     const wait = carrier({ kind: 'approval', key: 'a:1', sessionId: 'side-1' })
-    const store = storeOf([['side-1', wait]])
+    const store = storeOf([['side-1', { pendingInteraction: wait }]])
     // Identity matters: building a view here would re-render forever.
     expect(rawPendingOf(store, 'side-1')).toBe(wait)
     expect(rawPendingOf(store, 'side-1')).toBe(rawPendingOf(store, 'side-1'))
@@ -184,15 +190,22 @@ describe('rawPendingOf', () => {
 
   it('returns undefined when nothing is pending', () => {
     expect(rawPendingOf(storeOf(), 'side-1')).toBeUndefined()
+    expect(rawPendingOf(storeOf([['side-1', { pendingInteraction: undefined }]]), 'side-1')).toBeUndefined()
     expect(rawPendingOf(undefined, 'side-1')).toBeUndefined()
   })
 })
 
 describe('pendingInteractionsOf', () => {
-  it('resolves the store off a context carrying uiSession', () => {
+  it('resolves the current session-status store off uiSession', () => {
     const store = storeOf()
-    const ctx = { get: (name: string) => (name === 'uiSession' ? { pendingInteractions: store } : undefined) }
+    const ctx = { get: (name: string) => (name === 'uiSession' ? { sessionStatus: store } : undefined) }
     expect(pendingInteractionsOf(ctx)).toBe(store)
+  })
+
+  it('accepts the older direct pending-interaction store', () => {
+    const store = storeOf([['side-1', carrier({ kind: 'approval', key: 'old' })]])
+    expect(pendingInteractionsOf({ uiSession: { pendingInteractions: store } })).toBe(store)
+    expect(rawPendingOf(store, 'side-1')?.key).toBe('old')
   })
 
   it('returns undefined when the service is absent', () => {

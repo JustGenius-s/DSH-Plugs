@@ -2,8 +2,8 @@
 
 Two client-only extras on top of `dsh-notification`:
 
-1. **Jump** — click a system banner tagged `dsh-notification-<sessionId>` to focus the window **and** `sessions.open` that session. `dsh-notification`'s own `onclick` only calls `window.focus()`.
-2. **Pending waits** — when a listed session enters `approval`, `question` (ask), or `plan-review`, show a system notification (same tag, so click still jumps). First list snapshot and reconnect replay seed the baseline and do not fire.
+1. **Jump** — click a system banner tagged `dsh-notification-<sessionId>` to focus the window and navigate with `uiWorkspace.openSession`. `dsh-notification`'s own `onclick` only calls `window.focus()`.
+2. **Pending waits** — when a listed session enters `approval`, `question` (ask), or `plan-review`, read the wait from `uiSession.sessionStatus` and show a system notification (same tag, so click still jumps). First observation and reconnect replay seed the baseline and do not fire.
 
 Settings-page test pings (`dsh-notification-test`) do not jump. Subagent rows are skipped. No banner while you are already looking at that session with the page visible.
 

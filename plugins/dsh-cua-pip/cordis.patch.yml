@@ -1,0 +1,9 @@
+# Bundle patch for @just-genius/dsh-cua-pip.
+#
+# Host half owns the per-session window watchers, Cua activity, and the
+# /cua-pip/* routes (windows, watch, frame, focus, activity, overlay page).
+# Agents explicitly open PiP with computer_pip; Cua calls update an open preview.
+
+- insert:
+    - id: dsh-cua-pip
+      name: '@just-genius/dsh-cua-pip'

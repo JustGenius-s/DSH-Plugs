@@ -369,6 +369,7 @@ export async function openSession(
       argv: [shell, '-l'],
       cwd,
       env: { TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+      terminalType: 'xterm-256color',
       rows,
       cols,
       graceMs: 3000,

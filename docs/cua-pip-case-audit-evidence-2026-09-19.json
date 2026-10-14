@@ -1,0 +1,67 @@
+{
+  "verifiedAt": "2026-09-19T18:16:41.901462+08:00",
+  "host": "http://127.0.0.1:53649",
+  "sourceLog": "/Users/jiahaoqian/Downloads/后台启动秒表并定时关闭.md",
+  "turns": [
+    {
+      "userAt": "2026-09-19T06:23:30.067Z",
+      "calls": 20,
+      "failed": 4,
+      "clicks": 4,
+      "menus": 0
+    },
+    {
+      "userAt": "2026-09-19T06:37:27.966Z",
+      "calls": 26,
+      "failed": 2,
+      "clicks": 0,
+      "menus": 0
+    },
+    {
+      "userAt": "2026-09-19T07:09:02.476Z",
+      "calls": 32,
+      "failed": 0,
+      "clicks": 1,
+      "menus": 0
+    },
+    {
+      "userAt": "2026-09-19T08:58:48.564Z",
+      "calls": 130,
+      "failed": 7,
+      "clicks": 31,
+      "menus": 13
+    }
+  ],
+  "runtimeChecks": [
+    {
+      "path": "/cua-pip/health",
+      "status": 200,
+      "allow": null,
+      "body": {
+        "runtimeVersion": "2026-09-19-observation-stream-v2",
+        "capture": "window-zoom-observation",
+        "transport": "sse",
+        "actionBindings": "structured-context",
+        "resize": true,
+        "foregroundFpsLimit": 5
+      }
+    },
+    {
+      "path": "/cua-pip/resize",
+      "status": 405,
+      "allow": "POST",
+      "body": {
+        "error": "method not allowed; use POST"
+      }
+    },
+    {
+      "path": "/cua-pip/stream",
+      "status": 405,
+      "allow": "GET",
+      "body": {
+        "error": "method not allowed; use GET"
+      }
+    }
+  ],
+  "scope": "Read-only live host route checks. Does not establish Clock acceptance or frontend rendering."
+}

@@ -1,7 +1,12 @@
 import { readFile, readdir } from 'node:fs/promises'
+import { dsh012PlatformSeeds } from '../packages/ui/client-bundle-deps.mjs'
 
 const errors = []
-const platformSeeds = new Set(['react', 'react-dom'])
+// Single-source the seed list with the bundler config that decides what gets
+// inlined. Hardcoding it here let the two drift: the list said primitives is
+// host-seeded while this gate still demanded every plugin declare it as an
+// injectable module, so eight plugins failed on a require that is correct.
+const platformSeeds = new Set(dsh012PlatformSeeds.map(packageNameOf))
 const plugins = await readdir(new URL('../plugins/', import.meta.url), { withFileTypes: true })
 const requested = new Set(process.argv.slice(2))
 

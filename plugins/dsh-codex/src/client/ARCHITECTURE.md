@@ -39,6 +39,14 @@ registry and keyed body/title slots. Side Chat, Terminal and Git register tab
 types; they must not recreate layout, tabs, launchers, persistence or close
 chrome.
 
+The `officialTerminalDisabled` setting uses the same registry from the other
+side: an `extension` definition with the built-in `terminal` kind, no patterns
+and no guide entries shadows the official type, so its guide capsule vanishes
+and its tabs resolve to a body that closes them on mount (the official close
+handler releases the PTY). Inactive tabs mount no body, so the feature also
+sweeps the controller's cross-session tab inventory through
+`closeSidebarTabsByKind` for as long as the setting is on.
+
 DockSurface only renders the active body in each docked pane. Every custom body
 therefore uses `sidebar-tab-keep-alive.tsx`: the slot body is a disposable
 holder, while the real React root and its DOM stay alive under a key composed

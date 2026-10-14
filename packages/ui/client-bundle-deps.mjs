@@ -1,6 +1,7 @@
 /**
- * Client-bundle deps that must be inlined. DSH 0.1.2-alpha+ only seeds
- * react, react-dom, cordis, dsh-client-store, ui-slots, and ui-primitives.
+ * Client-bundle deps that must be inlined. DSH seeds exactly the packages in
+ * `dsh012PlatformSeeds` below — read that list, not this prose, as the source
+ * of truth; it mirrors the web frontend's `staticModules` table.
  */
 export const pluginClientAlwaysBundle = [
   '@just-genius/dsh-plugin-ui',
@@ -29,6 +30,7 @@ export const dsh012PlatformSeeds = [
   '@deepseek-ai/dsh-client-store',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-dockkit',
 ]
 
 /** Inline every non-seed, non-official package. Use with `neverBundle: true`. */

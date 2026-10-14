@@ -10,7 +10,7 @@
 
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync, realpathSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -202,4 +202,59 @@ test('the selected primary must be one of the validated folders', () => {
     primaryPath: other,
     repos: [{ name: 'listed', path: listed }],
   }), /primary folder must be listed/)
+})
+
+test('pruning drops bindings whose workspace is gone', () => {
+  const alpha = fixture('alpha')
+  const beta = fixture('beta')
+  const gamma = fixture('gamma')
+  store.bindBinding({ root: alpha, repos: [{ name: 'alpha', path: alpha }, { name: 'beta', path: beta }] })
+  store.bindBinding({ root: gamma, repos: [{ name: 'gamma', path: gamma }] })
+
+  const removed = store.pruneBindings([alpha])
+  assert.deepEqual(removed.map((b) => b.root), [gamma])
+  assert.deepEqual(store.listBindings().map((b) => b.root), [alpha])
+})
+
+test('an EMPTY live list prunes nothing', () => {
+  // The live set comes from a client snapshot, where empty means "not connected
+  // yet", NOT "every workspace was deleted". Treating it as the latter would
+  // wipe the user's bindings on any startup or reconnect race.
+  const alpha = fixture('alpha')
+  const beta = fixture('beta')
+  store.bindBinding({ root: alpha, repos: [{ name: 'alpha', path: alpha }, { name: 'beta', path: beta }] })
+
+  assert.deepEqual(store.pruneBindings([]), [])
+  assert.equal(store.listBindings().length, 1)
+})
+
+test('pruning keeps a binding whose workspace is live, and reports no change', () => {
+  const alpha = fixture('alpha')
+  const beta = fixture('beta')
+  store.bindBinding({ root: alpha, repos: [{ name: 'alpha', path: alpha }, { name: 'beta', path: beta }] })
+
+  assert.deepEqual(store.pruneBindings([alpha]), [])
+  assert.equal(store.listBindings().length, 1)
+})
+
+test('pruning matches by realpath, so a symlinked spelling still counts as live', () => {
+  // The official row holds the realpath of the directory while a binding may
+  // hold the path the operator typed (or a symlink); comparing raw strings would
+  // see two different folders and delete a binding that is actually live.
+  const alpha = fixture('alpha')
+  store.bindBinding({ root: alpha, repos: [{ name: 'alpha', path: alpha }] })
+
+  const link = join(home, 'fixtures', 'alpha-link')
+  symlinkSync(alpha, link)
+  assert.deepEqual(store.pruneBindings([link]), [])
+  assert.equal(store.listBindings().length, 1)
+})
+
+test('pruning is idempotent', () => {
+  const alpha = fixture('alpha')
+  const gamma = fixture('gamma')
+  store.bindBinding({ root: alpha, repos: [{ name: 'alpha', path: alpha }] })
+  store.bindBinding({ root: gamma, repos: [{ name: 'gamma', path: gamma }] })
+  assert.equal(store.pruneBindings([alpha]).length, 1)
+  assert.deepEqual(store.pruneBindings([alpha]), [])
 })

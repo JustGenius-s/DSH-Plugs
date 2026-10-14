@@ -15,7 +15,6 @@ export const name = 'dsh-codex'
 export const inject = [
   HOST_SERVICES.subprocess,
   HOST_SERVICES.webServer,
-  HOST_SERVICES.settings,
   HOST_SERVICES.llm,
   HOST_SERVICES.agentDefaultModel,
   HOST_SERVICES.fs,
@@ -23,6 +22,7 @@ export const inject = [
   HOST_SERVICES.sessions,
   HOST_SERVICES.agentPresets,
   HOST_SERVICES.commands,
+  HOST_SERVICES.tools,
 ] as const
 
 export function apply(ctx: Context, config?: CodexConfigInput): void {

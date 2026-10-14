@@ -46,10 +46,16 @@ type StyleTag = {
  * an empty head and re-injects, which is what happens in a real reload.
  */
 function loadInBrowserScope() {
+  // Browser-only seeds the bundle may legitimately require. React and
+  // react-dom are loaded for real (their `process.env` read happens here, in
+  // the normal scope); the DSH-seeded packages are stubbed because Node cannot
+  // evaluate their `.css` imports. The shared kit forwards host-owned menus
+  // and glyphs, so a consumer can require the primitives seed.
   const deps: Record<string, unknown> = {
     react: require('react'),
     'react/jsx-runtime': require('react/jsx-runtime'),
     'react-dom': require('react-dom'),
+    '@deepseek-ai/dsh-client-ui-primitives': {},
   }
   const registered: Array<Record<string, unknown>> = []
   const styleTags: StyleTag[] = []

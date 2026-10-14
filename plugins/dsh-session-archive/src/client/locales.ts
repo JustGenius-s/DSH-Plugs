@@ -5,11 +5,15 @@ export type ArchiveKey =
   | 'emptyGroup'
   | 'ungrouped'
   | 'delete'
+  | 'deleting'
+  | 'unarchive'
+  | 'unarchiving'
   | 'confirmDelete'
   | 'cancel'
   | 'retry'
   | 'loadFailed'
   | 'deleteFailed'
+  | 'unarchiveFailed'
   | 'updated'
   | 'path'
 
@@ -20,11 +24,15 @@ export const zh: Record<ArchiveKey, string> = {
   emptyGroup: '该工作区没有归档会话。',
   ungrouped: '未分组',
   delete: '删除',
+  deleting: '删除中…',
+  unarchive: '取消归档',
+  unarchiving: '恢复中…',
   confirmDelete: '确定永久删除这条会话？此操作不可恢复。',
   cancel: '取消',
   retry: '重试',
   loadFailed: '读取失败',
   deleteFailed: '删除失败',
+  unarchiveFailed: '取消归档失败',
   updated: '更新时间',
   path: '路径',
 }
@@ -36,11 +44,15 @@ export const en: Record<ArchiveKey, string> = {
   emptyGroup: 'No archived sessions in this workspace.',
   ungrouped: 'Ungrouped',
   delete: 'Delete',
+  deleting: 'Deleting…',
+  unarchive: 'Unarchive',
+  unarchiving: 'Restoring…',
   confirmDelete: 'Permanently delete this session? This cannot be undone.',
   cancel: 'Cancel',
   retry: 'Retry',
   loadFailed: 'Failed to load',
   deleteFailed: 'Failed to delete',
+  unarchiveFailed: 'Failed to unarchive',
   updated: 'Updated',
   path: 'Path',
 }

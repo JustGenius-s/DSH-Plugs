@@ -28,6 +28,8 @@ export interface PluginProfileManager {
   reconcile(input: {
     dependencies: Readonly<Record<string, string>>
     patchText: string
+    /** Fail closed when the profile changed under this caller. */
+    expectedModifiedAt?: number | null
   }): Promise<PluginProfileApplyResult>
   install(spec: string): Promise<{ detail: string; needsRestart: boolean }>
   remove(packageName: string): Promise<{ detail: string; needsRestart: boolean }>

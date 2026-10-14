@@ -30,6 +30,7 @@ const clipboard = (files: File[]): DataTransfer =>
 const conversationFace = (
   overrides: Partial<SideChatConversationFace> = {},
 ): SideChatConversationFace => ({
+  sendSession: async () => ({ kind: 'success' }),
   createDrafts: () => [],
   resolveDraftAttachments: () => [],
   serializeDraftAttachments: async () => ({ attachments: [] }),
@@ -56,6 +57,8 @@ describe('conversationAttachmentsOf', () => {
 
   it('rejects an incomplete face and survives a throwing context', () => {
     expect(conversationAttachmentsOfService({ createDrafts: () => [] })).toBeUndefined()
+    const { sendSession: _removed, ...oldSendFace } = conversationFace()
+    expect(conversationAttachmentsOfService(oldSendFace)).toBeUndefined()
     expect(conversationAttachmentsOf({ get: () => { throw new Error('not injected') } })).toBeUndefined()
   })
 })

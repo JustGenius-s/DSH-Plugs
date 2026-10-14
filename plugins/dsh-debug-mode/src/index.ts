@@ -546,8 +546,7 @@ function narrationFor(state: SessionDebugState, target: boolean, sink: IngestSin
     return createUserMessage({
       content: [{ type: 'text', text }],
       source: {
-        kind: 'plugin',
-        plugin: 'dsh-debug-mode',
+        kind: 'dsh-debug-mode',
         form: 'notice',
         summary: 'Debug mode on.',
       },
@@ -557,7 +556,7 @@ function narrationFor(state: SessionDebugState, target: boolean, sink: IngestSin
   const text = 'The user switched this session back to the default mode.'
   return createUserMessage({
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: 'dsh-debug-mode', form: 'notice', summary: text },
+    source: { kind: 'dsh-debug-mode', form: 'notice', summary: text },
   })
 }
 

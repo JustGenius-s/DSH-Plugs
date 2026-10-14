@@ -220,7 +220,7 @@ export function apply(ctx: ClientContext): void {
     setAgentAuth,
     startAgentOAuth,
     pollAgentOAuth,
-    getLocale: () => ctx.locale.getLocale().active,
+    getLocale: () => ctx.locale.getLocale().active.startsWith('zh') ? 'zh' : 'en',
   })
 
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({

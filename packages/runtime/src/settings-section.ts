@@ -1,11 +1,19 @@
 /** Settings wiring for legacy namespaces and DSH 0.1.7 Config forms. */
 import type { Context } from '@deepseek-ai/cordis'
 import type Schema from '@deepseek-ai/schemastery'
-import type {
-  SettingsNamespace,
-  SettingsRegisterOptions,
-  SettingsScope,
-} from '@deepseek-ai/dsh-settings'
+// Legacy registration types are retained at this shared boundary: current
+// DSH versions expose Config forms instead of these removed exports.
+type SettingsNamespace = string
+interface SettingsRegisterOptions<T> {
+  base?: Partial<T>
+  applies?: 'live' | 'restart'
+  validate?: (value: T) => void
+}
+interface SettingsScope<T> { get(): T; watch(listener: () => void): () => void }
+export interface SettingsProvider {
+  describe(): Array<{ ns: string; user?: unknown; revision: number }>
+  replace(ns: string, section: object, expectedRevision?: number): Promise<void>
+}
 
 export function settingsNamespace<T extends string>(ns: T): T & SettingsNamespace {
   return ns as T & SettingsNamespace

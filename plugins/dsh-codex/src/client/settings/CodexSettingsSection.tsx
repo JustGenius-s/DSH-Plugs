@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Button, IconChevronDownOutline14, Input, Menu } from '@just-genius/dsh-plugin-ui'
 import type { MenuItem } from '@just-genius/dsh-plugin-ui'
 import type { SettingsScope } from '@just-genius/dsh-plugin-runtime/client'
@@ -7,6 +7,7 @@ import { HIGHLIGHT_THEME_OPTIONS, type HighlightThemeKind } from '../features/fi
 import {
   clampFullSessionLoadLimit,
   DEFAULT_CONFIG,
+  DEFAULT_VOICE_SHORTCUT,
   FULL_SESSION_LOAD_LIMIT_MAX,
   FULL_SESSION_LOAD_LIMIT_MIN,
   type DshCodexConfig,
@@ -15,6 +16,7 @@ import {
 } from '../../shared/config'
 import type { CodexKey } from '../locales'
 import { FontSettings } from './FontSettings'
+import { captureVoiceShortcut, formatVoiceShortcut } from '../features/voice-input/shortcut'
 
 export interface CodexSettingsInjected {
   scope: SettingsScope<DshCodexConfig>
@@ -191,6 +193,65 @@ function NumberField(props: { label: string; value: number; min: number; max: nu
   )
 }
 
+function VoiceShortcutField(props: {
+  value: string
+  onChange: (value: string) => void
+  t: (key: CodexKey) => string
+}) {
+  const { value, onChange, t } = props
+  const [listening, setListening] = useState(false)
+  const [error, setError] = useState<CodexKey | undefined>()
+  const mac = navigator.platform.toLowerCase().includes('mac')
+
+  useEffect(() => {
+    if (!listening) return
+    const capture = (event: KeyboardEvent): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      const result = captureVoiceShortcut(event, mac)
+      if (result.kind === 'captured') {
+        onChange(result.binding)
+        setListening(false)
+        setError(undefined)
+      } else if (result.kind === 'cancel') {
+        setListening(false)
+        setError(undefined)
+      } else if (result.kind === 'invalid' || result.kind === 'reserved') {
+        setError(result.kind === 'invalid' ? 'voiceShortcutInvalid' : 'voiceShortcutReserved')
+      }
+    }
+    window.addEventListener('keydown', capture, true)
+    return () => window.removeEventListener('keydown', capture, true)
+  }, [listening, mac, onChange])
+
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+        <Button
+          type="button"
+          size="sm"
+          variant="toolbar"
+          aria-label={t('voiceShortcut')}
+          onClick={() => { setListening(current => !current); setError(undefined) }}
+          onBlur={() => setListening(false)}
+          style={{ minWidth: 128 }}
+        >
+          {listening ? t('voiceShortcutCapture') : formatVoiceShortcut(value, mac)}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="toolbar"
+          onClick={() => { onChange(DEFAULT_VOICE_SHORTCUT); setError(undefined) }}
+        >
+          {t('voiceShortcutReset')}
+        </Button>
+      </div>
+      {error ? <small role="status" style={{ color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' }}>{t(error)}</small> : null}
+    </div>
+  )
+}
+
 function SettingsBody(props: CodexSettingsInjected) {
   const { scope, t } = props
   const snapshot = useSyncExternalStore(
@@ -285,9 +346,35 @@ function SettingsBody(props: CodexSettingsInjected) {
           : null}
       </Group>
 
+      <Group title={t('groupVoice')}>
+        <FieldRow label={t('voiceShortcutEnabled')}>
+          <Switch label={t('voiceShortcutEnabled')} checked={value.voiceShortcutEnabled} onChange={next => set('voiceShortcutEnabled', next)} />
+        </FieldRow>
+        <FieldRow label={t('voiceShortcut')}>
+          <VoiceShortcutField value={value.voiceShortcut} onChange={next => set('voiceShortcut', next)} t={t} />
+        </FieldRow>
+        <FieldRow label={t('voiceAutoStopEnabled')}>
+          <Switch label={t('voiceAutoStopEnabled')} checked={value.voiceAutoStopEnabled} onChange={next => set('voiceAutoStopEnabled', next)} />
+        </FieldRow>
+        {value.voiceAutoStopEnabled ? (
+          <>
+            <FieldRow label={t('voiceNoSpeechSeconds')}>
+              <NumberField label={t('voiceNoSpeechSeconds')} min={3} max={30} step={1} value={value.voiceNoSpeechSeconds} onChange={next => set('voiceNoSpeechSeconds', Math.min(30, Math.max(3, next)))} />
+            </FieldRow>
+            <FieldRow label={t('voiceAfterSpeechSeconds')}>
+              <NumberField label={t('voiceAfterSpeechSeconds')} min={1} max={10} step={0.5} value={value.voiceAfterSpeechSeconds} onChange={next => set('voiceAfterSpeechSeconds', Math.min(10, Math.max(1, next)))} />
+            </FieldRow>
+          </>
+        ) : null}
+        <p style={{ margin: 0, color: 'var(--dsw-alias-label-tertiary)', fontSize: 12, lineHeight: '18px' }}>{t('voiceHint')}</p>
+      </Group>
+
       <Group title={t('groupTerminal')}>
         <FieldRow label={t('terminalEnabled')}>
           <Switch label={t('terminalEnabled')} checked={value.terminalEnabled} onChange={next => set('terminalEnabled', next)} />
+        </FieldRow>
+        <FieldRow label={t('officialTerminalDisabled')}>
+          <Switch label={t('officialTerminalDisabled')} checked={value.officialTerminalDisabled} onChange={next => set('officialTerminalDisabled', next)} />
         </FieldRow>
         <FieldRow label={t('terminalShell')}>
           <ShellMenu label={t('terminalShell')} value={value.terminalShell} t={t} onChange={next => set('terminalShell', next)} />

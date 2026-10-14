@@ -1,4 +1,7 @@
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
+import { repairWebProfileScopeIdentity } from '@just-genius/dsh-plugin-runtime/host'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type {
   PluginProfileApplyResult,
   PluginProfileManager,
@@ -19,6 +22,18 @@ const OUTDATED_TIMEOUT_MS = 120_000
 
 export function createPluginProfileManager(ctx: Context): PluginProfileManager {
   let chain = Promise.resolve()
+  let scopeNeedsRestart = false
+
+  const repairScope = (): void => {
+    const backup = repairWebProfileScopeIdentity(process.env.DSH_HOME || join(homedir(), '.dsh'))
+    if (backup !== undefined) {
+      scopeNeedsRestart = true
+      ctx.logger.warn(`Repaired duplicate dsh-scope; restart DSH to load the shared Host scope. Backup: ${backup}`)
+    }
+  }
+  // Also recover profiles installed outside this manager. Loaded module caches
+  // still require a Host restart; never pretend a disk repair changes them.
+  try { repairScope() } catch (error) { ctx.logger.warn(`Profile scope check failed: ${String(error)}`) }
 
   const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
     const run = chain.then(operation, operation)
@@ -27,10 +42,27 @@ export function createPluginProfileManager(ctx: Context): PluginProfileManager {
   }
 
   const runMutation = async (args: readonly string[]): Promise<string> => {
-    const result = await runDsh(['plugin', '--profile', 'web', ...args], MUTATION_TIMEOUT_MS)
-    const detail = commandDetail(result)
-    if (result.code !== 0) throw new Error(detail || `dsh ${args.join(' ')} exited ${result.code}`)
-    return detail
+    const outcome = await runDsh(['plugin', '--profile', 'web', ...args], MUTATION_TIMEOUT_MS).then(
+      (result) => {
+        const detail = commandDetail(result)
+        return {
+          detail,
+          error: result.code === 0 ? undefined : new Error(detail || `dsh ${args.join(' ')} exited ${result.code}`),
+        }
+      },
+      (error: unknown) => ({
+        detail: '',
+        error: error instanceof Error ? error : new Error(String(error)),
+      }),
+    )
+    // Failed/timed-out package operations can also have rewritten node_modules.
+    try {
+      repairScope()
+    } catch (error) {
+      throw new Error([outcome.error?.message, `Profile scope check failed: ${String(error)}`].filter(Boolean).join('\n'))
+    }
+    if (outcome.error !== undefined) throw outcome.error
+    return outcome.detail
   }
 
   const manager: PluginProfileManager = {
@@ -44,6 +76,12 @@ export function createPluginProfileManager(ctx: Context): PluginProfileManager {
 
     reconcile(input): Promise<PluginProfileApplyResult> {
       return serialize(async () => {
+        if (input.expectedModifiedAt !== undefined) {
+          const currentModifiedAt = profileModifiedAt()
+          if (currentModifiedAt !== input.expectedModifiedAt) {
+            throw new Error('profile changed since it was loaded')
+          }
+        }
         const current = readProfilePackage().dependencies ?? {}
         const desired = input.dependencies
         const remove = Object.keys(current).filter(name => !(name in desired))
@@ -79,7 +117,7 @@ export function createPluginProfileManager(ctx: Context): PluginProfileManager {
           removed,
           failed,
           patchChanged,
-          needsRestart: patchChanged || added.length > 0 || removed.length > 0,
+          needsRestart: scopeNeedsRestart || patchChanged || added.length > 0 || removed.length > 0,
         }
       })
     },

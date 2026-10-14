@@ -1,26 +1,29 @@
+/**
+ * The plugin's switches, on its page in the sidebar Plugins manager.
+ *
+ * Every row this plugin adds can be turned off, so the official menus never grow
+ * past what the user wants. Only ADDITIONS appear here: DSH's own pin, rename,
+ * fork, and archive rows are the host's and are not ours to toggle.
+ */
+
 import { useState, useSyncExternalStore } from 'react'
 import { SettingsCard, Switch } from '@just-genius/dsh-plugin-ui'
+
 import {
   SESSION_KEYS,
-  TRIGGER_KEYS,
+  SURFACE_KEYS,
   WORKSPACE_KEYS,
-  getMenuState,
+  getPluginState,
   setFeature,
-  subscribeMenuState,
+  subscribePluginState,
   type FeatureKey,
   type FeatureMap,
 } from './features.ts'
 import type { WorkspacePlusKey } from './locales.ts'
 
-/**
- * Plugin-settings card listing the row-menu switches.
- *
- * Rendered into the `settings.plugin.item` slot; every action can be turned
- * off so the menu only shows what the user wants.
- */
 export function MenuSettingsItem({ t }: { t?: (key: WorkspacePlusKey) => string }) {
   const translate = t ?? ((key: WorkspacePlusKey) => key)
-  const state = useSyncExternalStore(subscribeMenuState, getMenuState, getMenuState)
+  const state = useSyncExternalStore(subscribePluginState, getPluginState, getPluginState)
   const [open, setOpen] = useState(false)
 
   return (
@@ -31,14 +34,20 @@ export function MenuSettingsItem({ t }: { t?: (key: WorkspacePlusKey) => string 
       toggleLabel={translate('settings.title')}
     >
       <FeatureGroup
+        title={translate('settings.group.surface')}
+        keys={SURFACE_KEYS}
+        features={state.features}
+        translate={translate}
+      />
+      <FeatureGroup
         title={translate('settings.group.trigger')}
-        keys={TRIGGER_KEYS}
+        keys={['contextmenu']}
         features={state.features}
         translate={translate}
       />
       <FeatureGroup
         title={translate('settings.group.workspace')}
-        keys={WORKSPACE_KEYS}
+        keys={WORKSPACE_KEYS.filter((key) => key !== 'contextmenu')}
         features={state.features}
         translate={translate}
       />
@@ -62,26 +71,15 @@ function FeatureGroup(props: {
     <div>
       <div style={GROUP_TITLE_STYLE}>{props.title}</div>
       {props.keys.map((key) => (
-        <SwitchRow
-          key={key}
-          label={props.translate(SETTINGS_LABELS[key])}
-          checked={props.features[key] !== false}
-          onChange={(next) => { setFeature(key, next) }}
-        />
+        <div key={key} style={ROW_STYLE}>
+          <span>{props.translate(SETTINGS_LABELS[key])}</span>
+          <Switch
+            label={props.translate(SETTINGS_LABELS[key])}
+            checked={props.features[key] !== false}
+            onChange={(next) => { setFeature(key, next) }}
+          />
+        </div>
       ))}
-    </div>
-  )
-}
-
-function SwitchRow(props: {
-  label: string
-  checked: boolean
-  onChange: (next: boolean) => void
-}) {
-  return (
-    <div style={ROW_STYLE}>
-      <span>{props.label}</span>
-      <Switch label={props.label} checked={props.checked} onChange={props.onChange} />
     </div>
   )
 }
@@ -108,18 +106,14 @@ const ROW_STYLE = {
 }
 
 const SETTINGS_LABELS: Record<FeatureKey, WorkspacePlusKey> = {
-  dblclick: 'settings.dblclick',
   contextmenu: 'settings.contextmenu',
+  pinnedPanel: 'settings.pinnedPanel',
   workspacePin: 'settings.workspacePin',
-  workspaceRename: 'settings.workspaceRename',
+  workspaceEditBinding: 'settings.workspaceEditBinding',
   workspaceOpenExplorer: 'settings.workspaceOpenExplorer',
   workspaceCopyPath: 'settings.workspaceCopyPath',
   workspaceNewSession: 'settings.workspaceNewSession',
-  workspaceDelete: 'settings.workspaceDelete',
-  sessionPin: 'settings.sessionPin',
-  sessionRename: 'settings.sessionRename',
-  sessionUnread: 'settings.sessionUnread',
-  sessionArchive: 'settings.sessionArchive',
-  sessionFork: 'settings.sessionFork',
+  sessionCopyReference: 'settings.sessionCopyReference',
+  sessionExport: 'settings.sessionExport',
   sessionOpenFolder: 'settings.sessionOpenFolder',
 }
