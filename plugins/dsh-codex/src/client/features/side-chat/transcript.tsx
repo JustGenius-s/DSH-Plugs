@@ -25,7 +25,7 @@ import {
 import type {
   AssistantBlock,
   ChatConversationViewNode,
-  ConversationSnapshot,
+  SessionSnapshot,
 } from '@just-genius/dsh-plugin-runtime/client'
 import type {
   ContentBlock,
@@ -72,6 +72,7 @@ import {
   hasVisibleContent,
   queuedRowsOf,
   type ChatLike,
+  type InboxLike,
 } from './snapshot'
 import {
   isTerminalCall,
@@ -698,12 +699,14 @@ function isImageBlock(block: unknown): block is { type: 'image'; attachment?: Im
 
 function UserBubble({
   content,
+  referenceLabels = [],
   sessionId,
   api,
   uiConversation,
   pending = false,
 }: {
   content: readonly unknown[]
+  referenceLabels?: readonly string[]
   sessionId?: string
   api?: ImageApi
   uiConversation?: UiConversationFace
@@ -716,10 +719,8 @@ function UserBubble({
   // `projectUserText` returns ReactNode, not a component: 0.1.5 replaced the
   // old `MessageText` element with this projection, and calling it as JSX is
   // what made every user bubble render as `undefined` (React #130).
-  // No session mentions are decorated: a side chat has no recall of its own,
-  // so passing labels here would highlight bare `@name` words the user typed
-  // as plain prose.
-  const projected = text.length > 0 ? OfficialUserText(text, []) : null
+  // Only the host-confirmed recall labels decorate mentions, not bare @ prose.
+  const projected = text.length > 0 ? OfficialUserText(text, referenceLabels) : null
   return (
     <div className="dsh-codex-sidechat-user">
       <div
@@ -804,7 +805,6 @@ function ChatNodeView({
   uiConversation?: UiConversationFace
   t?: (key: string) => string
 }) {
-  if (node.visibility === 'hidden') return null
   const data = asRecord(node.data)
   switch (node.kind) {
     case 'user':
@@ -812,6 +812,7 @@ function ChatNodeView({
       return (
         <UserBubble
           content={Array.isArray(data?.content) ? data.content as readonly unknown[] : []}
+          referenceLabels={Array.isArray(data?.referenceLabels) ? data.referenceLabels.filter((label): label is string => typeof label === 'string') : []}
           sessionId={sessionId}
           api={api}
           uiConversation={uiConversation}
@@ -927,34 +928,38 @@ function CommandRow({ node }: { node: Record<string, unknown> | null }) {
  * One injected-context row.
  *
  * Context messages are model-facing injections (agent instructions, skill
- * content, a side chat's inherited parent digest, …) that this renderer used to
+ * content, a side chat's main-session link, …) that this renderer used to
  * drop entirely — so the transcript silently hid the fact that extra material
  * had entered the conversation. They now render as a collapsed, labelled row
  * using the producer name the runtime projects (`provenance.label`), which is
  * exactly what the official chat shows for the same node.
  */
-/** The producer id the host stamps on an inherited parent digest. */
-const DIGEST_PRODUCER = 'dsh-codex:side-chat'
+/** The producer id the host stamps on a side-chat context message. */
+const SIDE_CHAT_CONTEXT_PRODUCER = 'dsh-codex:side-chat'
 
 function ContextRow({
   node,
   t,
+  contextState,
 }: {
   node: Record<string, unknown> | null
   t?: (key: string) => string
+  contextState?: SideChatContextState
 }) {
   const [expanded, setExpanded] = useState(false)
   if (node === null) return null
   const content = Array.isArray(node.content) ? node.content as readonly ContentBlock[] : []
   const body = textOfContent(content)
   const provenance = asRecord(node.provenance)
-  // Our own digest arrives with a stable wire id as its producer name; show a
+  // Our own context arrives with a stable wire id as its producer name; show a
   // translated label instead of that id. Any other producer keeps its own name.
   const rawLabel = typeof provenance?.label === 'string' && provenance.label.length > 0
     ? provenance.label
     : undefined
-  const label = rawLabel === DIGEST_PRODUCER
-    ? (t?.('sideChat.contextLabel') ?? '主对话上下文')
+  const label = rawLabel === SIDE_CHAT_CONTEXT_PRODUCER
+    ? (contextState === 'linked'
+        ? (t?.('sideChat.contextLinkedLabel') ?? '主对话关联')
+        : (t?.('sideChat.contextLabel') ?? '主对话上下文'))
     : (rawLabel ?? '上下文')
   const recall = provenance?.role === 'recall'
   const expandable = body.length > 0
@@ -991,6 +996,7 @@ function ContextRow({
  */
 export function SideChatTranscript({
   snapshot,
+  inbox,
   chat,
   t,
   sessionId,
@@ -1000,7 +1006,9 @@ export function SideChatTranscript({
   contextState,
 }: {
   /** Control face (running / queue / pending) — `session.getSnapshot()`. */
-  snapshot: ConversationSnapshot | undefined
+  snapshot: SessionSnapshot | undefined
+  /** Durable queued messages from the Session's `inbox` projection. */
+  inbox?: InboxLike
   /**
    * The chat content snapshot (order/nodes) from `uiConversation.target('chat')`.
    * This is the ONLY place conversation rows live since DSH 0.1.2 — the control
@@ -1011,7 +1019,7 @@ export function SideChatTranscript({
   /** Session id used to authorize durable image reads. */
   sessionId?: string
   /**
-   * The session-keyed pending-interaction store. A pending approval or question
+   * The session-status observable. A pending approval or question
    * counts as content, so the empty hero does not replace a live wait.
    */
   pendingInteractions?: PendingInteractionsFace | undefined
@@ -1020,8 +1028,8 @@ export function SideChatTranscript({
   /** The `ctx.uiConversation` face: the main transcript's own image reads. */
   uiConversation?: UiConversationFace
   /**
-   * Whether the parent's context reached this side chat, as reported at open
-   * time. Rendered in the empty state because the injected context is not yet
+   * Whether the parent link reached this side chat, as reported at open
+   * time. Rendered in the empty state because the injected link is not yet
    * in the transcript — it only lands when the first turn claims it.
    */
   contextState?: SideChatContextState
@@ -1067,15 +1075,13 @@ export function SideChatTranscript({
   // (running/queue) from the control snapshot. A side chat renders content the
   // moment EITHER carries any. A PENDING interaction counts too: an approval or
   // question is a live turn the user must answer, and the empty hero would
-  // otherwise replace it — the wait lives on `uiSession`, so it is read from
-  // the store the panel passes down rather than the control snapshot (DSH 0.1.5
-  // removed `snapshot.pending`).
+  // otherwise replace it. The wait comes from the host's session-status row.
   const chatRows = chatRowsOf<ChatConversationViewNode>(chat)
   const hasChat = (chat !== undefined && hasVisibleContent(chat)) || snapshot?.running === true
-    || wait !== undefined || hasQueuedWork(snapshot)
+    || wait !== undefined || hasQueuedWork(snapshot, inbox)
 
   // Empty state: keep the hero, but render any context rows beneath it. A
-  // freshly opened side chat's only node IS its inherited parent context, and
+  // freshly opened side chat's only node may be its main-session link, and
   // hiding it is what made this feature look broken — the user sees an empty
   // chat with no evidence the main conversation came along.
   if (!hasChat) {
@@ -1087,22 +1093,18 @@ export function SideChatTranscript({
           <h2 className="dsh-codex-sidechat-empty-title">{t('sideChat.emptyTitle')}</h2>
           <p className="dsh-codex-sidechat-empty-hint">{t('sideChat.emptyHint')}</p>
         </div>
-        {/* The badge is the pre-turn placeholder for the injected context: the
-            digest is not in the transcript yet, so this is the only evidence it
-            came along. Once the context row itself lands, it supersedes the
-            badge — showing both would say the same thing twice. Only an actual
-            inheritance is announced; an empty parent has nothing to report and
-            an empty side chat already looks empty. */}
-        {contextState === 'inherited' && contextNodes.length === 0 && (
+        {/* The badge is the pre-turn placeholder for the injected link. Once
+            its context row lands, that row replaces the badge. */}
+        {(contextState === 'linked' || contextState === 'inherited') && contextNodes.length === 0 && (
           <div className="dsh-codex-sidechat-context-note" data-context={contextState}>
             <IconLinkOutline14 size={14} />
-            <span>{t('sideChat.contextInherited')}</span>
+            <span>{t(contextState === 'linked' ? 'sideChat.contextLinked' : 'sideChat.contextInherited')}</span>
           </div>
         )}
         {contextNodes.length > 0 && (
           <div className="dsh-codex-sidechat-empty-context">
             {contextNodes.map(node => (
-              <ContextRow key={node.key} node={asRecord(node.data)} t={t} />
+              <ContextRow key={node.key} node={asRecord(node.data)} t={t} contextState={contextState} />
             ))}
           </div>
         )}
@@ -1115,7 +1117,7 @@ export function SideChatTranscript({
   // A sent-but-unstarted prompt lives in the queue (as `queued`), not in the
   // log — rendering it here is what makes the message appear immediately
   // instead of only once its turn begins.
-  const queuedRows = queuedRowsOf<{ id: string; content: readonly unknown[] }>(snapshot)
+  const queuedRows = queuedRowsOf<{ id: string; content: readonly unknown[] }>(snapshot, inbox)
 
   return (
     <div className="dsh-codex-sidechat-transcript-wrap">

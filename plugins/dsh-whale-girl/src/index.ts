@@ -4,9 +4,8 @@ import { fileURLToPath } from 'node:url'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
 import type { Session } from '@just-genius/dsh-plugin-runtime/host'
-import { Schema } from '@just-genius/dsh-plugin-runtime/host'
-import { installSettingsSection } from '@just-genius/dsh-plugin-runtime/host'
-import { HOST_SERVICES, HttpInputError, readJsonBody, sendJson } from '@just-genius/dsh-plugin-runtime/host'
+import { Schema, readVolatileConfig } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, HttpInputError, readJsonBody, sendJson, sessionEventsOf } from '@just-genius/dsh-plugin-runtime/host'
 import {
   BODY_LIMIT,
   DEFAULTS,
@@ -49,7 +48,6 @@ import { openPetStore } from './pet-store.ts'
 export const name = 'dsh-whale-girl'
 export const inject = [
   HOST_SERVICES.webServer,
-  HOST_SERVICES.settings,
   HOST_SERVICES.storageDomain,
   HOST_SERVICES.jobs,
   HOST_SERVICES.agents,
@@ -57,10 +55,10 @@ export const inject = [
   HOST_SERVICES.sessionTitle,
 ] as const
 
-const ConfigSchema = Schema.object({
-  enabled: Schema.boolean().default(DEFAULTS.enabled),
-  size: Schema.number().min(64).max(160).default(DEFAULTS.size),
-  opacity: Schema.number().min(0.2).max(1).default(DEFAULTS.opacity),
+export const Config = Schema.object({
+  enabled: Schema.boolean().default(DEFAULTS.enabled).volatile(),
+  size: Schema.number().min(64).max(160).default(DEFAULTS.size).volatile(),
+  opacity: Schema.number().min(0.2).max(1).default(DEFAULTS.opacity).volatile(),
   walk: Schema.object({
     enabled: Schema.boolean().default(DEFAULTS.walk.enabled),
     minWaitMs: Schema.number().min(0).max(300_000).default(DEFAULTS.walk.minWaitMs),
@@ -68,18 +66,18 @@ const ConfigSchema = Schema.object({
     minMs: Schema.number().min(0).max(60_000).default(DEFAULTS.walk.minMs),
     maxMs: Schema.number().min(0).max(60_000).default(DEFAULTS.walk.maxMs),
     speedPxPerSec: Schema.number().min(10).max(300).default(DEFAULTS.walk.speedPxPerSec),
-  }),
-  sleepAfterMs: Schema.number().min(5_000).max(600_000).default(DEFAULTS.sleepAfterMs),
-  pollMs: Schema.number().min(1_000).max(30_000).default(DEFAULTS.pollMs),
-  bubbleMs: Schema.number().min(500).max(10_000).default(DEFAULTS.bubbleMs),
-  welcomeMs: Schema.number().min(0).max(30_000).default(DEFAULTS.welcomeMs),
-  celebrateMs: Schema.number().min(0).max(30_000).default(DEFAULTS.celebrateMs),
-  errorMs: Schema.number().min(0).max(15_000).default(DEFAULTS.errorMs),
-  disappointedMs: Schema.number().min(0).max(15_000).default(DEFAULTS.disappointedMs),
+  }).volatile(),
+  sleepAfterMs: Schema.number().min(5_000).max(600_000).default(DEFAULTS.sleepAfterMs).volatile(),
+  pollMs: Schema.number().min(1_000).max(30_000).default(DEFAULTS.pollMs).volatile(),
+  bubbleMs: Schema.number().min(500).max(10_000).default(DEFAULTS.bubbleMs).volatile(),
+  welcomeMs: Schema.number().min(0).max(30_000).default(DEFAULTS.welcomeMs).volatile(),
+  celebrateMs: Schema.number().min(0).max(30_000).default(DEFAULTS.celebrateMs).volatile(),
+  errorMs: Schema.number().min(0).max(15_000).default(DEFAULTS.errorMs).volatile(),
+  disappointedMs: Schema.number().min(0).max(15_000).default(DEFAULTS.disappointedMs).volatile(),
   replies: Schema.object({
     feed: Schema.array(Schema.string()).default([...DEFAULTS.replies.feed]),
     play: Schema.array(Schema.string()).default([...DEFAULTS.replies.play]),
-  }),
+  }).volatile(),
 })
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -120,29 +118,25 @@ function sendFile(res: ServerResponse, file: string, type: string): void {
   res.end(readFileSync(file))
 }
 
-export async function apply(ctx: Context): Promise<void> {
+export async function apply(ctx: Context, config?: unknown): Promise<void> {
   const store = await openPetStore(ctx)
   ctx.effect(() => () => store.close(), 'dsh-whale-girl: pet store')
   let state = store.load()
-  let configRef: WhaleGirlConfig = { ...DEFAULTS, walk: { ...DEFAULTS.walk }, replies: { feed: [...DEFAULTS.replies.feed], play: [...DEFAULTS.replies.play] } }
+  let configRef: WhaleGirlConfig = readVolatileConfig(config, DEFAULTS)
   let configRevision = 0
   const applyConfig = (next: WhaleGirlConfig) => {
     configRef = next
     configRevision += 1
   }
 
-  let source = (): WhaleGirlConfig => configRef
-  installSettingsSection(ctx, NAMESPACE as never, ConfigSchema, configRef, {
-    setSource: (nextSource) => { source = nextSource as () => WhaleGirlConfig },
-    onChange: () => {
-      try {
-        const next = source()
-        validateConfig(next)
-        applyConfig(next)
-      } catch {
-        // keep previous config
-      }
-    },
+  ctx.on('loader/volatile-update', () => {
+    try {
+      const next = readVolatileConfig(config, DEFAULTS)
+      validateConfig(next)
+      applyConfig(next)
+    } catch {
+      // Keep the previous valid config.
+    }
   })
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -174,7 +168,7 @@ export async function apply(ctx: Context): Promise<void> {
   const sessionViews = new Map<string, SessionView>()
 
   const resolveSessionTitle = (s: Session): string | null => {
-    const fromLog = titleFromLog(Array.isArray(s.events) ? s.events : [])
+    const fromLog = titleFromLog(sessionEventsOf(s))
     if (fromLog !== null) return fromLog
     try {
       const snapshot = ctx.sessionTitle.get(s)
@@ -257,7 +251,9 @@ export async function apply(ctx: Context): Promise<void> {
     }
   }
 
-  ctx.effect(() => ctx.jobs.onJobDone((snapshot) => {
+  ctx.effect(() => ctx.jobs.events.subscribe({ owners: 'all' }, (event) => {
+      if (event.type !== 'settled' || event.cause === 'teardown') return
+      const snapshot = event.job
       const now = Date.now()
       if (snapshot.status === 'completed') {
         const result = recordTaskCompleted(state, snapshot.label ?? '未命名任务', now)
@@ -279,7 +275,7 @@ export async function apply(ctx: Context): Promise<void> {
     return next()
   })
 
-  ctx.on('agent/session-start', (payload) => {
+  ctx.on('agent/created', (payload) => {
     const now = Date.now()
     const sourceKind = payload !== null && typeof payload === 'object' && typeof (payload as { source?: unknown }).source === 'string'
       ? (payload as { source: string }).source
@@ -292,6 +288,7 @@ export async function apply(ctx: Context): Promise<void> {
     }
     scheduleSave()
     broadcastEvent()
+    return undefined
   })
 
   ctx.on('session/event', (session, event) => {

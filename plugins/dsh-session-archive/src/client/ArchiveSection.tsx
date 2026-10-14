@@ -1,15 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Button } from '@just-genius/dsh-plugin-ui'
 import type { InjectFace } from '@just-genius/dsh-plugin-runtime/client'
 import { FailureRow, SettingsSection, StatusText } from '@just-genius/dsh-plugin-ui'
 import {
   DELETE_PATH,
   LIST_PATH,
+  UNARCHIVE_PATH,
   type ArchiveHttpResult,
   type ArchiveListPayload,
-  type ArchivedSessionRow,
 } from '../shared'
 import type { ArchiveKey } from './locales'
+import {
+  blockingError,
+  failureMessage,
+  groupSessions,
+  initialArchiveView,
+  pendingActionOf,
+  reduceArchiveView,
+  refreshNotice,
+  rowErrorOf,
+  runRowMutation,
+} from './view-state'
 import styles from './ArchiveSection.module.css'
 
 export interface ArchiveSectionInjected {
@@ -18,69 +29,78 @@ export interface ArchiveSectionInjected {
 
 export type ArchiveSectionProps = Partial<InjectFace<ArchiveSectionInjected>>
 
-interface WorkspaceGroup {
-  key: string
-  title: string
-  path: string | null
-  sessions: ArchivedSessionRow[]
-}
-
 export function ArchiveSection({ t }: ArchiveSectionProps) {
-  const translate = t ?? ((key: ArchiveKey) => key)
-  const [sessions, setSessions] = useState<ArchivedSessionRow[]>([])
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [error, setError] = useState<string | null>(null)
-  const [busyId, setBusyId] = useState<string | null>(null)
+  // Memoized so `reload` keeps one identity: the mount effect must fetch once,
+  // not once per render.
+  const translate = useMemo(() => t ?? ((key: ArchiveKey) => key), [t])
+  const [view, dispatch] = useReducer(reduceArchiveView, undefined, initialArchiveView)
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const readSeq = useRef(0)
 
-  const reload = useCallback(async () => {
-    setStatus('loading')
-    setError(null)
+  /**
+   * Read the list. A refresh never blanks the rendered rows: the reducer
+   * replaces them only once a payload arrives, so an in-flight read is
+   * invisible to every row that is not the one being mutated.
+   *
+   * @returns whether this read's rows were adopted; false when it failed or a
+   * newer read had already superseded it.
+   */
+  const reload = useCallback(async (): Promise<boolean> => {
+    const seq = ++readSeq.current
+    dispatch({ type: 'list-start', seq })
     try {
       const payload = await getJson<ArchiveListPayload>(LIST_PATH)
-      setSessions(payload.sessions)
-      setStatus('ready')
-    } catch (err) {
-      setStatus('error')
-      setError(err instanceof Error ? err.message : String(err))
+      dispatch({ type: 'list-ok', seq, rows: payload.sessions })
+      return seq === readSeq.current
+    } catch (error) {
+      dispatch({ type: 'list-failed', seq, message: failureMessage(error, translate('loadFailed')) })
+      return false
     }
-  }, [])
+  }, [translate])
 
   useEffect(() => {
     void reload()
   }, [reload])
 
-  const groups = useMemo(() => groupSessions(sessions, translate('ungrouped')), [sessions, translate])
+  const groups = useMemo(() => groupSessions(view.rows, translate('ungrouped')), [view.rows, translate])
 
-  const remove = async (id: string) => {
-    setBusyId(id)
-    setError(null)
-    try {
-      await postJson(DELETE_PATH, { sessionId: id })
-      setConfirmId(null)
-      await reload()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : translate('deleteFailed'))
-    } finally {
-      setBusyId(null)
-    }
+  /**
+   * Run one row mutation. The row holds its loading state until the refreshed
+   * list arrives, so the action reads as finished only when the data that
+   * changed is gone — not when the request returns. Other rows stay usable.
+   */
+  const mutate = (id: string, action: 'delete' | 'unarchive') => {
+    void runRowMutation({
+      id,
+      action,
+      dispatch,
+      perform: () => postJson(action === 'delete' ? DELETE_PATH : UNARCHIVE_PATH, { sessionId: id }),
+      refresh: reload,
+      failureMessage: translate(action === 'delete' ? 'deleteFailed' : 'unarchiveFailed'),
+    }).then((outcome) => {
+      if (outcome === 'done' && action === 'delete') setConfirmId(null)
+    })
   }
 
+  const firstLoad = !view.loaded
+  const blocking = blockingError(view)
+  const notice = refreshNotice(view)
+
   return (
-    <SettingsSection busy={status === 'loading' || busyId !== null}>
-      {status === 'loading' ? <StatusText>{translate('loading')}</StatusText> : null}
-      {status === 'error' ? (
+    <SettingsSection busy={firstLoad}>
+      {firstLoad && view.status === 'loading' ? <StatusText>{translate('loading')}</StatusText> : null}
+      {blocking !== null ? (
         <FailureRow>
-          <p role="alert">{error ?? translate('loadFailed')}</p>
+          <p role="alert">{blocking}</p>
           <Button size="sm" variant="outline" onClick={() => void reload()}>
             {translate('retry')}
           </Button>
         </FailureRow>
       ) : null}
-      {status === 'ready' ? (
+      {view.loaded ? (
         <>
-          {error !== null ? <p role="alert">{error}</p> : null}
-          {sessions.length === 0 ? <StatusText>{translate('empty')}</StatusText> : null}
+          {notice !== null ? <p role="alert">{notice}</p> : null}
+          {view.rows.length === 0 ? <StatusText>{translate('empty')}</StatusText> : null}
           {groups.map((group) => (
             <section key={group.key} className={styles.group}>
               <div className={styles.groupHead}>
@@ -89,7 +109,9 @@ export function ArchiveSection({ t }: ArchiveSectionProps) {
               </div>
               {group.sessions.map((session) => {
                 const confirming = confirmId === session.id
-                const busy = busyId === session.id
+                const pending = pendingActionOf(view, session.id)
+                const rowError = rowErrorOf(view, session.id)
+                const busy = pending !== undefined
                 return (
                   <div key={session.id} className={styles.row}>
                     <div>
@@ -99,6 +121,9 @@ export function ArchiveSection({ t }: ArchiveSectionProps) {
                           ? `${translate('updated')}: ${new Date(session.updatedAt).toLocaleString()}`
                           : session.id}
                       </p>
+                      {rowError !== undefined ? (
+                        <p role="alert" className={styles.rowError}>{rowError}</p>
+                      ) : null}
                     </div>
                     <div className={styles.actions}>
                       {confirming ? (
@@ -108,9 +133,9 @@ export function ArchiveSection({ t }: ArchiveSectionProps) {
                             size="sm"
                             variant="primary"
                             disabled={busy}
-                            onClick={() => void remove(session.id)}
+                            onClick={() => mutate(session.id, 'delete')}
                           >
-                            {translate('delete')}
+                            {pending === 'delete' ? translate('deleting') : translate('delete')}
                           </Button>
                           <Button
                             size="sm"
@@ -122,14 +147,24 @@ export function ArchiveSection({ t }: ArchiveSectionProps) {
                           </Button>
                         </>
                       ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={busyId !== null}
-                          onClick={() => setConfirmId(session.id)}
-                        >
-                          {translate('delete')}
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => mutate(session.id, 'unarchive')}
+                          >
+                            {pending === 'unarchive' ? translate('unarchiving') : translate('unarchive')}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => setConfirmId(session.id)}
+                          >
+                            {translate('delete')}
+                          </Button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -141,27 +176,6 @@ export function ArchiveSection({ t }: ArchiveSectionProps) {
       ) : null}
     </SettingsSection>
   )
-}
-
-function groupSessions(sessions: ArchivedSessionRow[], ungrouped: string): WorkspaceGroup[] {
-  const order: string[] = []
-  const map = new Map<string, WorkspaceGroup>()
-  for (const session of sessions) {
-    const key = session.workspaceId ?? 'ungrouped'
-    let group = map.get(key)
-    if (group === undefined) {
-      group = {
-        key,
-        title: session.workspaceTitle || ungrouped,
-        path: session.workspacePath,
-        sessions: [],
-      }
-      map.set(key, group)
-      order.push(key)
-    }
-    group.sessions.push(session)
-  }
-  return order.map((key) => map.get(key)!).filter((group) => group.sessions.length > 0)
 }
 
 async function getJson<T>(path: string): Promise<T> {

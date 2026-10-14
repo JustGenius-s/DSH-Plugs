@@ -19,7 +19,7 @@
 // The browser half ships through exports["./client"] and is discovered via the
 // dsh.client manifest in package.json.
 import type { Context } from '@just-genius/dsh-plugin-runtime/host'
-import { HOST_SERVICES, Schema, errorMessage, settingsNamespace } from '@just-genius/dsh-plugin-runtime/host'
+import { HOST_SERVICES, Schema, errorMessage } from '@just-genius/dsh-plugin-runtime/host'
 import {
   DEFAULTS_NAMESPACE,
   EMPTY_CONFIG,
@@ -29,11 +29,13 @@ import {
 } from './shared'
 
 export const name = 'dsh-model-custom-ex'
-export const inject = [HOST_SERVICES.settings, HOST_SERVICES.llm] as const
+export const inject = [HOST_SERVICES.llm] as const
 
-const ConfigSchema: Schema<ModelCustomExConfig> = Schema.object({
-  defaults: Schema.dict(Schema.dict(Schema.string())).default({}),
+export const Config: Schema<any> = Schema.object({
+  defaults: Schema.dict(Schema.dict(Schema.string())).default({}).volatile(),
 })
+
+type LiveConfig = { defaults: { get(): ModelCustomExConfig['defaults'] } }
 
 /**
  * The reasoning level type the llm service accepts for a request.
@@ -126,17 +128,13 @@ async function displayedDefaultEffort(
  * Install the defaults namespace and apply it to both the catalog and the wire.
  * @param ctx - host context carrying the settings and llm services.
  */
-export function apply(ctx: Context): void {
-  const scope = ctx.settings.register(
-    settingsNamespace(DEFAULTS_NAMESPACE),
-    ConfigSchema,
-    { base: EMPTY_CONFIG },
-  )
+export function apply(ctx: Context, config: LiveConfig): void {
+  const defaults = (): ModelCustomExConfig['defaults'] => config.defaults.get()
 
   const original = ctx.llm.resolveModelInfo.bind(ctx.llm)
   ctx.llm.resolveModelInfo = async (provider, model, signal) => {
     const info = await original(provider, model, signal)
-    return injectDefaultEffort(info, (scope.get() as ModelCustomExConfig).defaults)
+    return injectDefaultEffort(info, defaults())
   }
 
   ctx.effect(() => () => {
@@ -158,7 +156,7 @@ export function apply(ctx: Context): void {
     if (resolved.reasoningEffort !== undefined) return resolved
     const { provider, model } = resolved
     try {
-      const wanted = pickProviderDefaults((scope.get() as ModelCustomExConfig).defaults, provider)[model]
+      const wanted = pickProviderDefaults(defaults(), provider)[model]
       const effort = wanted === undefined
         ? await displayedDefaultEffort(ctx, provider, model)
         : await pinnedEffort(ctx, provider, model, wanted, warned)

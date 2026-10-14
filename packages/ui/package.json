@@ -35,19 +35,19 @@
     "clean": "rm -rf lib"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.7-alpha.2",
     "react": ">=18.2.0",
     "react-dom": ">=18.2.0"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.7-alpha.2",
     "clsx": "^2.1.1",
     "dompurify": "^3.2.4",
     "lightningcss": "^1.29.2",
     "markdown-it": "^14.1.0"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.7-alpha.2",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",

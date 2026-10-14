@@ -1,0 +1,75 @@
+{
+  "name": "@just-genius/dsh-cua-pip",
+  "description": "Agent-controlled, session-scoped application picture-in-picture alongside Cua Computer Use",
+  "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/overlay.js",
+    "lib/overlay.html",
+    "lib/DSH Window Capture.app/**",
+    "native/**",
+    "scripts/**",
+    "src/native-launch.ts",
+    "cordis.patch.yml",
+    "lib/**/*.d.ts",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build-native.mjs && tsdown -c tsdown.config.ts && tsdown -c tsdown.client.config.ts && tsdown -c tsdown.overlay.config.ts && cp src/overlay.html lib/overlay.html && (test -f lib/overlay.js || mv lib/overlay.iife.js lib/overlay.js)",
+    "build:native": "node scripts/build-native.mjs",
+    "capture:permissions": "node scripts/request-permission.mjs",
+    "capture:probe": "node scripts/probe-native.mjs",
+    "watch": "tsdown -c tsdown.config.ts --watch & tsdown -c tsdown.client.config.ts --watch & tsdown -c tsdown.overlay.config.ts --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm -w exec vitest run --config plugins/dsh-cua-pip/vitest.config.ts",
+    "test:native": "node scripts/test-native.mjs",
+    "clean": "rm -rf lib"
+  },
+  "dependencies": {
+    "@just-genius/dsh-plugin-runtime": "workspace:*",
+    "@just-genius/dsh-plugin-ui": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "~18.3.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

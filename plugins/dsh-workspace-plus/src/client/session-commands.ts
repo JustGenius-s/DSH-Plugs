@@ -1,9 +1,14 @@
-import type {
-  ClientContext,
-  SessionId,
-  WorkspaceId,
-} from '@just-genius/dsh-plugin-runtime/client'
-import { getSessions, getUiWorkspace, getWorkspaces } from '@just-genius/dsh-plugin-runtime/client'
+/**
+ * Navigation and title helpers shared by the pinned area.
+ *
+ * Every call goes through DSH's own `uiWorkspace` service, so the plugin never
+ * re-implements blank-session reuse, fork semantics, or title projection. Ids
+ * arrive as plain strings from DOM attributes and slot owner props; the casts
+ * are localized here.
+ */
+
+import type { ClientContext, SessionId, WorkspaceId } from '@just-genius/dsh-plugin-runtime/client'
+import { getUiWorkspace } from '@just-genius/dsh-plugin-runtime/client'
 
 function asWorkspaceId(id: string): WorkspaceId {
   return id as WorkspaceId
@@ -13,6 +18,13 @@ function asSessionId(id: string): SessionId {
   return id as SessionId
 }
 
+/**
+ * The session's human-facing label.
+ *
+ * `displayTitle` is the projected label the official sidebar shows (durable
+ * title, else project basename, else id), so reading it keeps this plugin's rows
+ * word-for-word consistent with the row the user clicked.
+ */
 export function sessionTitleOf(session: unknown, fallback: string): string {
   if (session !== null && typeof session === 'object') {
     const value = session as { title?: unknown; displayTitle?: unknown }
@@ -22,48 +34,19 @@ export function sessionTitleOf(session: unknown, fallback: string): string {
   return fallback
 }
 
-export function newSession(ctx: ClientContext, workspaceId: string): void {
-  const uiWorkspace = getUiWorkspace(ctx)
-  if (typeof uiWorkspace.startSession !== 'function') {
-    throw new Error('workspace navigation does not support starting sessions')
-  }
-  uiWorkspace.startSession(asWorkspaceId(workspaceId))
-}
-
-export async function openWorkspace(ctx: ClientContext, workspaceId: string): Promise<void> {
-  const uiWorkspace = getUiWorkspace(ctx)
-  if (typeof uiWorkspace.openWorkspace === 'function') {
-    await uiWorkspace.openWorkspace(asWorkspaceId(workspaceId))
-    return
-  }
-  newSession(ctx, workspaceId)
-}
-
-export async function archiveSession(ctx: ClientContext, sessionId: string): Promise<void> {
-  const uiWorkspace = getUiWorkspace(ctx)
-  if (typeof uiWorkspace.archiveSession === 'function') {
-    await uiWorkspace.archiveSession(asSessionId(sessionId))
-    return
-  }
-  await getWorkspaces(ctx).archiveSession(asSessionId(sessionId))
-}
-
-export async function forkSession(ctx: ClientContext, sessionId: string): Promise<void> {
-  const uiWorkspace = getUiWorkspace(ctx)
-  if (typeof uiWorkspace.forkSession === 'function') {
-    await uiWorkspace.forkSession(asSessionId(sessionId))
-    return
-  }
-  const sessions = getSessions(ctx)
-  const childId = await sessions.fork({ sessionId: asSessionId(sessionId), increaseTitle: true })
-  sessions.open(childId)
-}
-
+/** Open a session, letting the host own selection and history loading. */
 export function openSession(ctx: ClientContext, sessionId: string): void {
   const uiWorkspace = getUiWorkspace(ctx)
-  if (typeof uiWorkspace.openSession === 'function') {
-    uiWorkspace.openSession(asSessionId(sessionId))
-    return
-  }
-  getSessions(ctx).open(asSessionId(sessionId))
+  if (typeof uiWorkspace.openSession !== 'function') throw new Error('workspace navigation cannot open sessions')
+  uiWorkspace.openSession(asSessionId(sessionId))
+}
+
+/**
+ * Open a workspace: connect it and open its session, reusing or creating its
+ * blank session exactly as the official sidebar's own "new session" does.
+ */
+export async function openWorkspace(ctx: ClientContext, workspaceId: string): Promise<void> {
+  const uiWorkspace = getUiWorkspace(ctx)
+  if (typeof uiWorkspace.openWorkspace !== 'function') throw new Error('workspace navigation cannot open workspaces')
+  await uiWorkspace.openWorkspace(asWorkspaceId(workspaceId))
 }

@@ -7,6 +7,8 @@ import {
   SIDE_CHAT_CLOSE_PATH,
   SIDE_CHAT_LIST_PATH,
   SIDE_CHAT_OPEN_PATH,
+  SIDE_CHAT_REFERENCES_PATH,
+  type SideChatReferenceCandidate,
   SIDE_CHAT_DISABLED_REASON,
   type SideChatContextState,
   type SideChatOpenResult,
@@ -105,11 +107,16 @@ async function request(path: string, init?: RequestInit): Promise<any> {
 
 /** The plugin's host API surface. */
 export const sideChatApi = {
+  async references(sideSessionId: string, signal?: AbortSignal): Promise<SideChatReferenceCandidate[]> {
+    const payload = await request(`${SIDE_CHAT_REFERENCES_PATH}?sideSessionId=${encodeURIComponent(sideSessionId)}`, { signal })
+    if (!Array.isArray(payload.candidates)) throw new SideChatApiError(500, 'reference response missing candidates')
+    return payload.candidates
+  },
   /**
    * Open a side chat for a parent session.
    *
-   * Resolves the new session id plus whether the parent's context came along —
-   * the injected context is not visible in the transcript until the first turn,
+   * Resolves the new session id plus whether the parent link came along —
+   * the injected link is not visible in the transcript until the first turn,
    * so this is the only place the outcome is observable up front.
    */
   open(parentSessionId: string): Promise<SideChatOpenResult> {
@@ -120,14 +127,13 @@ export const sideChatApi = {
       if (typeof payload.sideSessionId !== 'string') {
         throw new SideChatApiError(500, 'open response missing sideSessionId')
       }
-      // `context` is absent on a host built before context inheritance, and
-      // 'off' only exists on a host that knows the setting — both collapse to
-      // 'none' rather than letting an older host make the panel claim more
-      // than it was told.
+      // Preserve the legacy 'inherited' state from older hosts that attached
+      // a digest. An absent value never claims the link was created.
       const context: SideChatContextState =
-        payload.context === 'inherited' ? 'inherited'
-          : payload.context === 'off' ? 'off'
-            : 'none'
+        payload.context === 'linked' ? 'linked'
+          : payload.context === 'inherited' ? 'inherited'
+            : payload.context === 'off' ? 'off'
+              : 'none'
       return { sideSessionId: payload.sideSessionId, context }
     })
   },

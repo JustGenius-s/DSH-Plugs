@@ -1,122 +1,150 @@
 /**
- * Local menu preferences and a cache of host-persisted pins.
+ * Local preferences for the plugin's additive surfaces.
  *
- * Every action can be turned off from the Plugins settings page so the menu
- * never grows past what the user actually wants. Merged from
- * dsh-workspace-menu v1.2.0, minus the destructive delete actions.
+ * Every row this plugin contributes can be switched off, so the official menus
+ * never grow past what the user wants. Only additions live here: the official
+ * pin, rename, fork, and archive rows are DSH's own and are not ours to toggle.
+ *
+ * The pinned panel reads its project pins from the Host (`pins.json`); session
+ * pins are the official `pinnedSessionIds` and are not duplicated here.
  */
 
-import { readPins, updatePin, type Pin } from './pins.ts'
-import { createPinPersistence } from './pin-persistence.ts'
-
 export type FeatureKey =
-  | 'dblclick'
+  /** Right-clicking a row opens that row's official menu (and our rows with it). */
   | 'contextmenu'
+  /** Show the pinned area above the sidebar list. */
+  | 'pinnedPanel'
   | 'workspacePin'
-  | 'workspaceRename'
+  | 'workspaceEditBinding'
   | 'workspaceOpenExplorer'
   | 'workspaceCopyPath'
   | 'workspaceNewSession'
-  | 'workspaceDelete'
-  | 'sessionPin'
-  | 'sessionRename'
-  | 'sessionUnread'
-  | 'sessionArchive'
-  | 'sessionFork'
+  | 'sessionCopyReference'
+  | 'sessionExport'
   | 'sessionOpenFolder'
 
 export const FEATURE_KEYS: readonly FeatureKey[] = [
-  'dblclick',
+  'contextmenu',
+  'pinnedPanel',
+  'workspacePin',
+  'workspaceEditBinding',
+  'workspaceOpenExplorer',
+  'workspaceCopyPath',
+  'workspaceNewSession',
+  'sessionCopyReference',
+  'sessionExport',
+  'sessionOpenFolder',
+]
+
+/** Rows contributed to the official Project (workspace) menu. */
+export const WORKSPACE_KEYS: readonly FeatureKey[] = [
   'contextmenu',
   'workspacePin',
-  'workspaceRename',
+  'workspaceEditBinding',
   'workspaceOpenExplorer',
   'workspaceCopyPath',
   'workspaceNewSession',
-  'workspaceDelete',
-  'sessionPin',
-  'sessionRename',
-  'sessionUnread',
-  'sessionArchive',
-  'sessionFork',
-  'sessionOpenFolder',
 ]
 
-/** Triggers are not menu rows: they decide how the menu opens at all. */
-export const TRIGGER_KEYS: readonly FeatureKey[] = ['dblclick', 'contextmenu']
-
-export const WORKSPACE_KEYS: readonly FeatureKey[] = [
-  'workspacePin',
-  'workspaceRename',
-  'workspaceOpenExplorer',
-  'workspaceCopyPath',
-  'workspaceNewSession',
-  'workspaceDelete',
-]
-
+/** Rows contributed to the official Session menu. */
 export const SESSION_KEYS: readonly FeatureKey[] = [
-  'sessionPin',
-  'sessionRename',
-  'sessionUnread',
-  'sessionArchive',
-  'sessionFork',
+  'sessionCopyReference',
+  'sessionExport',
   'sessionOpenFolder',
 ]
+
+/** Switches for the plugin's own surfaces rather than a menu row. */
+export const SURFACE_KEYS: readonly FeatureKey[] = ['pinnedPanel']
 
 export type FeatureMap = Record<FeatureKey, boolean>
 
 const DEFAULT_FEATURES: FeatureMap = {
-  dblclick: true,
   contextmenu: true,
+  pinnedPanel: true,
   workspacePin: true,
-  workspaceRename: true,
+  workspaceEditBinding: true,
   workspaceOpenExplorer: true,
   workspaceCopyPath: true,
   workspaceNewSession: true,
-  workspaceDelete: true,
-  sessionPin: true,
-  sessionRename: true,
-  sessionUnread: true,
-  sessionArchive: true,
-  sessionFork: true,
+  sessionCopyReference: true,
+  sessionExport: true,
   sessionOpenFolder: true,
 }
 
-export interface MenuState {
-  pins: Pin[]
-  unreadSessions: string[]
+export interface PluginState {
+  /** Pinned workspace ids, newest first. Session pins are DSH's own. */
+  workspacePins: string[]
+  /**
+   * Drag-arranged row order, keyed by scope (`top`, `project:<id>`).
+   *
+   * Children are also written through to the host, but this is kept for both
+   * scopes: the panel re-sorts its rows for display, so a host write alone is
+   * invisible until a stored order overrides that sort (see `pinned-order.ts`).
+   */
+  pinnedOrder: Record<string, string[]>
   features: FeatureMap
+  /** Whether the pinned area's rows are folded away. Per browser, like the rest. */
+  pinsCollapsed: boolean
+  /**
+   * Project ids whose nested sessions are folded, newest first.
+   *
+   * Per browser like the rest of this state: which projects the operator is
+   * currently working inside is a view preference, not shared data.
+   */
+  collapsedProjects: string[]
 }
 
-export const STORAGE_KEY = 'dsh-workspace-plus:v1'
+/**
+ * Storage key. v2 kept the menu-only shape; this rebuild stores workspace pins
+ * only, because session pins moved to the official registry.
+ */
+export const STORAGE_KEY = 'dsh-workspace-plus:v3'
 
 const listeners = new Set<() => void>()
-let state: MenuState = load()
-let pinPersistence: ReturnType<typeof createPinPersistence> | undefined
-let persistenceOwners = 0
+let state: PluginState = load()
 
 function emit(): void {
   for (const listener of listeners) listener()
 }
 
-export function subscribeMenuState(listener: () => void): () => void {
+export function subscribePluginState(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
 
-export function getMenuState(): MenuState {
+export function getPluginState(): PluginState {
   return state
 }
 
-function defaultState(): MenuState {
+function defaultState(): PluginState {
   return {
-    pins: [],
-    unreadSessions: [],
+    workspacePins: [],
+    pinnedOrder: {},
     features: { ...DEFAULT_FEATURES },
+    pinsCollapsed: false,
+    collapsedProjects: [],
   }
 }
 
-function parse(raw: string | null): MenuState {
+/**
+ * Read the stored row order, dropping anything malformed.
+ *
+ * Shape-checked rather than trusted: this is user-writable localStorage, and a
+ * corrupted entry must degrade to "no arrangement" (the default ordering) rather
+ * than crash the panel or, worse, drop rows.
+ */
+function parseOrder(value: unknown): Record<string, string[]> {
+  if (value === null || typeof value !== 'object') return {}
+  const out: Record<string, string[]> = {}
+  for (const [scope, list] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue
+    const ids = list.filter((id): id is string => typeof id === 'string' && id !== '')
+    if (ids.length > 0) out[scope] = ids
+  }
+  return out
+}
+
+function parse(raw: string | null): PluginState {
   if (raw === null) return defaultState()
   try {
     const value = JSON.parse(raw) as Record<string, unknown>
@@ -129,18 +157,22 @@ function parse(raw: string | null): MenuState {
       }
     }
     return {
-      pins: readPins(value),
-      unreadSessions: Array.isArray(value.unreadSessions)
-        ? value.unreadSessions.filter((id): id is string => typeof id === 'string')
+      workspacePins: Array.isArray(value.workspacePins)
+        ? value.workspacePins.filter((id): id is string => typeof id === 'string' && id !== '')
         : [],
+      pinnedOrder: parseOrder(value.pinnedOrder),
       features,
+      pinsCollapsed: value.pinsCollapsed === true,
+      collapsedProjects: Array.isArray(value.collapsedProjects)
+        ? value.collapsedProjects.filter((id): id is string => typeof id === 'string' && id !== '')
+        : [],
     }
   } catch {
     return defaultState()
   }
 }
 
-function load(): MenuState {
+function load(): PluginState {
   try {
     return parse(localStorage.getItem(STORAGE_KEY))
   } catch {
@@ -149,58 +181,72 @@ function load(): MenuState {
   }
 }
 
-function commit(next: MenuState): void {
+function commit(next: PluginState): void {
   state = next
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, ...next }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, ...next }))
   } catch {
     // Storage unavailable; the in-memory state still drives this session.
   }
   emit()
 }
 
-export function isEnabled(key: FeatureKey, at?: MenuState): boolean {
-  return (at ?? state).features[key] !== false
+export function isEnabled(key: FeatureKey, at: PluginState = state): boolean {
+  return at.features[key] !== false
 }
 
 export function setFeature(key: FeatureKey, value: boolean): void {
   commit({ ...state, features: { ...state.features, [key]: value } })
 }
 
-export function toggleId(list: readonly string[], id: string): string[] {
-  return list.includes(id) ? list.filter((item) => item !== id) : [...list, id]
+/** Newest first, so the most recently pinned project leads the panel. */
+export function setWorkspacePin(workspaceId: string, pinned: boolean): WorkspacePinChange {
+  const rest = state.workspacePins.filter((id) => id !== workspaceId)
+  const workspacePins = pinned ? [workspaceId, ...rest] : rest
+  commit({ ...state, workspacePins })
+  return { workspacePins }
 }
 
-export function setPin(pin: Pin, pinned: boolean): Promise<void> | undefined {
-  commit({ ...state, pins: updatePin(state.pins, pin, pinned) })
-  return pinPersistence?.set(pin, pinned)
+/** What a pin write changed, so the Host store can persist exactly that. */
+export interface WorkspacePinChange {
+  workspacePins: string[]
 }
 
-export function installPinPersistence(): () => void {
-  if (pinPersistence === undefined) {
-    pinPersistence = createPinPersistence({
-      initial: state.pins,
-      apply: (pins) => { commit({ ...state, pins }) },
-      onError: (error) => { console.warn('[dsh-workspace-plus] retrying pin persistence', error) },
-    })
-    void pinPersistence.flush().catch((error) => {
-      console.warn('[dsh-workspace-plus] pin persistence unavailable; will retry', error)
-    })
-  }
-  persistenceOwners += 1
-  return () => {
-    persistenceOwners -= 1
-    if (persistenceOwners !== 0) return
-    pinPersistence?.dispose()
-    pinPersistence = undefined
-  }
+/** Fold or unfold the pinned area. Remembered per browser, like the switches. */
+export function setPinsCollapsed(pinsCollapsed: boolean): void {
+  commit({ ...state, pinsCollapsed })
 }
 
-export function setUnreadSessions(ids: string[]): void {
-  commit({ ...state, unreadSessions: ids })
+/**
+ * Replace one scope's row order.
+ *
+ * An empty list removes the scope entirely rather than storing `[]`, so
+ * "no arrangement" has exactly one representation.
+ */
+export function setPinnedOrder(scope: string, order: readonly string[]): void {
+  const next = { ...state.pinnedOrder }
+  if (order.length === 0) delete next[scope]
+  else next[scope] = [...order]
+  commit({ ...state, pinnedOrder: next })
 }
 
-export function listenForMenuStateChanges(): () => void {
+/** Fold or unfold one pinned project's sessions. */
+export function setProjectCollapsed(workspaceId: string, collapsed: boolean): void {
+  const rest = state.collapsedProjects.filter((id) => id !== workspaceId)
+  commit({ ...state, collapsedProjects: collapsed ? [...rest, workspaceId] : rest })
+}
+
+/** Adopt the Host's project pins without emitting a write back. */
+export function adoptWorkspacePins(workspacePins: string[]): void {
+  if (sameIds(workspacePins, state.workspacePins)) return
+  commit({ ...state, workspacePins })
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index])
+}
+
+export function listenForPluginStateChanges(): () => void {
   const onStorage = (event: StorageEvent): void => {
     if (event.storageArea !== localStorage || (event.key !== STORAGE_KEY && event.key !== null)) return
     state = load()

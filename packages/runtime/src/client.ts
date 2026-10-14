@@ -1,10 +1,17 @@
 // The browser adapter is the only client-side package boundary that knows the
 // concrete DSH module layout. Plugin code consumes this module instead, so a
 // future platform package split is handled here once.
+
+
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -16,9 +23,13 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // Keep declaration-merging-only platform modules in the generated .d.ts.
 // Plain empty imports are erased by the declaration bundler.
 export type {} from '@deepseek-ai/dsh-api-remotes/client'
+export type {} from '@deepseek-ai/dsh-api-session-controller/client'
+export type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 export type {} from '@deepseek-ai/dsh-client-connection/client'
 export type {} from '@deepseek-ai/dsh-client-locale/client'
-export type {} from '@deepseek-ai/dsh-client-runtime/client'
+export type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+export type {} from '@deepseek-ai/dsh-client-ui-session/client'
+export type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 export type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 export type {} from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 export type {} from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -28,16 +39,16 @@ export type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 export type {} from '@deepseek-ai/dsh-client-ui-slots'
 
 import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {
-  ClientContext,
   ConversationNodeDefinition,
-  ISessions,
-  IWorkspaces,
-  SessionId,
-  SnapshotStore,
-  WorkspaceId,
-} from '@deepseek-ai/dsh-client-runtime/client'
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { SettingsScope } from './settings-scope.ts'
 import type {
   SessionEvent as CoreSessionEvent,
   SurfaceEvent,
@@ -165,14 +176,29 @@ export interface PluginClientContext {
 /** Plugin-owned locale namespaces bridged into the official slot registry. */
 export interface PluginLocaleNamespaceMap {}
 
-/** Plugin-owned slots and newer platform contracts bridged into the slot registry. */
+/**
+ * The view the sidebar Plugins page asks a configuration entry for (DSH
+ * 0.1.6+): `summary` for the one-liner under the title, `page` for the form
+ * with its own save control. Mirrors the official
+ * `dsh-client-ui-plugin-manager` slot contract; drop these declarations when
+ * the workspace's official type deps move to a version that ships them.
+ */
+export interface PluginConfigViewProps {
+  readonly view: 'summary' | 'page'
+}
+
+/**
+ * Plugin-owned slots bridged into the official slot registry, plus the
+ * official Plugins-page configuration slots our bundles register into:
+ * `plugins.bundle.config` is keyed by the bundle's package name and rendered
+ * on the bundle's own page (`view: 'page'` only); `plugins.row.config` is
+ * keyed by `<package name>#<row id>`; `plugins.item` is the Official-group
+ * card list the host-plane configuration pages occupy.
+ */
 export interface PluginSlotMap {
-  /** DSH 0.1.7 bundle detail page, keyed by npm package name. */
-  'plugins.bundle.config': {
-    kind: 'keyed'
-    scope: 'root'
-    owner: { readonly view: 'summary' | 'page' }
-  }
+  'plugins.item': { kind: 'list'; scope: 'root'; owner: PluginConfigViewProps }
+  'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: PluginConfigViewProps }
+  'plugins.row.config': { kind: 'keyed'; scope: 'root'; owner: PluginConfigViewProps }
 }
 
 /** Plugin-owned conversation node payloads bridged into the chat renderer. */
@@ -184,7 +210,15 @@ export interface UiWorkspaceFace {
   openSession?: (sessionId: SessionId) => void
   forkSession?: (sessionId: SessionId) => Promise<void>
   startSession?: (workspaceId?: WorkspaceId) => void
-  archiveSession?: (sessionId: SessionId) => Promise<void>
+  /**
+   * Archive a Session.
+   *
+   * `stopActivity` asks the Host to stop the Session's running work (its turn,
+   * subagent descendants, background jobs, schedules) instead of REFUSING the
+   * archive with `workspace/session-active`. Without it the call rejects while
+   * work is running, which is what lets a caller ask before killing that work.
+   */
+  archiveSession?: (sessionId: SessionId, options?: { readonly stopActivity?: boolean }) => Promise<void>
   pickDirectory: () => Promise<string | null>
 }
 
@@ -203,46 +237,54 @@ declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
 
 export type {
   AssistantBlock,
-  ChatConversationViewNode,
-  ClientContext,
   ConversationEventRegistry,
   ConversationNodeDefinition,
   ConversationNode,
   ConversationSnapshot,
-  ISessions,
-  IWorkspaces,
-  PendingInteraction,
-  PendingWait,
   RunningToolCall,
-  SessionBinding,
-  SessionFace,
-  SessionId,
-  SessionListState,
-  SessionSummary,
-  SettingsScope,
-  SnapshotStore,
-  UseConversationSession,
-  WorkspaceId,
-} from '@deepseek-ai/dsh-client-runtime/client'
+  ConversationViewNode as ChatConversationViewNode,
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 export type {
-  ConfigurableProviderView,
+  SessionBinding,
+  SessionFace,
+  SessionListState,
+  SessionSummary,
+} from '@deepseek-ai/dsh-api-session-controller/client'
+export type { SessionId } from '@deepseek-ai/dsh-session/types'
+export type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
+export type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
+export type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
+
+export type { ClientContext, SettingsScope, SnapshotStore }
+export type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+export type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
+
+export type {
   ConnectionHandle,
-  CredentialView,
-  DiscoveredModelView,
-  HistoryEntry,
-  IApiClient,
   SessionEvent,
+} from '@deepseek-ai/dsh-client-connection/client'
+
+export type {
+  LlmConfigurableProvider as ConfigurableProviderView,
+  CredentialInfo as CredentialView,
+  LlmDiscoveredModel as DiscoveredModelView,
   SettingsNamespaceView,
   SettingsPathOpView,
-} from '@deepseek-ai/dsh-client-connection/client'
+} from '@deepseek-ai/dsh-api-remotes/client'
+
+/** Legacy page transport retained for the side-chat history adapter. */
+export interface HistoryEntry { event: unknown; seq: number }
+export interface IApiClient {
+  sessions: { history(request: unknown): Promise<{ result: { ok: boolean; value: { events: HistoryEntry[]; hasMore: boolean } } }> }
+  subagents: { history(request: unknown): Promise<{ result: { ok: boolean; value: { events: HistoryEntry[]; hasMore: boolean } } }> }
+}
 
 export type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
 export type {
   InputTriggerSource,
   ReferenceInsert,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-export type { TurnTailOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 /**
  * Chat-target selector hook, surfaced to slot components as `useChat`.
  *
@@ -431,7 +473,7 @@ export const CLIENT_SERVICES = {
   /** Official DSH 0.1.5+ right-Sidebar tab-type registry. */
   sidebarRightTabs: 'sidebarRightTabs',
   slots: 'slots',
-  settingsScope: 'settingsScope',
+  settingsScope: 'configForms',
   settingsSchema: 'settingsSchema',
   uiWorkspace: 'uiWorkspace',
   workspaces: 'workspaces',
@@ -640,4 +682,84 @@ export async function readSessionModelCatalogWhenReady(
     if (Date.now() - started >= timeoutMs) return undefined
     await new Promise(resolve => setTimeout(resolve, intervalMs))
   }
+}
+
+/**
+ * The canonical DSH session reference, for clipboard and composer use.
+ *
+ * ## Why the encoder is reproduced here
+ *
+ * `dsh-session-reference` defines the format — a session id serialized as
+ * `dsh-session:<base64url(JSON id)>`, rendered as a Markdown mention
+ * `@[label](uri)` — and `packages/runtime/src/host.ts` re-exports its
+ * `formatSessionReferenceMention` for the HOST side. This is the CLIENT twin of
+ * that export: same name, same output, resolved from `./client` instead of
+ * `./host`, exactly as `readSessionModelCatalog` is paired.
+ *
+ * That implementation cannot run in the browser: it goes through `Buffer`, which
+ * the client does not have (verified at runtime — `typeof Buffer === 'undefined'`
+ * in the DSH client). No official client bundle carries it either.
+ *
+ * The encoding is small and fully specified, so it lives here rather than being
+ * plumbed through a host round-trip for one clipboard write. Its parity with the
+ * official implementation is checked by `test/session-reference.test.js` in this
+ * package, which may import the official module directly — a plugin may not
+ * (`scripts/check-dependency-contracts.mjs` enforces that official code enters
+ * plugins only through this boundary).
+ *
+ * JSON-quoting the id before base64 is deliberate on the official side: the id
+ * is an opaque string, and quoting keeps the encoding lossless for an id that
+ * contains characters base64url alone could not carry.
+ */
+
+/** The URI scheme reserved for DSH session snapshots. */
+export const SESSION_REFERENCE_SCHEME = 'dsh-session:'
+
+/**
+ * Encode a session id as a canonical `dsh-session:` URI.
+ *
+ * Base64url comes out of `btoa` fed a BINARY string, because `btoa` cannot take
+ * arbitrary Unicode and an id is not guaranteed ASCII.
+ */
+export function encodeSessionReferenceUri(sessionId: string): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(sessionId))
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  const base64 = btoa(binary)
+  return `${SESSION_REFERENCE_SCHEME}${base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`
+}
+
+/**
+ * Escape a Markdown link label as the official formatter does.
+ *
+ * Backslash and the CLOSING bracket only. Escaping an opening `[` would still
+ * round-trip (the official parser unescapes any `\x`) but would not match what
+ * the host writes, and the two must stay interchangeable.
+ */
+function escapeSessionReferenceLabel(label: string): string {
+  return label.replace(/[\\\]]/gu, (match) => `\\${match}`)
+}
+
+/** The structured id and optional display label a mention is built from. */
+export interface SessionReferenceInput {
+  /** Opaque source session identity. */
+  sessionId: string
+  /** Optional user-facing mention label. */
+  label?: string
+}
+
+/**
+ * The mention a composer accepts: `@[label](dsh-session:...)`.
+ *
+ * The label is display-only — the host resolves the id from the URI — so it can
+ * be a session's title, which is what makes the pasted reference readable.
+ *
+ * Takes the SAME object shape as the host-side `formatSessionReferenceMention`
+ * that `./host` re-exports, deliberately: an import that resolved to the other
+ * entry point would otherwise compile and then misbehave at runtime, reading
+ * `sessionId.sessionId` off a string. Identical call signatures make the two
+ * interchangeable rather than merely similar.
+ */
+export function formatSessionReferenceMention(reference: SessionReferenceInput): string {
+  return `@[${escapeSessionReferenceLabel(reference.label ?? reference.sessionId)}](${encodeSessionReferenceUri(reference.sessionId)})`
 }

@@ -7,6 +7,7 @@ import { HOST_SERVICES, SessionId } from '@just-genius/dsh-plugin-runtime/host'
 import {
   DELETE_PATH,
   LIST_PATH,
+  UNARCHIVE_PATH,
   type ArchiveHttpResult,
   type ArchiveListPayload,
   type ArchivedSessionRow,
@@ -26,6 +27,8 @@ interface RegistryMutator {
   enqueueOperation: <T>(operation: () => Promise<T>) => Promise<T>
   requireState: () => WorkspaceDomainState
   setState: (state: WorkspaceDomainState) => Promise<void>
+  /** Present on 0.1.6+; older registries only expose the state mutators. */
+  unarchiveSession?: (sessionId: SessionId) => Promise<void>
 }
 
 export function apply(ctx: Context): void {
@@ -40,6 +43,12 @@ export function apply(ctx: Context): void {
     path: DELETE_PATH,
     handler: (req, res) => void handleDelete(ctx, req, res),
   }), 'dsh-session-archive: delete')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: UNARCHIVE_PATH,
+    handler: (req, res) => void handleUnarchive(ctx, req, res),
+  }), 'dsh-session-archive: unarchive')
 }
 
 async function handleList(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -66,9 +75,7 @@ async function handleDelete(ctx: Context, req: IncomingMessage, res: ServerRespo
     json(res, 400, { ok: false, message: errorMessage(error) })
     return
   }
-  const sessionId = typeof (body as { sessionId?: unknown })?.sessionId === 'string'
-    ? (body as { sessionId: string }).sessionId.trim()
-    : ''
+  const sessionId = sessionIdFrom(body)
   if (sessionId === '') {
     json(res, 400, { ok: false, message: 'sessionId is required' })
     return
@@ -79,6 +86,36 @@ async function handleDelete(ctx: Context, req: IncomingMessage, res: ServerRespo
   } catch (error) {
     json(res, 500, { ok: false, message: errorMessage(error) })
   }
+}
+
+async function handleUnarchive(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method !== 'POST') {
+    json(res, 405, { ok: false, message: 'method not allowed' })
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    json(res, 400, { ok: false, message: errorMessage(error) })
+    return
+  }
+  const sessionId = sessionIdFrom(body)
+  if (sessionId === '') {
+    json(res, 400, { ok: false, message: 'sessionId is required' })
+    return
+  }
+  try {
+    await unarchiveArchived(ctx, sessionId)
+    json(res, 200, { ok: true, value: { unarchived: true, sessionId } })
+  } catch (error) {
+    json(res, 500, { ok: false, message: errorMessage(error) })
+  }
+}
+
+function sessionIdFrom(body: unknown): string {
+  const value = (body as { sessionId?: unknown })?.sessionId
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 async function listArchived(ctx: Context): Promise<ArchiveListPayload> {
@@ -99,7 +136,7 @@ async function listArchived(ctx: Context): Promise<ArchiveListPayload> {
       title = derived.title
       updatedAt = derived.updatedAt ?? updatedAt
     } else if (header !== undefined) {
-      const persisted = await readPersistedEvents(ctx.sessionPersistence, String(header.id))
+      const persisted = await readPersistedEvents(ctx.sessionPersistence, SessionId(String(header.id)))
       if (persisted !== null) {
         const derived = titleFromEvents(persisted.events, title)
         title = derived.title
@@ -159,8 +196,20 @@ async function deleteArchived(ctx: Context, rawId: string): Promise<void> {
   }
 }
 
+/**
+ * Drop one session from the registry-global archive set.
+ *
+ * 0.1.6+ registries own `unarchiveSession`; the structural fallback performs the
+ * same write through the state mutators for older hosts. Either way the write
+ * goes through the registry's operation queue and commits via `setState`, which
+ * is what makes the durable domain emit its change.
+ */
 async function removeFromArchiveSet(ctx: Context, sessionId: string): Promise<void> {
   const registry = ctx.workspaceRegistry as unknown as RegistryMutator
+  if (typeof registry.unarchiveSession === 'function') {
+    await registry.unarchiveSession(SessionId(sessionId))
+    return
+  }
   await registry.enqueueOperation(async () => {
     const state = registry.requireState()
     if (!state.archivedSessionIds.map(String).includes(sessionId)) return
@@ -169,6 +218,19 @@ async function removeFromArchiveSet(ctx: Context, sessionId: string): Promise<vo
       archivedSessionIds: state.archivedSessionIds.filter((id) => String(id) !== sessionId),
     })
   })
+}
+
+/**
+ * Restore one archived session to every grouping surface.
+ *
+ * Archiving never touched the session's workspace accounting slot, so dropping
+ * the id from the registry-global archive set alone puts the session back in its
+ * recorded position — no log, header, or directory is touched. An id that is
+ * not archived resolves without writing, matching the official unarchive
+ * semantics: removing an id cannot introduce an unknown session.
+ */
+async function unarchiveArchived(ctx: Context, rawId: string): Promise<void> {
+  await removeFromArchiveSet(ctx, rawId)
 }
 
 interface AgentRegistryLike {
@@ -229,30 +291,29 @@ function iterableEvents(events: unknown): SessionEvent[] | null {
 // `never` parameter makes the id bivariant: any id type is accepted while the
 // structural shape of the returned inspection stays checked.
 interface PersistenceReader {
-  inspect?: (id: never, signal?: AbortSignal) => Promise<{ events?: unknown; meta?: { createdAt?: number } }>
-  open?: (id: never, access: 'read' | 'write') => Promise<{
+  inspect?: (id: SessionId, signal?: AbortSignal) => Promise<{ events?: unknown; meta?: { createdAt?: number } }>
+  open?: (id: SessionId, access: 'read' | 'write') => Promise<{
     header?: { createdAt?: number }
     read: () => Promise<{ events?: unknown }>
     close?: () => Promise<void>
   }>
 }
 
-async function readPersistedEvents(persistence: PersistenceReader, sessionId: string): Promise<{ events: SessionEvent[]; createdAt?: number } | null> {
-  const id = sessionId as never
+async function readPersistedEvents(persistence: PersistenceReader, sessionId: SessionId): Promise<{ events: SessionEvent[]; createdAt?: number } | null> {
   if (typeof persistence.inspect === 'function') {
     try {
-      const inspection = await persistence.inspect(id)
+      const inspection = await persistence.inspect(sessionId)
       const events = iterableEvents(inspection?.events)
       if (events !== null) return { events, createdAt: inspection?.meta?.createdAt }
       if (inspection?.meta?.createdAt !== undefined) return { events: [], createdAt: inspection.meta.createdAt }
     } catch {
-      // 0.1.5 removed inspect; fall through to open/read.
+      // Newer persistence APIs removed inspect; fall through to open/read.
     }
   }
   if (typeof persistence.open !== 'function') return null
   let handle: Awaited<ReturnType<NonNullable<PersistenceReader['open']>>> | undefined
   try {
-    handle = await persistence.open(id, 'read')
+    handle = await persistence.open(sessionId, 'read')
     const result = await handle.read()
     const events = iterableEvents(result?.events) ?? []
     return { events, createdAt: handle.header?.createdAt }

@@ -30,16 +30,16 @@ test.each(['/flow', '/流程'])('%s claims typed arguments and preserves their t
   expect(submit).not.toHaveBeenCalled()
   await result.claim.submit('  调整登录流程\n保留现有行为  ', {} as never, [])
   expect(submit).toHaveBeenCalledWith('session-1', '  调整登录流程\n保留现有行为  ')
-  const entered = await source.matchEnter!(session, `${token} off`, signal, { images: 0 })
+  const entered = await source.matchEnter!(session, `${token} off`, signal, { attachments: 0 })
   expect(entered).toHaveProperty('claim.token', `${token} `)
 })
 
 test('arguments contribute no second menu row and leave bare /flow and other input alone', async () => {
   const submit = vi.fn()
   const source = createFlowArgumentSource(translate, submit)
-  expect(await source.candidates(session, { query: '', position: 'leading', signal })).toEqual([])
+  expect(await source.candidates(session, { query: '', position: 'leading', drilled: false, signal })).toEqual([])
   for (const line of ['/flow', '/flowchart off', '/debug off', 'hello /flow off']) {
-    expect(await source.matchEnter!(session, line, signal, { images: 0 })).toBeUndefined()
+    expect(await source.matchEnter!(session, line, signal, { attachments: 0 })).toBeUndefined()
   }
   expect(source.matchSpace!(session, '/flowchart')).toBeUndefined()
   expect(submit).not.toHaveBeenCalled()
@@ -48,8 +48,10 @@ test('arguments contribute no second menu row and leave bare /flow and other inp
 test('typed /流程 can enter the mode and attachment-carrying submissions remain intact', async () => {
   const submit = vi.fn()
   const source = createFlowArgumentSource(translate, submit)
-  expect(await source.matchEnter!(session, '/流程', signal, { images: 0 })).toHaveProperty('claim.token', '/流程 ')
-  for (const envelope of [{ images: 1 }, { attachments: 1 }]) {
+  expect(await source.matchEnter!(session, '/流程', signal, { attachments: 0 })).toHaveProperty('claim.token', '/流程 ')
+  // Older SDKs call this field `images`; the current host counts all
+  // attachments. Both spellings must be refused.
+  for (const envelope of [{ images: 1 } as never, { attachments: 1 }]) {
     await expect(source.matchEnter!(session, '/flow off', signal, envelope as never))
       .rejects.toThrow(zh['command.attachmentsUnsupported'])
   }

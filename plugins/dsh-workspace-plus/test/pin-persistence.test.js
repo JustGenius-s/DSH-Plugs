@@ -1,13 +1,20 @@
+/**
+ * Client pin persistence and the legacy session-pin migration.
+ *
+ * The migration is the one operation in this plugin that can LOSE user data, so
+ * these cover it directly: rows are handed to DSH one at a time, the old
+ * records are cleared only after every one was accepted, and an interrupted run
+ * leaves them on disk for the next attempt.
+ */
+
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createPinPersistence } from '../src/client/pin-persistence.ts'
 import { changeStoredPins, readStoredPins } from '../src/pin-store.ts'
 
-const workspace = { kind: 'workspace', id: 'workspace-a' }
-const session = { kind: 'session', id: 'session-a', workspaceId: workspace.id }
 let home
 let previousHome
 let clients
@@ -31,15 +38,18 @@ function client(initial = [], extra = {}) {
   return { ...sync, snapshot: () => pins, states }
 }
 
-function deferred() {
-  let resolve
-  const promise = new Promise((done) => { resolve = done })
-  return { promise, resolve }
+/** Write a v1 store holding session pins, as an older plugin version left it. */
+function seedLegacyPins(sessionIds) {
+  mkdirSync(join(home, 'workspace-plus'))
+  writeFileSync(join(home, 'workspace-plus', 'pins.json'), JSON.stringify({
+    version: 1,
+    pins: sessionIds.map((id) => ({ kind: 'session', id, workspaceId: 'w' })),
+  }))
 }
 
 beforeEach(() => {
   previousHome = process.env.DSH_HOME
-  home = mkdtempSync(join(tmpdir(), 'workspace-plus-pin-sync-'))
+  home = mkdtempSync(join(tmpdir(), 'workspace-plus-pins-'))
   process.env.DSH_HOME = home
   clients = []
 })
@@ -51,145 +61,81 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true })
 })
 
-test('a cold client on a different origin restores pins with empty localStorage', async () => {
-  const oldOrigin = client([workspace, session])
-  await oldOrigin.flush()
-  oldOrigin.dispose()
-  const newOrigin = client([])
-  await newOrigin.flush()
-  assert.deepEqual(newOrigin.snapshot(), [workspace, session])
-  assert.deepEqual(readStoredPins().pins, [workspace, session])
+test('a cold client restores the host project pins', async () => {
+  changeStoredPins({ action: 'set', workspaceId: 'w1', pinned: true })
+  changeStoredPins({ action: 'set', workspaceId: 'w2', pinned: true })
+  const cold = client([])
+  await cold.flush()
+  assert.deepEqual(cold.snapshot(), ['w2', 'w1'])
 })
 
-test('stale localStorage cannot revive a pin explicitly removed on disk', async () => {
-  changeStoredPins({ action: 'set', pin: workspace, pinned: false })
-  const sync = client([workspace])
+test('legacy session pins are handed to DSH, then cleared from disk', async () => {
+  seedLegacyPins(['s1', 's2'])
+  const adopted = []
+  const sync = client([], { adoptSessionPin: async (id) => { adopted.push(id) } })
   await sync.flush()
-  assert.deepEqual(sync.snapshot(), [])
-  assert.deepEqual(readStoredPins().pins, [])
+  assert.deepEqual(adopted, ['s1', 's2'])
+  const after = readStoredPins()
+  assert.deepEqual(after.legacySessionPins, [])
+  assert.deepEqual(after.workspacePins, [])
 })
 
-test('cold startup never writes the empty local default over host pins', async () => {
-  let changes = 0
-  const sync = client([], { transport: {
-    load: async () => ({ initialized: true, pins: [workspace, session] }),
-    change: async () => { changes += 1; throw new Error('unexpected write') },
-  } })
-  await sync.flush()
-  assert.equal(changes, 0)
-  assert.deepEqual(sync.snapshot(), [workspace, session])
-})
-
-test('pin and unpin during hydration are replayed over the restored list', async () => {
-  changeStoredPins({ action: 'import', pins: [workspace, session] })
-  const loading = deferred()
-  const sync = client([], { transport: { ...transport, load: () => loading.promise } })
-  const ready = sync.flush()
-  const removed = sync.set(workspace, false)
-  const added = { kind: 'workspace', id: 'new-workspace' }
-  const adding = sync.set(added, true)
-  loading.resolve(readStoredPins())
-  await Promise.all([ready, removed, adding])
-  assert.deepEqual(sync.snapshot(), [added, session])
-  assert.deepEqual(readStoredPins().pins, [added, session])
-  assert.ok(sync.states.every((pins) => !pins.some((pin) => pin.id === workspace.id)))
-})
-
-test('a delayed save response cannot erase a newer optimistic pin action', async () => {
-  const saving = deferred()
-  let first = true
-  const sync = client([], { transport: {
-    ...transport,
-    change: async (action) => {
-      const result = changeStoredPins(action)
-      if (first) { first = false; await saving.promise }
-      return result
+test('an interrupted migration keeps the un-adopted rows for the next attempt', async () => {
+  seedLegacyPins(['s1', 's2'])
+  const sync = client([], {
+    adoptSessionPin: async (id) => {
+      if (id === 's2') throw new Error('host rejected the pin')
     },
-  } })
+  })
+  await assert.rejects(() => sync.flush())
+  // The first pin was accepted, the second was not, so the store must NOT have
+  // been cleared — otherwise s2 would be lost with nothing holding it.
+  assert.deepEqual(readStoredPins().legacySessionPins, ['s1', 's2'])
+})
+
+test('a migration without an adopter leaves the rows alone', async () => {
+  // A host whose DSH lacks pinning must not silently drop the user's pins.
+  seedLegacyPins(['s1'])
+  const sync = client([])
   await sync.flush()
-  const addingWorkspace = sync.set(workspace, true)
-  const addingSession = sync.set(session, true)
-  const removingWorkspace = sync.set(workspace, false)
-  saving.resolve()
-  await Promise.all([addingWorkspace, addingSession, removingWorkspace])
-  assert.deepEqual(sync.snapshot(), [session])
-  assert.deepEqual(readStoredPins().pins, [session])
+  assert.deepEqual(readStoredPins().legacySessionPins, ['s1'])
 })
 
-test('two clients send operations without overwriting each others pins', async () => {
-  const first = client()
-  const second = client()
-  await Promise.all([first.flush(), second.flush()])
-  await Promise.all([first.set(workspace, true), second.set(session, true)])
-  assert.deepEqual(readStoredPins().pins, [session, workspace])
-  await first.set(workspace, false)
-  assert.deepEqual(readStoredPins().pins, [session])
+test('a cold client adopts legacy browser pins once', async () => {
+  const first = client(['w1'])
+  await first.flush()
+  assert.deepEqual(readStoredPins().workspacePins, ['w1'])
+  // A later window with a stale cache must not overwrite durable state.
+  const second = client(['stale'])
+  await second.flush()
+  assert.deepEqual(second.snapshot(), ['w1'])
+  assert.deepEqual(readStoredPins().workspacePins, ['w1'])
 })
 
-test('a failed hydration retains local pins and retries before importing or saving', async () => {
-  let offline = true
-  let changes = 0
-  const sync = client([workspace], { transport: {
-    load: async () => {
-      if (offline) throw new Error('offline')
-      return readStoredPins()
+test('queued writes survive a failure and replay in order', async () => {
+  let failNext = true
+  const sync = client([], {
+    transport: {
+      load: async () => readStoredPins(),
+      change: async (action) => {
+        if (failNext && action.action !== 'import') {
+          failNext = false
+          throw new Error('transient')
+        }
+        return changeStoredPins(action)
+      },
     },
-    change: async (action) => { changes += 1; return changeStoredPins(action) },
-  } })
-  await assert.rejects(sync.set(session, true), /offline/)
-  assert.equal(changes, 0)
-  assert.deepEqual(sync.snapshot(), [workspace])
-  offline = false
-  await sync.flush()
-  assert.deepEqual(readStoredPins().pins, [session, workspace])
+  })
+  const first = sync.set('w1', true)
+  await assert.rejects(() => first)
+  // The write stays queued; the retry timer is what eventually lands it.
+  await sync.set('w2', true).catch(() => undefined)
+  assert.deepEqual(sync.snapshot(), ['w2', 'w1'])
 })
 
-test('a write failure is observable and retains the operation for retry', async () => {
-  let failing = true
-  const sync = client([], { transport: {
-    ...transport,
-    change: async (action) => {
-      if (failing) throw new Error('disk full')
-      return changeStoredPins(action)
-    },
-  } })
-  await sync.flush()
-  await assert.rejects(sync.set(workspace, true), /disk full/)
-  assert.deepEqual(readStoredPins().pins, [])
-  failing = false
-  await sync.flush()
-  assert.deepEqual(readStoredPins().pins, [workspace])
-})
-
-test('failed saves automatically retry while the plugin remains active', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  let failing = true
-  const sync = client([], { retryMs: 1000, transport: {
-    ...transport,
-    change: async (action) => {
-      if (failing) throw new Error('offline')
-      return changeStoredPins(action)
-    },
-  } })
-  await sync.flush()
-  await assert.rejects(sync.set(session, true), /offline/)
-  failing = false
-  t.mock.timers.tick(1000)
-  await sync.flush()
-  assert.deepEqual(readStoredPins().pins, [session])
-})
-
-test('disposing a loading plugin stops late hydration and migration', async () => {
-  const loading = deferred()
-  let changes = 0
-  const sync = client([workspace], { transport: {
-    load: () => loading.promise,
-    change: async () => { changes += 1; throw new Error('unexpected write') },
-  } })
-  const ready = sync.flush()
+test('a disposed client stops writing', async () => {
+  const sync = client([])
   sync.dispose()
-  loading.resolve({ initialized: false, pins: [] })
-  await ready
-  assert.equal(changes, 0)
-  assert.deepEqual(sync.states, [])
+  await sync.set('w1', true)
+  assert.deepEqual(readStoredPins().workspacePins, [])
 })

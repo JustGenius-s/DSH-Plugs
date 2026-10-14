@@ -2,7 +2,7 @@
  * Width-fitting rules for the forwarded conversation surfaces.
  *
  * `@deepseek-ai/dsh-client-ui-primitives` ships `MarkdownText`, `CodeBlock`,
- * `JsonBlock`, `MessageText` and `TerminalBlock` as a module-loader bundle.
+ * `JsonBlock` and `TerminalBlock` as a module-loader bundle.
  * A plugin bundle that imports them through this package gets the components
  * with their hashed class names but WITHOUT the matching stylesheet —
  * verified against a built bundle: the class names are referenced on the DOM

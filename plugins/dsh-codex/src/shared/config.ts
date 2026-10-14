@@ -32,18 +32,29 @@ export interface DshCodexConfig {
   /** Cap on in-window user messages while full-session load is on (inclusive). */
   fullSessionLoadLimit: number
   terminalEnabled: boolean
+  /**
+   * Switch off DSH's built-in terminal: its guide entry disappears and any of
+   * its sidebar tabs close, while the Codex terminal panel is unaffected.
+   */
+  officialTerminalDisabled: boolean
   gitGraphEnabled: boolean
   /** Prefer the retained Codex file tree and previews over DSH's built-ins. */
   customFilesEnabled: boolean
   /** Offer the side-chat panel: a blank conversation beside the current session. */
   sideChatEnabled: boolean
   /**
-   * Hand a new side chat a digest of the parent conversation as context.
-   *
-   * Context, not history: the side chat's own transcript still starts empty —
-   * the digest only tells the side agent what the main task is about.
+   * Link a new side chat to the main conversation and allow on-demand reads.
+   * No parent turns are injected when the side chat opens.
    */
   sideChatContextEnabled: boolean
+  /** Toggle the built-in voice input from the focused DSH window. */
+  voiceShortcutEnabled: boolean
+  /** KeyboardEvent.code-based binding, such as Mod+Shift+KeyM. */
+  voiceShortcut: string
+  /** Stop after speech goes quiet, or cancel if no speech was detected. */
+  voiceAutoStopEnabled: boolean
+  voiceNoSpeechSeconds: number
+  voiceAfterSpeechSeconds: number
   /** Light syntax-highlight theme id for the files panel (see client catalog). */
   highlightThemeLight: string
   /** Dark syntax-highlight theme id for the files panel (see client catalog). */
@@ -58,6 +69,7 @@ export interface DshCodexConfig {
 export const FULL_SESSION_LOAD_LIMIT_MIN = 5
 export const FULL_SESSION_LOAD_LIMIT_MAX = 200
 export const FULL_SESSION_LOAD_LIMIT_PRESETS = [10, 15, 25, 50] as const
+export const DEFAULT_VOICE_SHORTCUT = 'Mod+Shift+KeyM'
 
 export const DEFAULT_CONFIG: DshCodexConfig = {
   uiFontFamily: '',
@@ -68,10 +80,16 @@ export const DEFAULT_CONFIG: DshCodexConfig = {
   fullSessionLoadEnabled: false,
   fullSessionLoadLimit: 25,
   terminalEnabled: true,
+  officialTerminalDisabled: false,
   gitGraphEnabled: true,
   customFilesEnabled: false,
   sideChatEnabled: true,
   sideChatContextEnabled: true,
+  voiceShortcutEnabled: true,
+  voiceShortcut: DEFAULT_VOICE_SHORTCUT,
+  voiceAutoStopEnabled: true,
+  voiceNoSpeechSeconds: 8,
+  voiceAfterSpeechSeconds: 2.5,
   highlightThemeLight: 'codex-light',
   highlightThemeDark: 'codex-dark',
   terminalShell: 'auto',

@@ -833,7 +833,7 @@ export class FlowOrchestrator {
 
       const message = createUserMessage({
         content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: 'dsh-flow', form: 'notice', summary: truncate(text, 120) },
+        source: { kind: 'dsh-flow', form: 'notice', summary: truncate(text, 120) },
       })
       live.followup(message)
     } catch {

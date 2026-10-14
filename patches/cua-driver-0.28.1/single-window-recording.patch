@@ -1,0 +1,1844 @@
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs
+index b72310088516788d890ccf9911df3395e483870e..8f74dbc39429ab760990fdb686bc02b6d7f926a5 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/lib.rs
+@@ -89,3 +89,4 @@ pub mod window_target;
+ 
+ pub use cua_driver_contract::{CaptureScope, EscalationReason, TOOL_INVOCATION_FAILED_CODE};
+ pub use recording::RecordingSession;
++pub mod observation_projection;
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/observation_projection.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/observation_projection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d76eb4473f217d253732b3feb4c2b3ee8ae8996
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/observation_projection.rs
+@@ -0,0 +1,47 @@
++//! Model-facing action bindings for clients that render MCP text/image blocks
++//! but do not forward structuredContent to the model.
++
++use serde_json::{Map, Value};
++
++/// Keep the snapshot binding and coordinate frame beside the rendered tree.
++/// Never fabricate a token for observation-only or unresolved AX surfaces.
++pub fn window_action_context(state: &Value) -> Option<String> {
++    let fields = [
++        "pid",
++        "window_id",
++        "snapshot_id",
++        "screenshot_width",
++        "screenshot_height",
++        "window_bounds",
++        "screenshot_frame_valid",
++        "degraded_reason",
++    ];
++    let mut context = Map::new();
++    for field in fields {
++        if let Some(value) = state.get(field) {
++            context.insert(field.to_owned(), value.clone());
++        }
++    }
++    if !context.contains_key("snapshot_id")
++        && !context.contains_key("screenshot_width")
++        && !context.contains_key("degraded_reason")
++    {
++        return None;
++    }
++    let mut text = format!("Window observation context:\n{}", Value::Object(context));
++    if state.get("snapshot_id").and_then(Value::as_str).is_some() {
++        text.push_str(
++            "\nFor AX actions, pass this snapshot_id together with the element_index \
++             shown in the tree. A bare element_index is not accepted. Re-snapshot \
++             after an action changes the window.",
++        );
++    }
++    if state.get("screenshot_width").is_some() {
++        text.push_str(
++            "\nPixel x/y are coordinates in the screenshot returned by this call. \
++             Do not manually convert them to desktop points or reuse a PiP \
++             thumbnail's coordinates.",
++        );
++    }
++    Some(text)
++}
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs
+index 6a8e72e4ad2bace947e19a5ee5340ea0be16b7b7..bbf4eb5286f2010b4e15acaef6ef4799cbc90ffe 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/recording.rs
+@@ -18,7 +18,7 @@ use std::time::Instant;
+ use serde_json::Value;
+ 
+ use crate::cursor_sampler::CursorSampler;
+-use crate::video::{self, VideoBackend, VideoMetadata};
++use crate::video::{self, VideoBackend, VideoMetadata, VideoTarget};
+ 
+ // ── Platform screenshot callback ─────────────────────────────────────────────
+ //
+@@ -255,6 +255,8 @@ struct RecordingInner {
+     /// session. The concrete type is platform-determined (SCKit on
+     /// macOS, ffmpeg subprocess elsewhere).
+     video: Option<Box<dyn VideoBackend>>,
++    /// Requested video surface, retained after stop and failed video startup.
++    video_target: Option<VideoTarget>,
+     /// Recorded after `stop()` until the next start — exposed in
+     /// `current_state()` so callers can read the finalized video info
+     /// after stopping.
+@@ -278,6 +280,9 @@ pub struct RecordingState {
+     pub last_error: Option<String>,
+     /// Whether a video subprocess is currently running.
+     pub video_active: bool,
++    /// Requested surface for the current or most recent session. `None` when
++    /// video was not requested; retained after stop or video startup failure.
++    pub video_target: Option<VideoTarget>,
+     /// Path to the most recently finalized video file, if any. Populated
+     /// after a stop; cleared on next start.
+     pub last_video_path: Option<String>,
+@@ -304,6 +309,7 @@ impl RecordingSession {
+                 session_monotonic_start: None,
+                 last_error: None,
+                 video: None,
++                video_target: None,
+                 last_video: None,
+                 cursor: None,
+                 last_cursor_samples: 0,
+@@ -326,7 +332,7 @@ impl RecordingSession {
+     /// Enable recording at `output_dir`, optionally with video capture.
+     /// Counterpart to `stop()`. Returns the resulting state.
+     ///
+-    /// `record_video=true` spawns ffmpeg writing `<output_dir>/recording.mp4`
++    /// `record_video=true` starts display capture to `<output_dir>/recording.mp4`
+     /// for the lifetime of the session. NOTE: the MCP `start_recording` tool
+     /// now defaults `record_video` to *false* (opt-in) — see
+     /// `recording_tools.rs` — so video only records when explicitly requested.
+@@ -346,6 +352,25 @@ impl RecordingSession {
+         record_video: bool,
+         owner: Option<&str>,
+     ) -> anyhow::Result<()> {
++        self.start_with_target(output_dir, record_video, owner, &VideoTarget::Display)
++    }
++
++    /// Enable recording with an explicit video surface. A window target requires
++    /// video capture. Validate before touching an existing recording so malformed
++    /// requests cannot stop another session.
++    pub fn start_with_target(
++        &self,
++        output_dir: &str,
++        record_video: bool,
++        owner: Option<&str>,
++        video_target: &VideoTarget,
++    ) -> anyhow::Result<()> {
++        video_target.validate()?;
++        anyhow::ensure!(
++            record_video || matches!(video_target, VideoTarget::Display),
++            "video_target requires record_video: true"
++        );
++        anyhow::ensure!(!output_dir.is_empty(), "output_dir is required");
+         let mut inner = self.inner.lock().unwrap();
+         // Write-boundary resurrection guard — checked INSIDE the lock so the
+         // is_session_ended test is atomic with the enabled/owner write below.
+@@ -364,6 +389,9 @@ impl RecordingSession {
+                 );
+             }
+         }
++        let dir = expand_tilde(output_dir);
++        std::fs::create_dir_all(&dir)?;
++
+         // If a previous session is still open, gracefully tear it down
+         // first so the caller doesn't accidentally leak an ffmpeg process.
+         if let Some(rec) = inner.video.take() {
+@@ -373,9 +401,6 @@ impl RecordingSession {
+             let _ = cur.stop();
+         }
+ 
+-        let dir = expand_tilde(output_dir);
+-        std::fs::create_dir_all(&dir)?;
+-
+         // Single monotonic anchor shared by video, cursor sampler, and
+         // per-turn `t_ms_from_session_start` math in `record()` — so all
+         // three timelines line up at the millisecond.
+@@ -385,7 +410,7 @@ impl RecordingSession {
+         let mut video_error: Option<String> = None;
+         if record_video {
+             let path = dir.join("recording.mp4");
+-            match video::start_video(&path) {
++            match video::start_video_with_target(&path, video_target) {
+                 Ok(rec) => {
+                     inner.video = Some(rec);
+                     video_present = true;
+@@ -422,6 +447,7 @@ impl RecordingSession {
+         let session_payload = serde_json::json!({
+             "schema_version": 1,
+             "started_at_monotonic_ms": now_ms(),
++            "video_target": record_video.then_some(video_target),
+             "video": video_session_payload(video_present, video_error.as_deref(), None),
+             "cursor": { "present": inner.cursor.is_some(), "sample_count": 0 }
+         });
+@@ -440,6 +466,7 @@ impl RecordingSession {
+         inner.session_start_ms = now_ms();
+         inner.session_monotonic_start = Some(monotonic_start);
+         inner.last_error = video_error;
++        inner.video_target = record_video.then_some(*video_target);
+         inner.last_video = None;
+         inner.last_cursor_samples = 0;
+         Ok(())
+@@ -515,6 +542,7 @@ impl RecordingSession {
+             let session_payload = serde_json::json!({
+                 "schema_version": 1,
+                 "started_at_monotonic_ms": now_ms(),
++                "video_target": inner.video_target,
+                 "video": video_block,
+                 "cursor": { "present": cursor_samples > 0, "sample_count": cursor_samples }
+             });
+@@ -553,6 +581,7 @@ impl RecordingSession {
+             next_turn: inner.next_turn,
+             last_error: inner.last_error.clone(),
+             video_active: inner.video.is_some(),
++            video_target: inner.video_target,
+             last_video_path: inner
+                 .last_video
+                 .as_ref()
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/recording_tools.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/recording_tools.rs
+index 43779ee71badd14ba1c8b7fe6770cc8774bd3d8a..2399a0b81fa35d70e543aef3761ed2ea5b55cd17 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/recording_tools.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/recording_tools.rs
+@@ -22,6 +22,7 @@ use crate::{
+     protocol::ToolResult,
+     recording::{RecordingSession, RecordingState},
+     tool::{Tool, ToolDef, ToolRegistry},
++    video::VideoTarget,
+ };
+ 
+ pub type ReplayRegistrySlot = Arc<Mutex<Weak<ToolRegistry>>>;
+@@ -67,7 +68,12 @@ impl Tool for StartRecordingTool {
+                 **Video is off by default.** Pass `record_video: true` to also \
+                 capture the main display to `<output_dir>/recording.mp4` (H.264 / \
+                 30 fps) for the lifetime of the session. The recording is torn \
+-                down automatically when the MCP client disconnects.\n\n\
++                down automatically when the MCP client disconnects. On macOS, \
++                add `video_target: {pid, window_id}` to capture only that window. \
++                Both identifiers must be positive integers, and the window must \
++                belong to that process. A window request never falls back to \
++                display capture. Window targets require `record_video: true` \
++                and are unsupported on Windows and Linux.\n\n\
+                 **macOS uses native ScreenCaptureKit** (daemon-owned SCStream + \
+                 SCRecordingOutput) so video inherits the daemon's Screen \
+                 Recording grant — no extra TCC prompt, no ffmpeg subprocess. \
+@@ -93,12 +99,30 @@ impl Tool for StartRecordingTool {
+                     },
+                     "record_video": {
+                         "type": "boolean",
+-                        "description": "Capture the main display to <output_dir>/recording.mp4. \
+-                            Default: false. Set to true to also capture the main \
+-                            display to recording.mp4 (otherwise only the per-turn \
++                        "description": "Capture video to <output_dir>/recording.mp4. \
++                            Default: false. Captures the main display unless \
++                            video_target selects a macOS window (otherwise only the per-turn \
+                             screenshots + JSON are recorded). On macOS this uses native \
+                             ScreenCaptureKit (no extra TCC prompt, macOS 15.0+); on \
+                             Windows + Linux it requires ffmpeg on PATH."
++                    },
++                    "video_target": {
++                        "type": "object",
++                        "description": "Capture only the specified macOS window, which must \
++                            belong to pid. Requires record_video: true. Omit to capture the \
++                            main display. Unsupported platforms reject window capture.",
++                        "required": ["pid", "window_id"],
++                        "properties": {
++                            "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647},
++                            "window_id": {"type": "integer", "minimum": 1, "maximum": u32::MAX}
++                        },
++                        "additionalProperties": false
++                    }
++                },
++                "dependentSchemas": {
++                    "video_target": {
++                        "required": ["record_video"],
++                        "properties": {"record_video": {"const": true}}
+                     }
+                 },
+                 "additionalProperties": false
+@@ -116,16 +140,27 @@ impl Tool for StartRecordingTool {
+         if output_dir.as_deref().map(str::is_empty).unwrap_or(true) {
+             return ToolResult::error("`output_dir` is required.");
+         }
+-        let record_video = args.bool_or("record_video", false);
++        let record_video = match args.get("record_video") {
++            None => false,
++            Some(value) => match value.as_bool() {
++                Some(value) => value,
++                None => return ToolResult::error("`record_video` must be a boolean."),
++            },
++        };
++        let video_target = match parse_video_target(&args, record_video) {
++            Ok(target) => target,
++            Err(error) => return error,
++        };
+         // Daemon-injected ownership key (absent for one-shot CLI / anonymous
+         // sessions). Stamps the recording so a session-scoped teardown
+         // (session_end) only stops the recording its own session started.
+         let owner = args.opt_str("_session_id");
+ 
+-        match self.session.start(
++        match self.session.start_with_target(
+             output_dir.as_deref().unwrap(),
+             record_video,
+             owner.as_deref(),
++            &video_target,
+         ) {
+             Ok(()) => {
+                 let state = self.session.current_state();
+@@ -134,11 +169,22 @@ impl Tool for StartRecordingTool {
+                 // prominently — the per-turn capture still runs, but the
+                 // caller deserves to know the mp4 won't materialize.
+                 let video_failed = record_video && !state.video_active;
++                if video_failed && matches!(video_target, VideoTarget::Window { .. }) {
++                    return ToolResult::error(format!(
++                        "Window video recording failed: {}. No display capture was started. \
++                         Trajectory recording remains enabled; call stop_recording to finalize it.",
++                        state.last_error.as_deref().unwrap_or("unknown backend error")
++                    ))
++                    .with_structured(recording_state_json(&state));
++                }
+                 let video_note = if record_video && state.video_active {
+                     " (video → recording.mp4)".to_string()
+                 } else if video_failed {
+                     let err = state.last_error.clone().unwrap_or_else(|| "unknown".into());
+-                    let hint = if crate::video_ffmpeg::find_ffmpeg().is_none() {
++                    let hint = if !cfg!(target_os = "macos")
++                        && matches!(video_target, VideoTarget::Display)
++                        && crate::video_ffmpeg::find_ffmpeg().is_none()
++                    {
+                         "\n\nffmpeg was not found. Call install_ffmpeg (then again with \
+                          confirm=true) to install it, then restart recording."
+                     } else {
+@@ -492,6 +538,47 @@ impl Tool for ReplayTrajectoryTool {
+ 
+ // ── helpers ───────────────────────────────────────────────────────────────────
+ 
++pub(crate) fn parse_video_target(
++    args: &Value,
++    record_video: bool,
++) -> Result<VideoTarget, ToolResult> {
++    let Some(raw) = args.get("video_target") else {
++        return Ok(VideoTarget::Display);
++    };
++    if !record_video {
++        return Err(ToolResult::error(
++            "`video_target` requires `record_video: true`.",
++        ));
++    }
++    let object = raw.as_object().ok_or_else(|| {
++        ToolResult::error("`video_target` must be an object with pid and window_id.")
++    })?;
++    if object.keys().any(|key| key != "pid" && key != "window_id") {
++        return Err(ToolResult::error(
++            "`video_target` accepts only pid and window_id.",
++        ));
++    }
++    let pid = raw
++        .get("pid")
++        .and_then(Value::as_i64)
++        .and_then(|value| i32::try_from(value).ok())
++        .filter(|value| *value > 0)
++        .ok_or_else(|| {
++            ToolResult::error("`video_target.pid` must be an integer between 1 and 2147483647.")
++        })?;
++    let window_id = raw
++        .get("window_id")
++        .and_then(Value::as_u64)
++        .and_then(|value| u32::try_from(value).ok())
++        .filter(|value| *value > 0)
++        .ok_or_else(|| {
++            ToolResult::error(
++                "`video_target.window_id` must be an integer between 1 and 4294967295.",
++            )
++        })?;
++    Ok(VideoTarget::Window { pid, window_id })
++}
++
+ fn recording_state_json(state: &RecordingState) -> Value {
+     json!({
+         // "recording" mirrors the Swift field name for parity.
+@@ -501,6 +588,7 @@ fn recording_state_json(state: &RecordingState) -> Value {
+         "next_turn": state.next_turn,
+         "last_error": state.last_error,
+         "video_active": state.video_active,
++        "video_target": state.video_target,
+         "last_video_path": state.last_video_path,
+         // Session that owns the live recording (the daemon-injected
+         // `_session_id`), or null when started anonymously. Informational; the
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
+index c69c0a3e2c06715b362f3431f4914048ac37584c..eb0e2de44075827d5d0b349a2e022ff19c8e69f8 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/tool.rs
+@@ -22,6 +22,7 @@ use crate::{
+         StopRecordingTool,
+     },
+     tool_args::ArgsExt,
++    video::VideoTarget,
+ };
+ 
+ tokio::task_local! {
+@@ -121,6 +122,19 @@ fn try_admit_text_input(
+     Ok(Some(TextInputAdmission { pid }))
+ }
+ 
++/// Resolve the recording surface through the same strict decoder used by the
++/// tool, before observation or output authorization chooses a resource.
++fn recording_video_target(args: &Value) -> Result<Option<VideoTarget>, ToolResult> {
++    let record_video = match args.get("record_video") {
++        None => false,
++        Some(value) => value
++            .as_bool()
++            .ok_or_else(|| ToolResult::error("`record_video` must be a boolean."))?,
++    };
++    let target = crate::recording_tools::parse_video_target(args, record_video)?;
++    Ok(record_video.then_some(target))
++}
++
+ pub use cua_driver_contract::{CAPABILITY_VERSION, TOOLS_LIST_SCHEMA_VERSION};
+ 
+ /// Metadata for a single tool.
+@@ -1693,7 +1707,23 @@ impl ToolRegistry {
+         {
+             return Ok(());
+         }
+-        let browser_target = args.get("target_id").and_then(Value::as_str);
++        let recording_target = if tool_name == "start_recording" {
++            Some(recording_video_target(args).map_err(|error| {
++                crate::consent::ConsentError::Provider(match error.content.first() {
++                    Some(Content::Text { text, .. }) => text.clone(),
++                    _ => "invalid recording video target".to_owned(),
++                })
++            })?)
++        } else {
++            None
++        };
++        // Recording has its own nested target. Unrelated top-level browser or
++        // window identifiers must never substitute a different grant scope.
++        let browser_target = if recording_target.is_none() {
++            args.get("target_id").and_then(Value::as_str)
++        } else {
++            None
++        };
+         let browser_tab = args.get("tab_id").and_then(Value::as_str);
+         if adapter_id == "private_observation"
+             && context.mode() == crate::authorization::PermissionMode::Standard
+@@ -1718,14 +1748,36 @@ impl ToolRegistry {
+             return Ok(());
+         }
+         let history_resource = history_observation_resource(tool_name);
+-        let browser_scope = if history_resource.is_none() {
++        let browser_scope = if history_resource.is_none() && recording_target.is_none() {
+             tool.protected_resource_scope("private_observation", args)
+                 .await
+                 .map_err(crate::consent::ConsentError::Provider)?
+         } else {
+             None
+         };
+-        let (mut resource, summary) = if let Some((resource, summary)) = history_resource {
++        let (mut resource, summary) = if let Some(target) = recording_target {
++            match target {
++                Some(VideoTarget::Window { pid, window_id }) => (
++                    serde_json::json!({
++                        "kind": "window",
++                        "pid": pid,
++                        "window_id": window_id,
++                    }),
++                    format!("Allow Cua to record window {window_id} of process {pid}"),
++                ),
++                Some(VideoTarget::Display) => self.display_observation_resource().await?,
++                None => (
++                    // Each later action passes its own observation/input
++                    // adapters. Starting trajectory-only recording does not
++                    // require a display identity or desktop observation grant.
++                    serde_json::json!({
++                        "kind": "session_trajectory_recording",
++                        "record_video": false,
++                    }),
++                    "Allow Cua to record separately authorized actions in this session".to_owned(),
++                ),
++            }
++        } else if let Some((resource, summary)) = history_resource {
+             (resource, summary.to_owned())
+         } else if let Some(resource) = browser_scope {
+             let target_id = browser_target.unwrap_or("unknown");
+@@ -1773,56 +1825,8 @@ impl ToolRegistry {
+                 }),
+                 format!("Allow Cua to observe process {pid}"),
+             )
+-        } else if tool_name == "start_recording"
+-            && args.get("record_video").and_then(Value::as_bool) != Some(true)
+-        {
+-            // A trajectory-only recording does not capture the display when it
+-            // starts. Each later action still passes its own observation/input
+-            // adapters, and the grant key is bound to this runtime-private
+-            // lifecycle session. Requiring display discovery here would make
+-            // this safe, headless-capable mode unusable on Linux CI.
+-            (
+-                serde_json::json!({
+-                    "kind": "session_trajectory_recording",
+-                    "record_video": false,
+-                }),
+-                "Allow Cua to record separately authorized actions in this session".to_owned(),
+-            )
+         } else {
+-            // Whole-desktop and unfiltered listing calls are scoped to the
+-            // current display geometry. Reading get_screen_size is R0 and
+-            // content-free; calling its platform implementation directly
+-            // avoids recursive authorization while making a display topology
+-            // change produce a different grant digest.
+-            let display = self
+-                .tools
+-                .get("get_screen_size")
+-                .ok_or_else(|| {
+-                    crate::consent::ConsentError::Provider(
+-                        "display identity is unavailable".to_owned(),
+-                    )
+-                })?
+-                .invoke(serde_json::json!({}))
+-                .await;
+-            if display.is_error == Some(true) {
+-                return Err(crate::consent::ConsentError::Provider(
+-                    "display identity could not be read".to_owned(),
+-                ));
+-            }
+-            let display = display.structured_content.ok_or_else(|| {
+-                crate::consent::ConsentError::Provider(
+-                    "display identity was not returned".to_owned(),
+-                )
+-            })?;
+-            (
+-                serde_json::json!({
+-                    "kind": "display",
+-                    "width": display.get("width").and_then(Value::as_u64),
+-                    "height": display.get("height").and_then(Value::as_u64),
+-                    "scale_factor": display.get("scale_factor").and_then(Value::as_f64),
+-                }),
+-                "Allow Cua to observe the current desktop".to_owned(),
+-            )
++            self.display_observation_resource().await?
+         };
+ 
+         if context.capability_manifest().is_some() {
+@@ -1845,6 +1849,39 @@ impl ToolRegistry {
+         Ok(())
+     }
+ 
++    async fn display_observation_resource(
++        &self,
++    ) -> Result<(Value, String), crate::consent::ConsentError> {
++        // Whole-desktop and unfiltered listing calls are scoped to the current
++        // display geometry. Content-free direct discovery avoids recursive
++        // authorization, and display changes produce a different grant digest.
++        let display = self
++            .tools
++            .get("get_screen_size")
++            .ok_or_else(|| {
++                crate::consent::ConsentError::Provider("display identity is unavailable".to_owned())
++            })?
++            .invoke(serde_json::json!({}))
++            .await;
++        if display.is_error == Some(true) {
++            return Err(crate::consent::ConsentError::Provider(
++                "display identity could not be read".to_owned(),
++            ));
++        }
++        let display = display.structured_content.ok_or_else(|| {
++            crate::consent::ConsentError::Provider("display identity was not returned".to_owned())
++        })?;
++        Ok((
++            serde_json::json!({
++                "kind": "display",
++                "width": display.get("width").and_then(Value::as_u64),
++                "height": display.get("height").and_then(Value::as_u64),
++                "scale_factor": display.get("scale_factor").and_then(Value::as_f64),
++            }),
++            "Allow Cua to observe the current desktop".to_owned(),
++        ))
++    }
++
+     async fn authorize_desktop_input(
+         &self,
+         tool_name: &str,
+@@ -2085,17 +2122,31 @@ impl ToolRegistry {
+                 )
+             }
+             "start_recording" => {
++                let video_target = recording_video_target(args)?;
+                 let output = canonical_proposed_path(required_path_arg(args, "output_dir")?)?;
+                 args["output_dir"] = Value::String(output.clone());
++                let summary = match video_target {
++                    Some(VideoTarget::Window { pid, window_id }) => format!(
++                        "Allow Cua to write video of window {window_id} of process {pid} \
++                         and trajectory evidence to the exact local directory"
++                    ),
++                    Some(VideoTarget::Display) => {
++                        "Allow Cua to write display video and trajectory evidence \
++                         to the exact local directory"
++                            .to_owned()
++                    }
++                    None => "Allow Cua to write trajectory evidence to the exact local directory"
++                        .to_owned(),
++                };
+                 (
+                     serde_json::json!({
+                         "kind": "recording_output",
+                         "direction": "driver_to_local",
+                         "canonical_output_directory": output,
+-                        "record_video": args.get("record_video").and_then(Value::as_bool).unwrap_or(false),
++                        "record_video": video_target.is_some(),
++                        "video_target": video_target,
+                     }),
+-                    "Allow Cua to write trajectory evidence to the exact local directory"
+-                        .to_owned(),
++                    summary,
+                 )
+             }
+             "stop_recording" => {
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/src/video.rs b/libs/cua-driver/rust/crates/cua-driver-core/src/video.rs
+index f7eddc53d999059592be745bd66601709d6264b5..0796c7c672c9313537c1b2074da346f8bafbd199 100644
+--- a/libs/cua-driver/rust/crates/cua-driver-core/src/video.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-core/src/video.rs
+@@ -21,6 +21,29 @@
+ use std::path::{Path, PathBuf};
+ use std::sync::OnceLock;
+ 
++/// The surface requested for video capture. Window identifiers must identify
++/// one window owned by `pid`; a window request must never fall back to a display.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
++#[serde(tag = "type", rename_all = "snake_case")]
++pub enum VideoTarget {
++    Display,
++    Window { pid: i32, window_id: u32 },
++}
++
++impl VideoTarget {
++    /// Validate identifiers before starting or replacing a recording.
++    pub fn validate(&self) -> anyhow::Result<()> {
++        if let Self::Window { pid, window_id } = self {
++            anyhow::ensure!(*pid > 0, "video_target.pid must be a positive i32");
++            anyhow::ensure!(
++                *window_id > 0,
++                "video_target.window_id must be a positive u32"
++            );
++        }
++        Ok(())
++    }
++}
++
+ /// Finalized metadata returned by `VideoBackend::stop`. Mirrors the
+ /// Swift impl's `FinalMetadata` so `session.json` carries the same
+ /// shape across all backends.
+@@ -43,6 +66,22 @@ pub trait VideoBackend: Send {
+ /// once at startup via `set_video_backend_factory`.
+ pub trait VideoBackendFactory: Send + Sync {
+     fn start(&self, output_path: &Path) -> anyhow::Result<Box<dyn VideoBackend>>;
++
++    /// Backends opt into window capture explicitly. Existing display-only
++    /// backends keep working, but cannot silently record the display instead.
++    fn start_target(
++        &self,
++        output_path: &Path,
++        target: &VideoTarget,
++    ) -> anyhow::Result<Box<dyn VideoBackend>> {
++        target.validate()?;
++        match target {
++            VideoTarget::Display => self.start(output_path),
++            VideoTarget::Window { .. } => {
++                anyhow::bail!("window video capture is not supported by this platform's backend")
++            }
++        }
++    }
+ }
+ 
+ static VIDEO_BACKEND_FACTORY: OnceLock<Box<dyn VideoBackendFactory>> = OnceLock::new();
+@@ -58,8 +97,17 @@ pub fn set_video_backend_factory(factory: Box<dyn VideoBackendFactory>) {
+ /// `RecordingSession` as "video failed to start" — the per-turn pipeline
+ /// keeps running).
+ pub fn start_video(output_path: &Path) -> anyhow::Result<Box<dyn VideoBackend>> {
++    start_video_with_target(output_path, &VideoTarget::Display)
++}
++
++/// Start capture for an explicit surface, with no display fallback for a window.
++pub fn start_video_with_target(
++    output_path: &Path,
++    target: &VideoTarget,
++) -> anyhow::Result<Box<dyn VideoBackend>> {
++    target.validate()?;
+     let factory = VIDEO_BACKEND_FACTORY
+         .get()
+         .ok_or_else(|| anyhow::anyhow!("no video backend registered for this platform"))?;
+-    factory.start(output_path)
++    factory.start_target(output_path, target)
+ }
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/tests/observation_projection.rs b/libs/cua-driver/rust/crates/cua-driver-core/tests/observation_projection.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..d30b5d65aa58543ef3b31a0bcad21112ef9b69bb
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/cua-driver-core/tests/observation_projection.rs
+@@ -0,0 +1,39 @@
++use cua_driver_core::observation_projection::window_action_context;
++use serde_json::json;
++
++#[test]
++fn text_clients_receive_the_real_snapshot_binding_and_frame() {
++    let state = json!({
++        "pid": 42, "window_id": 73, "snapshot_id": "snapshot:real",
++        "screenshot_width": 1568, "screenshot_height": 1176,
++        "window_bounds": {"x": 100, "y": 80, "width": 1024, "height": 768},
++        "elements": [{"element_index": 7, "label": "Start"}],
++        "screenshot_png_b64": "large-private-image"
++    });
++    let text = window_action_context(&state).unwrap();
++    assert!(text.contains("\"snapshot_id\":\"snapshot:real\""));
++    assert!(text.contains("\"screenshot_width\":1568"));
++    assert!(text.contains("\"width\":1024"));
++    assert!(text.contains("bare element_index is not accepted"));
++    assert!(!text.contains("large-private-image"));
++    assert!(!text.contains("\"elements\""));
++}
++
++#[test]
++fn observation_only_images_do_not_claim_an_action_binding() {
++    let text = window_action_context(&json!({
++        "pid": 42, "window_id": 73, "screenshot_width": 500, "screenshot_height": 375
++    })).unwrap();
++    assert!(!text.contains("snapshot_id"));
++    assert!(!text.contains("For AX actions"));
++}
++
++#[test]
++fn unresolved_windows_keep_their_degradation_without_inventing_a_token() {
++    let text = window_action_context(&json!({
++        "pid": 42, "window_id": 73, "degraded_reason": "ax_window_unresolved"
++    })).unwrap();
++    assert!(text.contains("ax_window_unresolved"));
++    assert!(!text.contains("snapshot_id"));
++    assert!(window_action_context(&json!({"pid":42,"window_id":73})).is_none());
++}
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/tests/recording_capture_authorization.rs b/libs/cua-driver/rust/crates/cua-driver-core/tests/recording_capture_authorization.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..109450c68f7a9175030e74d6c9992160613ee159
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/cua-driver-core/tests/recording_capture_authorization.rs
+@@ -0,0 +1,293 @@
++#![cfg(feature = "yaml")]
++
++use std::{
++    path::Path,
++    sync::{
++        atomic::{AtomicUsize, Ordering},
++        Arc,
++    },
++    time::Duration,
++};
++
++use async_trait::async_trait;
++use cua_driver_core::{
++    authorization::PermissionMode,
++    protocol::ToolResult,
++    session_authorization::{
++        EffectiveAuthorizationContext, SessionAuthorizationRegistry, SessionModeCeiling,
++    },
++    session_manifest::load_manifest,
++    tool::{Tool, ToolDef, ToolRegistry},
++};
++use serde_json::{json, Value};
++
++struct Probe {
++    def: ToolDef,
++    calls: Arc<AtomicUsize>,
++    display: bool,
++}
++
++#[async_trait]
++impl Tool for Probe {
++    fn def(&self) -> &ToolDef {
++        &self.def
++    }
++
++    async fn invoke(&self, _args: Value) -> ToolResult {
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        if self.display {
++            ToolResult::text("synthetic display")
++                .with_structured(json!({"width": 1920, "height": 1080, "scale_factor": 1.0}))
++        } else {
++            // Exercise admission only: never start a recorder or cursor sampler.
++            ToolResult::text("recording authorization passed")
++        }
++    }
++}
++
++fn registry(include_display_probe: bool) -> (ToolRegistry, Arc<AtomicUsize>, Arc<AtomicUsize>) {
++    let recording_calls = Arc::new(AtomicUsize::new(0));
++    let display_calls = Arc::new(AtomicUsize::new(0));
++    let mut registry = ToolRegistry::new();
++    for (name, calls, display) in [
++        ("start_recording", recording_calls.clone(), false),
++        ("get_screen_size", display_calls.clone(), true),
++    ] {
++        if display && !include_display_probe {
++            continue;
++        }
++        registry.register(Box::new(Probe {
++            def: ToolDef {
++                name: name.to_owned(),
++                description: "synthetic authorization probe".to_owned(),
++                input_schema: json!({"type": "object"}),
++                read_only: display,
++                destructive: false,
++                idempotent: true,
++                open_world: false,
++            },
++            calls,
++            display,
++        }));
++    }
++    (registry, recording_calls, display_calls)
++}
++
++fn context(
++    mode: PermissionMode,
++    output: &Path,
++    window_granted: bool,
++    display_granted: bool,
++) -> Arc<EffectiveAuthorizationContext> {
++    let manifest_file = tempfile::NamedTempFile::new().unwrap();
++    let windows = if window_granted {
++        json!([{"pid": 42, "window_id": 7}])
++    } else {
++        json!([])
++    };
++    std::fs::write(
++        manifest_file.path(),
++        json!({
++            "version": 3,
++            "expires_after": "1h",
++            "idle_timeout": "30m",
++            "allow": {"tools": ["start_recording"]},
++            "resources": {
++                "desktop": {"windows": windows, "display": display_granted},
++                "files": {"write": [output.canonicalize().unwrap()]}
++            }
++        })
++        .to_string(),
++    )
++    .unwrap();
++    let manifest = Arc::new(load_manifest(manifest_file.path()).unwrap());
++    let ceiling = SessionModeCeiling::for_trusted_sessions(
++        [mode],
++        mode == PermissionMode::Unrestricted,
++        Duration::from_secs(60),
++        Duration::from_secs(30),
++    )
++    .unwrap();
++    SessionAuthorizationRegistry::with_ceiling(ceiling)
++        .compatibility_context(mode, Some(manifest))
++        .unwrap()
++}
++
++#[tokio::test]
++async fn nested_window_grant_works_without_display_discovery_and_ignores_outer_ids() {
++    let output = tempfile::tempdir().unwrap();
++    for mode in [
++        PermissionMode::Bounded,
++        PermissionMode::Standard,
++        PermissionMode::Unrestricted,
++    ] {
++        let (registry, recording_calls, display_calls) = registry(false);
++        let result = registry
++            .invoke_with_context(
++                "start_recording",
++                json!({
++                    "session": "window-recording",
++                    "output_dir": output.path(),
++                    "record_video": true,
++                    "video_target": {"pid": 42, "window_id": 7},
++                    "pid": 999,
++                    "window_id": 888,
++                    "target_id": "unrelated-browser"
++                }),
++                context(mode, output.path(), true, false),
++            )
++            .await;
++        assert_ne!(result.is_error, Some(true), "{mode:?}: {result:?}");
++        assert_eq!(recording_calls.load(Ordering::SeqCst), 1);
++        assert_eq!(display_calls.load(Ordering::SeqCst), 0);
++    }
++}
++
++#[tokio::test]
++async fn outer_window_grant_cannot_authorize_a_different_nested_target() {
++    let output = tempfile::tempdir().unwrap();
++    let (registry, recording_calls, display_calls) = registry(true);
++    let result = registry
++        .invoke_with_context(
++            "start_recording",
++            json!({
++                "session": "window-recording",
++                "output_dir": output.path(),
++                "record_video": true,
++                "video_target": {"pid": 999, "window_id": 888},
++                "pid": 42,
++                "window_id": 7
++            }),
++            context(PermissionMode::Bounded, output.path(), true, true),
++        )
++        .await;
++    assert_eq!(result.is_error, Some(true), "{result:?}");
++    assert_eq!(recording_calls.load(Ordering::SeqCst), 0);
++    assert_eq!(display_calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn display_recording_requires_display_grant_despite_outer_window_ids() {
++    let output = tempfile::tempdir().unwrap();
++    for display_granted in [false, true] {
++        let (registry, recording_calls, display_calls) = registry(true);
++        let result = registry
++            .invoke_with_context(
++                "start_recording",
++                json!({
++                    "session": "display-recording",
++                    "output_dir": output.path(),
++                    "record_video": true,
++                    "pid": 42,
++                    "window_id": 7
++                }),
++                context(
++                    PermissionMode::Bounded,
++                    output.path(),
++                    true,
++                    display_granted,
++                ),
++            )
++            .await;
++        assert_eq!(result.is_error != Some(true), display_granted, "{result:?}");
++        assert_eq!(
++            recording_calls.load(Ordering::SeqCst),
++            usize::from(display_granted)
++        );
++        assert_eq!(display_calls.load(Ordering::SeqCst), 1);
++    }
++}
++
++#[tokio::test]
++async fn trajectory_only_recording_requires_no_window_or_display_grant() {
++    let output = tempfile::tempdir().unwrap();
++    let (registry, recording_calls, display_calls) = registry(false);
++    for record_video in [None, Some(false)] {
++        let mut args = json!({
++            "session": "trajectory-recording",
++            "output_dir": output.path(),
++            "pid": 999,
++            "window_id": 888
++        });
++        if let Some(value) = record_video {
++            args["record_video"] = json!(value);
++        }
++        let result = registry
++            .invoke_with_context(
++                "start_recording",
++                args,
++                context(PermissionMode::Bounded, output.path(), false, false),
++            )
++            .await;
++        assert_ne!(result.is_error, Some(true), "{result:?}");
++    }
++    assert_eq!(recording_calls.load(Ordering::SeqCst), 2);
++    assert_eq!(display_calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn invalid_recording_targets_fail_before_display_discovery_or_dispatch() {
++    let output = tempfile::tempdir().unwrap();
++    let (registry, recording_calls, display_calls) = registry(true);
++    let mut requests = vec![
++        Value::Null,
++        json!([]),
++        json!({}),
++        json!({"pid": 42}),
++        json!({"pid": 0, "window_id": 7}),
++        json!({"pid": 2147483648_u64, "window_id": 7}),
++        json!({"pid": 42, "window_id": -1}),
++        json!({"pid": 42, "window_id": 4294967296_u64}),
++        json!({"pid": "42", "window_id": 7}),
++        json!({"pid": 42, "window_id": 7.5}),
++        json!({"pid": 42, "window_id": 7, "unexpected": true}),
++    ]
++    .into_iter()
++    .map(|target| json!({"record_video": true, "video_target": target}))
++    .collect::<Vec<_>>();
++    requests.push(json!({"video_target": {"pid": 42, "window_id": 7}}));
++    for flag in [json!(false), json!(null), json!("true"), json!(1)] {
++        requests.push(json!({
++            "record_video": flag,
++            "video_target": {"pid": 42, "window_id": 7}
++        }));
++    }
++    for mut request in requests {
++        request["output_dir"] = json!(output.path());
++        request["session"] = json!("invalid-recording");
++        request["pid"] = json!(42);
++        request["window_id"] = json!(7);
++        let result = registry
++            .invoke_with_context(
++                "start_recording",
++                request.clone(),
++                context(PermissionMode::Bounded, output.path(), true, true),
++            )
++            .await;
++        assert_eq!(result.is_error, Some(true), "{request}: {result:?}");
++    }
++    assert_eq!(recording_calls.load(Ordering::SeqCst), 0);
++    assert_eq!(display_calls.load(Ordering::SeqCst), 0);
++}
++
++#[tokio::test]
++async fn window_observation_grant_does_not_bypass_exact_output_directory_grant() {
++    let granted_output = tempfile::tempdir().unwrap();
++    let different_output = tempfile::tempdir().unwrap();
++    let (registry, recording_calls, display_calls) = registry(false);
++    let result = registry
++        .invoke_with_context(
++            "start_recording",
++            json!({
++                "session": "window-recording",
++                "output_dir": different_output.path(),
++                "record_video": true,
++                "video_target": {"pid": 42, "window_id": 7}
++            }),
++            context(PermissionMode::Bounded, granted_output.path(), true, false),
++        )
++        .await;
++    assert_eq!(result.is_error, Some(true), "{result:?}");
++    assert_eq!(recording_calls.load(Ordering::SeqCst), 0);
++    assert_eq!(display_calls.load(Ordering::SeqCst), 0);
++}
+diff --git a/libs/cua-driver/rust/crates/cua-driver-core/tests/recording_video_target.rs b/libs/cua-driver/rust/crates/cua-driver-core/tests/recording_video_target.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..778635018b976195bb122a0f689a0f5be817e4f3
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/cua-driver-core/tests/recording_video_target.rs
+@@ -0,0 +1,414 @@
++use std::{
++    path::{Path, PathBuf},
++    sync::{
++        atomic::{AtomicUsize, Ordering},
++        Arc, Mutex, Once,
++    },
++};
++
++use cua_driver_core::{
++    recording::RecordingSession,
++    recording_tools::{GetRecordingStateTool, StartRecordingTool, StopRecordingTool},
++    tool::Tool,
++    video::{
++        set_video_backend_factory, VideoBackend, VideoBackendFactory, VideoMetadata, VideoTarget,
++    },
++};
++use serde_json::{json, Value};
++
++static STARTED: Mutex<Vec<(PathBuf, VideoTarget)>> = Mutex::new(Vec::new());
++static STOPPED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
++
++struct StubVideo(PathBuf);
++
++impl VideoBackend for StubVideo {
++    fn stop(self: Box<Self>) -> anyhow::Result<VideoMetadata> {
++        STOPPED.lock().unwrap().push(self.0.clone());
++        std::fs::write(&self.0, b"test fixture, not a recording")?;
++        Ok(VideoMetadata {
++            path: self.0,
++            duration_ms: 1,
++            finalized: true,
++        })
++    }
++}
++
++struct TargetFactory;
++
++impl VideoBackendFactory for TargetFactory {
++    fn start(&self, output_path: &Path) -> anyhow::Result<Box<dyn VideoBackend>> {
++        self.start_target(output_path, &VideoTarget::Display)
++    }
++
++    fn start_target(
++        &self,
++        output_path: &Path,
++        target: &VideoTarget,
++    ) -> anyhow::Result<Box<dyn VideoBackend>> {
++        STARTED
++            .lock()
++            .unwrap()
++            .push((output_path.to_owned(), *target));
++        if matches!(target, VideoTarget::Window { pid: 777, .. }) {
++            anyhow::bail!("requested window is unavailable");
++        }
++        Ok(Box::new(StubVideo(output_path.to_owned())))
++    }
++}
++
++fn setup() -> tempfile::TempDir {
++    static REGISTER: Once = Once::new();
++    REGISTER.call_once(|| set_video_backend_factory(Box::new(TargetFactory)));
++    let directory = tempfile::tempdir().unwrap();
++    // Make cursor-sampler startup fail before spawning its polling thread.
++    // These tests exercise only the recording interface and fake video backend.
++    std::fs::create_dir(directory.path().join("cursor.jsonl")).unwrap();
++    directory
++}
++
++fn starts_for(path: &Path) -> Vec<VideoTarget> {
++    STARTED
++        .lock()
++        .unwrap()
++        .iter()
++        .filter(|(output, _)| output == path)
++        .map(|(_, target)| *target)
++        .collect()
++}
++
++fn stops_for(path: &Path) -> usize {
++    STOPPED
++        .lock()
++        .unwrap()
++        .iter()
++        .filter(|output| output.as_path() == path)
++        .count()
++}
++
++fn manifest(path: &Path) -> Value {
++    serde_json::from_slice(&std::fs::read(path.join("session.json")).unwrap()).unwrap()
++}
++
++#[test]
++fn advertised_schema_requires_video_and_bounded_window_identifiers() {
++    let tool = StartRecordingTool::new(Arc::new(RecordingSession::new()));
++    let validator = jsonschema::validator_for(&tool.def().input_schema).unwrap();
++    assert!(validator.is_valid(&json!({"output_dir": "/unused"})));
++    assert!(validator.is_valid(&json!({
++        "output_dir": "/unused",
++        "record_video": true,
++        "video_target": {"pid": i32::MAX, "window_id": u32::MAX}
++    })));
++    for arguments in [
++        json!({"output_dir": "/unused", "video_target": {"pid": 1, "window_id": 1}}),
++        json!({
++            "output_dir": "/unused",
++            "record_video": false,
++            "video_target": {"pid": 1, "window_id": 1}
++        }),
++        json!({
++            "output_dir": "/unused",
++            "record_video": true,
++            "video_target": {"pid": 0, "window_id": 1}
++        }),
++        json!({
++            "output_dir": "/unused",
++            "record_video": true,
++            "video_target": {"pid": 1, "window_id": 4294967296_u64}
++        }),
++    ] {
++        assert!(!validator.is_valid(&arguments), "accepted {arguments}");
++    }
++}
++
++#[test]
++fn display_only_backend_keeps_legacy_start_and_rejects_window_without_fallback() {
++    struct DisplayFactory(AtomicUsize);
++    impl VideoBackendFactory for DisplayFactory {
++        fn start(&self, output_path: &Path) -> anyhow::Result<Box<dyn VideoBackend>> {
++            self.0.fetch_add(1, Ordering::SeqCst);
++            Ok(Box::new(StubVideo(output_path.to_owned())))
++        }
++    }
++
++    let factory = DisplayFactory(AtomicUsize::new(0));
++    let path = Path::new("unused-video-target-fixture.mp4");
++    let _display = factory.start_target(path, &VideoTarget::Display).unwrap();
++    assert_eq!(factory.0.load(Ordering::SeqCst), 1);
++
++    let error = factory
++        .start_target(
++            path,
++            &VideoTarget::Window {
++                pid: 42,
++                window_id: 84,
++            },
++        )
++        .err()
++        .expect("a display-only backend must reject window capture");
++    assert!(error.to_string().contains("not supported"));
++    assert_eq!(
++        factory.0.load(Ordering::SeqCst),
++        1,
++        "a window request must never invoke display capture"
++    );
++}
++
++#[test]
++fn legacy_session_api_uses_display_and_no_video_clears_target() {
++    let directory = setup();
++    let path = directory.path().join("recording.mp4");
++    let session = RecordingSession::new();
++    session
++        .start(directory.path().to_str().unwrap(), true, None)
++        .unwrap();
++    assert_eq!(
++        session.current_state().video_target,
++        Some(VideoTarget::Display)
++    );
++    assert_eq!(starts_for(&path), vec![VideoTarget::Display]);
++    assert_eq!(
++        manifest(directory.path())["video_target"],
++        json!({"type": "display"})
++    );
++    session.stop_owner(None).unwrap();
++    assert_eq!(
++        session.current_state().video_target,
++        Some(VideoTarget::Display)
++    );
++
++    session
++        .start(directory.path().to_str().unwrap(), false, None)
++        .unwrap();
++    assert_eq!(session.current_state().video_target, None);
++    assert!(manifest(directory.path())["video_target"].is_null());
++    session.stop_owner(None).unwrap();
++}
++
++#[tokio::test]
++async fn window_target_reaches_backend_and_survives_stop_in_state_and_manifest() {
++    let directory = setup();
++    let path = directory.path().join("recording.mp4");
++    let session = Arc::new(RecordingSession::new());
++    let target = VideoTarget::Window {
++        pid: i32::MAX,
++        window_id: u32::MAX,
++    };
++    let expected_json = json!({"type": "window", "pid": i32::MAX, "window_id": u32::MAX});
++
++    let started = StartRecordingTool::new(session.clone())
++        .invoke(json!({
++            "output_dir": directory.path(),
++            "record_video": true,
++            "video_target": {"pid": i32::MAX, "window_id": u32::MAX}
++        }))
++        .await;
++    assert_ne!(started.is_error, Some(true), "{started:?}");
++    let state = started.structured_content.unwrap();
++    assert_eq!(state["video_active"], true);
++    assert_eq!(state["video_target"], expected_json);
++    assert_eq!(starts_for(&path), vec![target]);
++    assert_eq!(session.current_state().video_target, Some(target));
++    assert_eq!(manifest(directory.path())["video_target"], expected_json);
++
++    let stopped = StopRecordingTool::new(session.clone())
++        .invoke(json!({}))
++        .await;
++    assert_ne!(stopped.is_error, Some(true), "{stopped:?}");
++    let state = GetRecordingStateTool::new(session).invoke(json!({})).await;
++    let state = state.structured_content.unwrap();
++    assert_eq!(state["enabled"], false);
++    assert_eq!(state["video_active"], false);
++    assert_eq!(state["video_target"], expected_json);
++    assert_eq!(state["last_video_path"], json!(path));
++    assert_eq!(manifest(directory.path())["video_target"], expected_json);
++    assert_eq!(stops_for(&path), 1);
++}
++
++#[tokio::test]
++async fn malformed_requests_do_not_replace_an_active_recording() {
++    let directory = setup();
++    let path = directory.path().join("recording.mp4");
++    let replacement = directory.path().join("replacement");
++    let session = Arc::new(RecordingSession::new());
++    let active_target = VideoTarget::Window {
++        pid: 42,
++        window_id: 84,
++    };
++    session
++        .start_with_target(
++            directory.path().to_str().unwrap(),
++            true,
++            Some("existing-owner"),
++            &active_target,
++        )
++        .unwrap();
++    let tool = StartRecordingTool::new(session.clone());
++    let mut requests: Vec<Value> = vec![
++        Value::Null,
++        json!([]),
++        json!("window"),
++        json!({}),
++        json!({"pid": 42}),
++        json!({"window_id": 84}),
++        json!({"pid": 0, "window_id": 84}),
++        json!({"pid": -1, "window_id": 84}),
++        json!({"pid": 2147483648_u64, "window_id": 84}),
++        json!({"pid": 42.5, "window_id": 84}),
++        json!({"pid": "42", "window_id": 84}),
++        json!({"pid": null, "window_id": 84}),
++        json!({"pid": true, "window_id": 84}),
++        json!({"pid": 42, "window_id": 0}),
++        json!({"pid": 42, "window_id": -1}),
++        json!({"pid": 42, "window_id": 4294967296_u64}),
++        json!({"pid": 42, "window_id": 84.5}),
++        json!({"pid": 42, "window_id": "84"}),
++        json!({"pid": 42, "window_id": null}),
++        json!({"pid": 42, "window_id": false}),
++        json!({"pid": 42, "window_id": 84, "display": true}),
++    ]
++    .into_iter()
++    .map(|target| {
++        json!({
++            "output_dir": replacement,
++            "record_video": true,
++            "video_target": target,
++            "_session_id": "replacement-owner"
++        })
++    })
++    .collect();
++    for flag in [json!(false), json!("true"), json!(1), Value::Null] {
++        requests.push(json!({
++            "output_dir": replacement,
++            "record_video": flag,
++            "video_target": {"pid": 42, "window_id": 84}
++        }));
++    }
++    requests.push(json!({
++        "output_dir": replacement,
++        "video_target": {"pid": 42, "window_id": 84}
++    }));
++    requests.push(json!({"record_video": true}));
++    requests.push(json!({"output_dir": "", "record_video": true}));
++
++    for request in requests {
++        let result = tool.invoke(request.clone()).await;
++        assert_eq!(
++            result.is_error,
++            Some(true),
++            "accepted {request}: {result:?}"
++        );
++        let state = session.current_state();
++        assert!(state.enabled);
++        assert!(state.video_active);
++        assert_eq!(state.output_dir.as_deref(), directory.path().to_str());
++        assert_eq!(state.owner.as_deref(), Some("existing-owner"));
++        assert_eq!(state.video_target, Some(active_target));
++        assert_eq!(starts_for(&path), vec![active_target]);
++        assert_eq!(
++            stops_for(&path),
++            0,
++            "stopped active recording for {request}"
++        );
++        assert!(!replacement.exists());
++    }
++    session.stop_owner(None).unwrap();
++}
++
++#[test]
++fn direct_session_validation_preserves_the_active_backend() {
++    let directory = setup();
++    let path = directory.path().join("recording.mp4");
++    let session = RecordingSession::new();
++    session
++        .start(directory.path().to_str().unwrap(), true, Some("active"))
++        .unwrap();
++
++    for (record_video, target) in [
++        (
++            true,
++            VideoTarget::Window {
++                pid: 0,
++                window_id: 1,
++            },
++        ),
++        (
++            true,
++            VideoTarget::Window {
++                pid: -1,
++                window_id: 1,
++            },
++        ),
++        (
++            true,
++            VideoTarget::Window {
++                pid: 1,
++                window_id: 0,
++            },
++        ),
++        (
++            false,
++            VideoTarget::Window {
++                pid: 1,
++                window_id: 1,
++            },
++        ),
++    ] {
++        session
++            .start_with_target(
++                directory.path().to_str().unwrap(),
++                record_video,
++                Some("replacement"),
++                &target,
++            )
++            .expect_err("invalid target should fail before replacing the recorder");
++        assert!(session.current_state().video_active);
++        assert_eq!(session.current_state().owner.as_deref(), Some("active"));
++        assert_eq!(stops_for(&path), 0);
++    }
++    let blocked = directory.path().join("not-a-directory");
++    std::fs::write(&blocked, b"fixture").unwrap();
++    session
++        .start_with_target(
++            blocked.to_str().unwrap(),
++            true,
++            Some("replacement"),
++            &VideoTarget::Display,
++        )
++        .expect_err("invalid output directory should preserve active recording");
++    assert_eq!(stops_for(&path), 0);
++    assert!(session.current_state().video_active);
++    session.stop_owner(None).unwrap();
++}
++
++#[tokio::test]
++async fn failed_window_start_retains_requested_target_without_display_fallback() {
++    let directory = setup();
++    let path = directory.path().join("recording.mp4");
++    let session = Arc::new(RecordingSession::new());
++    let result = StartRecordingTool::new(session.clone())
++        .invoke(json!({
++            "output_dir": directory.path(),
++            "record_video": true,
++            "video_target": {"pid": 777, "window_id": 84}
++        }))
++        .await;
++    assert_eq!(result.is_error, Some(true));
++    let state = result.structured_content.unwrap();
++    assert_eq!(state["enabled"], true);
++    assert_eq!(state["video_active"], false);
++    assert_eq!(state["last_error"], "requested window is unavailable");
++    assert_eq!(
++        state["video_target"],
++        json!({"type": "window", "pid": 777, "window_id": 84})
++    );
++    assert_eq!(
++        starts_for(&path),
++        vec![VideoTarget::Window {
++            pid: 777,
++            window_id: 84
++        }]
++    );
++    assert_eq!(stops_for(&path), 0);
++    session.stop_owner(None).unwrap();
++}
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
+index 01e56b57099c8c08f85205c2d60cbfd58ef260b5..bd3da6cfaf57fce296088cc20dfd0b60cac6726b 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/get_window_state.rs
+@@ -722,6 +722,11 @@ impl Tool for GetWindowStateTool {
+                 cua_driver_core::window_inspection::BrowserChromeCaptureCoverage::MayBeIncomplete,
+             ),
+         );
++        if let Some(context) =
++            cua_driver_core::observation_projection::window_action_context(&structured)
++        {
++            content.push(Content::text(context));
++        }
+         ToolResult {
+             content,
+             is_error: None,
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/tools/list_windows.rs b/libs/cua-driver/rust/crates/platform-macos/src/tools/list_windows.rs
+index 7a9df62adfd466ec4b91354717d702b72e9d44a3..d526de75ca5e4b90a1c65da5bdc1147fe03cefd7 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/tools/list_windows.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/tools/list_windows.rs
+@@ -70,7 +70,16 @@ impl Tool for ListWindowsTool {
+ 
+         let windows_json: Vec<Value> = windows.iter().map(window_record_json).collect();
+ 
+-        ToolResult::text(format!("Found {} window(s).", windows_json.len())).with_structured(
++        let mut summary = format!("Found {} window(s).", windows_json.len());
++        for window in &windows {
++            summary.push_str(&format!(
++                "\nwindow_id={} pid={} app={:?} title={:?} bounds=({}, {}, {}, {}) on_screen={}",
++                window.window_id, window.pid, window.app_name, window.title,
++                window.bounds.x, window.bounds.y, window.bounds.width, window.bounds.height,
++                window.is_on_screen,
++            ));
++        }
++        ToolResult::text(summary).with_structured(
+             serde_json::json!({
+                 "windows": windows_json,
+                 "current_space_id": current_space_id
+diff --git a/libs/cua-driver/rust/crates/platform-macos/src/video_sckit.rs b/libs/cua-driver/rust/crates/platform-macos/src/video_sckit.rs
+index ce3841ec99253a705340770f82c12d0215478c47..0393b78b1c1f2de3289eff7b8b416c4f1e337531 100644
+--- a/libs/cua-driver/rust/crates/platform-macos/src/video_sckit.rs
++++ b/libs/cua-driver/rust/crates/platform-macos/src/video_sckit.rs
+@@ -15,9 +15,10 @@
+ //! widespread enough that requiring it is acceptable for the Rust port.
+ //!
+ //! Lifecycle:
+-//!   1. `start(path)` resolves the main display, builds a 30fps full-display
+-//!      SCStream config + SCRecordingOutput pointing at the mp4 path,
+-//!      attaches the recording output, calls `start_capture()`.
++//!   1. `start(path)` resolves the display; `start_target(path, target)` can
++//!      instead select one exact window owned by the requested process.
++//!      Both build a 30fps SCStream config + SCRecordingOutput pointing at
++//!      the mp4 path, attach the recording output, call `start_capture()`.
+ //!   2. Caller stays alive while recording.
+ //!   3. `stop()` calls `stop_capture()` (which finalises the mp4 moov
+ //!      atom) and returns the elapsed-time metadata.
+@@ -25,7 +26,7 @@
+ use std::path::Path;
+ use std::time::Instant;
+ 
+-use cua_driver_core::video::{VideoBackend, VideoBackendFactory, VideoMetadata};
++use cua_driver_core::video::{VideoBackend, VideoBackendFactory, VideoMetadata, VideoTarget};
+ 
+ use screencapturekit::prelude::{
+     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration,
+@@ -39,7 +40,133 @@ pub struct SckitVideoBackendFactory;
+ 
+ impl VideoBackendFactory for SckitVideoBackendFactory {
+     fn start(&self, output_path: &Path) -> anyhow::Result<Box<dyn VideoBackend>> {
+-        SckitVideoBackend::start(output_path).map(|b| Box::new(b) as Box<dyn VideoBackend>)
++        self.start_target(output_path, &VideoTarget::Display)
++    }
++
++    fn start_target(
++        &self,
++        output_path: &Path,
++        target: &VideoTarget,
++    ) -> anyhow::Result<Box<dyn VideoBackend>> {
++        SckitVideoBackend::start(output_path, target).map(|b| Box::new(b) as Box<dyn VideoBackend>)
++    }
++}
++
++/// Match the window ID first, then verify its owner. Never substitute a sibling
++/// window from the same application, or an unrelated window that reused the ID.
++fn select_owned_window<W>(
++    windows: impl IntoIterator<Item = W>,
++    pid: i32,
++    window_id: u32,
++    id_of: impl Fn(&W) -> u32,
++    owner_of: impl Fn(&W) -> Option<i32>,
++) -> anyhow::Result<W> {
++    let window = windows
++        .into_iter()
++        .find(|window| id_of(window) == window_id)
++        .ok_or_else(|| {
++            anyhow::anyhow!(
++                "ScreenCaptureKit: window id {window_id} not found in shareable content \
++                 (closed, not capturable, or no longer listed)"
++            )
++        })?;
++    let owner_pid = owner_of(&window).ok_or_else(|| {
++        anyhow::anyhow!("ScreenCaptureKit: window id {window_id} has no owning application")
++    })?;
++    anyhow::ensure!(
++        owner_pid == pid,
++        "ScreenCaptureKit: window id {window_id} belongs to pid {owner_pid}, \
++         not requested pid {pid}"
++    );
++    Ok(window)
++}
++
++/// Bound the output allocation like the native screenshot path.
++const MAX_WINDOW_PIXEL_DIM: u32 = 16384;
++
++fn even_pixel_dimension(value: f64, label: &str) -> anyhow::Result<u32> {
++    anyhow::ensure!(
++        value.is_finite() && value > 0.0,
++        "invalid window video {label}: {value}"
++    );
++    // H.264 output needs even dimensions. Round up so fractional or odd
++    // extents are never truncated and the configured canvas contains the window.
++    let even = (value / 2.0).ceil() * 2.0;
++    anyhow::ensure!(
++        (2.0..=f64::from(MAX_WINDOW_PIXEL_DIM)).contains(&even),
++        "window video {label} {even} out of allowed range 2..={MAX_WINDOW_PIXEL_DIM}"
++    );
++    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
++    Ok(even as u32)
++}
++
++fn window_pixel_dimensions(
++    content_size: (f64, f64),
++    frame_size: (f64, f64),
++    point_pixel_scale: f64,
++) -> anyhow::Result<(u32, u32)> {
++    anyhow::ensure!(
++        point_pixel_scale.is_finite() && point_pixel_scale > 0.0,
++        "invalid window video point-to-pixel scale: {point_pixel_scale}"
++    );
++    let (width, height) = if content_size.0.is_finite()
++        && content_size.1.is_finite()
++        && content_size.0 > 0.0
++        && content_size.1 > 0.0
++    {
++        content_size
++    } else {
++        // Same fallback as capture.rs: SCWindow.frame is in logical points.
++        frame_size
++    };
++    Ok((
++        even_pixel_dimension(width * point_pixel_scale, "width")?,
++        even_pixel_dimension(height * point_pixel_scale, "height")?,
++    ))
++}
++
++fn resolve_capture_target(target: &VideoTarget) -> anyhow::Result<(SCContentFilter, u32, u32)> {
++    let content = SCShareableContent::get()
++        .map_err(|e| anyhow::anyhow!("SCShareableContent::get failed: {e}"))?;
++    match target {
++        VideoTarget::Display => {
++            let display = content
++                .displays()
++                .into_iter()
++                .next()
++                .ok_or_else(|| anyhow::anyhow!("no displays available for ScreenCaptureKit"))?;
++            let filter = SCContentFilter::create()
++                .with_display(&display)
++                .with_excluding_windows(&[])
++                .build();
++            // SCDisplay already reports physical pixels. Preserve the existing
++            // display capture resolution without applying the window scale.
++            Ok((filter, display.width(), display.height()))
++        }
++        VideoTarget::Window { pid, window_id } => {
++            let window = select_owned_window(
++                content.windows(),
++                *pid,
++                *window_id,
++                |window| window.window_id(),
++                |window| {
++                    window
++                        .owning_application()
++                        .map(|application| application.process_id())
++                },
++            )?;
++            // The binding calls SCContentFilter(desktopIndependentWindow:).
++            // No display is selected or used as a fallback on this branch.
++            let filter = SCContentFilter::create().with_window(&window).build();
++            let content_rect = filter.content_rect();
++            let frame = window.frame();
++            let (width, height) = window_pixel_dimensions(
++                (content_rect.size.width, content_rect.size.height),
++                (frame.size.width, frame.size.height),
++                f64::from(filter.point_pixel_scale()),
++            )?;
++            Ok((filter, width, height))
++        }
+     }
+ }
+ 
+@@ -55,7 +182,28 @@ pub struct SckitVideoBackend {
+ }
+ 
+ impl SckitVideoBackend {
+-    fn start(output_path: &Path) -> anyhow::Result<Self> {
++    fn start(output_path: &Path, target: &VideoTarget) -> anyhow::Result<Self> {
++        target.validate()?;
++        // Resolve and validate the requested surface before touching the output
++        // path, so a stale or mismatched window cannot destroy a prior recording.
++        let (filter, pixel_width, pixel_height) = resolve_capture_target(target)?;
++        let frame_interval = screencapturekit::cm::CMTime::new(1, 30);
++        let mut config = SCStreamConfiguration::new()
++            .with_width(pixel_width)
++            .with_height(pixel_height)
++            .with_minimum_frame_interval(&frame_interval)
++            .with_shows_cursor(true)
++            .with_captures_audio(false)
++            .with_captures_microphone(false);
++        if matches!(target, VideoTarget::Window { .. }) {
++            // Window dimensions describe its content, without the drop shadow.
++            // Keep the initial canvas if the window resizes while recording.
++            config = config
++                .with_ignores_shadows_single_window(true)
++                .with_scales_to_fit(true)
++                .with_preserves_aspect_ratio(true);
++        }
++
+         if let Some(parent) = output_path.parent() {
+             std::fs::create_dir_all(parent).map_err(|e| {
+                 anyhow::anyhow!(
+@@ -77,32 +225,6 @@ impl SckitVideoBackend {
+             }
+         }
+ 
+-        let content = SCShareableContent::get()
+-            .map_err(|e| anyhow::anyhow!("SCShareableContent::get failed: {e}"))?;
+-        let displays = content.displays();
+-        let display = displays
+-            .into_iter()
+-            .next()
+-            .ok_or_else(|| anyhow::anyhow!("no displays available for ScreenCaptureKit"))?;
+-
+-        let filter = SCContentFilter::create()
+-            .with_display(&display)
+-            .with_excluding_windows(&[])
+-            .build();
+-
+-        // Match the Swift recorder's pixel resolution + 30fps target. The
+-        // display's reported width/height are in pixels (already
+-        // backing-scale-multiplied) on SCDisplay, so passing them through
+-        // gives a native-resolution capture.
+-        let pixel_width = display.width();
+-        let pixel_height = display.height();
+-        let frame_interval = screencapturekit::cm::CMTime::new(1, 30);
+-        let config = SCStreamConfiguration::new()
+-            .with_width(pixel_width)
+-            .with_height(pixel_height)
+-            .with_minimum_frame_interval(&frame_interval)
+-            .with_shows_cursor(true);
+-
+         let rec_config = SCRecordingOutputConfiguration::new()
+             .with_output_url(output_path)
+             .with_video_codec(SCRecordingOutputCodec::H264)
+@@ -127,6 +249,7 @@ impl SckitVideoBackend {
+         tracing::info!(
+             target: "recording",
+             path = %output_path.display(),
++            capture_target = ?target,
+             width = pixel_width,
+             height = pixel_height,
+             "sckit video capture started"
+@@ -141,6 +264,10 @@ impl SckitVideoBackend {
+     }
+ }
+ 
++#[cfg(test)]
++#[path = "../tests/unit/video_sckit.rs"]
++mod tests;
++
+ impl VideoBackend for SckitVideoBackend {
+     fn stop(self: Box<Self>) -> anyhow::Result<VideoMetadata> {
+         let elapsed = self.started_at.elapsed();
+diff --git a/libs/cua-driver/rust/crates/platform-macos/tests/unit/video_sckit.rs b/libs/cua-driver/rust/crates/platform-macos/tests/unit/video_sckit.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..7a0e8ccc72db64f6b3bb57700fc296a6c803f9af
+--- /dev/null
++++ b/libs/cua-driver/rust/crates/platform-macos/tests/unit/video_sckit.rs
+@@ -0,0 +1,119 @@
++use super::{select_owned_window, window_pixel_dimensions};
++
++#[derive(Debug, PartialEq, Eq)]
++struct Window {
++    id: u32,
++    pid: Option<i32>,
++}
++
++fn select(windows: Vec<Window>, pid: i32, id: u32) -> anyhow::Result<Window> {
++    select_owned_window(windows, pid, id, |window| window.id, |window| window.pid)
++}
++
++#[test]
++fn selects_exact_window_even_when_owner_has_other_windows() {
++    let selected = select(
++        vec![
++            Window {
++                id: 41,
++                pid: Some(10),
++            },
++            Window {
++                id: 42,
++                pid: Some(10),
++            },
++        ],
++        10,
++        42,
++    )
++    .unwrap();
++    assert_eq!(selected.id, 42);
++}
++
++#[test]
++fn missing_window_does_not_select_another_window_from_the_owner() {
++    let error = select(
++        vec![Window {
++            id: 41,
++            pid: Some(10),
++        }],
++        10,
++        42,
++    )
++    .unwrap_err();
++    assert!(error.to_string().contains("window id 42 not found"));
++}
++
++#[test]
++fn reused_window_id_with_different_owner_is_rejected() {
++    let error = select(
++        vec![
++            Window {
++                id: 42,
++                pid: Some(20),
++            },
++            Window {
++                id: 43,
++                pid: Some(10),
++            },
++        ],
++        10,
++        42,
++    )
++    .unwrap_err();
++    let message = error.to_string();
++    assert!(message.contains("belongs to pid 20"));
++    assert!(message.contains("not requested pid 10"));
++}
++
++#[test]
++fn window_without_known_owner_is_rejected() {
++    let error = select(vec![Window { id: 42, pid: None }], 10, 42).unwrap_err();
++    assert!(error.to_string().contains("has no owning application"));
++}
++
++#[test]
++fn window_dimensions_use_content_points_and_retina_scale() {
++    assert_eq!(
++        window_pixel_dimensions((801.0, 601.0), (900.0, 700.0), 2.0).unwrap(),
++        (1602, 1202)
++    );
++}
++
++#[test]
++fn odd_and_fractional_window_dimensions_round_up_to_even_pixels() {
++    assert_eq!(
++        window_pixel_dimensions((801.0, 600.25), (900.0, 700.0), 1.0).unwrap(),
++        (802, 602)
++    );
++    assert_eq!(
++        window_pixel_dimensions((640.5, 480.5), (900.0, 700.0), 1.5).unwrap(),
++        (962, 722)
++    );
++}
++
++#[test]
++fn unavailable_content_rect_falls_back_to_window_frame_points() {
++    for content in [(0.0, 0.0), (800.0, f64::NAN), (-1.0, 600.0)] {
++        assert_eq!(
++            window_pixel_dimensions(content, (800.0, 600.0), 2.0).unwrap(),
++            (1600, 1200)
++        );
++    }
++}
++
++#[test]
++fn rejects_invalid_scale_geometry_and_oversized_output() {
++    for scale in [0.0, -1.0, f64::NAN, f64::INFINITY] {
++        assert!(window_pixel_dimensions((800.0, 600.0), (800.0, 600.0), scale).is_err());
++    }
++    for frame in [(0.0, 600.0), (800.0, -1.0), (f64::INFINITY, 600.0)] {
++        assert!(window_pixel_dimensions((0.0, 0.0), frame, 1.0).is_err());
++    }
++    assert!(window_pixel_dimensions((8192.5, 600.0), (800.0, 600.0), 2.0).is_err());
++    assert!(window_pixel_dimensions((f64::MAX, 600.0), (800.0, 600.0), 2.0).is_err());
++    assert_eq!(
++        window_pixel_dimensions((8192.0, 600.0), (800.0, 600.0), 2.0).unwrap(),
++        (16384, 1200)
++    );
++}

@@ -169,13 +169,13 @@ ${CONTENT_SCOPE} pre{white-space:pre-wrap}
 .dsh-codex-sidechat-empty-title{margin:0;color:var(--dsw-alias-label-primary);font-size:20px;font-weight:600;line-height:28px}
 .dsh-codex-sidechat-empty-hint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:13px;font-weight:400;line-height:20px}
 
-/* Inherited-context rows under the empty hero. Centered to match the hero, and
+/* Context rows under the empty hero. Centered to match the hero, and
    capped to the hero's width so the block reads as one grouped unit rather than
    a full-width band stretching past the centered copy. */
 .dsh-codex-sidechat-empty-context{width:100%;max-width:280px;display:flex;flex-direction:column;gap:4px;text-align:left;min-width:0}
-/* Context badge: whether the main conversation came along. */
+/* Context badge: whether the main conversation is linked. */
 .dsh-codex-sidechat-context-note{display:inline-flex;align-items:center;justify-content:center;gap:6px;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
-.dsh-codex-sidechat-context-note[data-context=inherited]{color:var(--dsw-alias-label-secondary)}
+.dsh-codex-sidechat-context-note[data-context=linked],.dsh-codex-sidechat-context-note[data-context=inherited]{color:var(--dsw-alias-label-secondary)}
 
 /* Composer — one-to-one with the main InputBar's uV2eYG_card:
    --dsw-specific-input-major fill, l2-darkmode-thin hairline, 22px radius,
@@ -194,6 +194,14 @@ ${CONTENT_SCOPE} pre{white-space:pre-wrap}
 .dsh-codex-sidechat-card{box-sizing:border-box;width:100%;border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-specific-input-major);box-shadow:var(--dsw-shadow-lv2);border-radius:22px;display:flex;flex-direction:column;gap:12px;padding-top:10px;font-size:16px;line-height:24px;position:relative}
 .dsh-codex-sidechat-composer-input{box-sizing:border-box;width:100%;resize:none;border:none;background:transparent;color:var(--dsw-alias-label-primary);caret-color:var(--dsw-alias-state-business-primary);padding:4px 16px 0;font-family:inherit;font-size:16px;line-height:24px;outline:none}
 .dsh-codex-sidechat-composer-input::placeholder{color:var(--dsw-alias-label-tertiary)}
+.dsh-codex-sidechat-mentions{-webkit-app-region:no-drag;app-region:no-drag;position:absolute;z-index:30;bottom:calc(100% + 8px);left:0;right:0;min-width:0;max-height:min(320px,45vh);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-specific-menu);box-shadow:var(--dsw-shadow-lv3);padding:4px;box-sizing:border-box;overflow:hidden}
+.dsh-codex-sidechat-mentions-heading{padding:6px 8px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);flex:none}
+.dsh-codex-sidechat-mentions-list{overflow-y:auto;min-height:0}
+.dsh-codex-sidechat-mentions-status{padding:8px;font-size:13px;line-height:20px;overflow-wrap:anywhere}
+.dsh-codex-sidechat-mention-option{-webkit-app-region:no-drag;app-region:no-drag;box-sizing:border-box;display:flex;flex-direction:column;gap:2px;min-width:0;width:100%;height:52px;padding:6px 8px;background:transparent;border:0;border-radius:6px;color:inherit;text-align:left;cursor:pointer;font-family:inherit}
+.dsh-codex-sidechat-mention-option:hover,.dsh-codex-sidechat-mention-option[aria-selected="true"]{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-codex-sidechat-mention-title,.dsh-codex-sidechat-mention-id{display:block;width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:20px}
+.dsh-codex-sidechat-mention-id{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary)}
 
 /* Tool row — uV2eYG_row + tools/trailing: 2/8/6 padding, left gap 16, right gap 12. */
 .dsh-codex-sidechat-composer-tools{justify-content:space-between;align-items:center;gap:12px;min-width:0;padding:2px 8px 6px;display:flex;container-type:inline-size}

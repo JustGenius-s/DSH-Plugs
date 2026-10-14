@@ -7,13 +7,13 @@ export const PROJECT_PATH = '/dsh-workspace-plus/binding'
 /** HTTP path: reveal a path in the OS file manager (Explorer / Finder / xdg-open). */
 export const OPEN_PATH = '/dsh-workspace-plus/open-in-explorer'
 
-/** HTTP path: recover durable or derived titles for visible session rows. */
-export const SESSION_TITLES_PATH = '/dsh-workspace-plus/session-titles'
+/** HTTP path: export the complete recorded conversation as Markdown. */
+export const SESSION_EXPORT_PATH = '/dsh-workspace-plus/session-export'
 
 /** HTTP path: durable pins, independent of the desktop web host's port. */
 export const PINS_PATH = '/dsh-workspace-plus/pins'
 
-/** Settings namespace the Plugins → 插件配置 tab dispatches by `settings.plugin.item` key. */
+/** Settings namespace the menu switches persist under (Host-registered). */
 export const SETTINGS_NS = 'workspace-plus'
 
 // Branded ids, re-exported through the shared runtime boundary so both halves
@@ -52,21 +52,9 @@ export interface BindingListPayload {
   bindings: WorkspaceBinding[]
 }
 
-export interface SessionTitleLookup {
-  id: string
-  cwd?: string
-  updatedAt: number
-  listedBlank: boolean
-}
-
-export interface SessionTitleFact extends SessionTitleLookup {
-  blank: boolean
-  title?: string
-  source?: 'event' | 'fallback'
-}
-
-export interface SessionTitlePayload {
-  sessions: SessionTitleFact[]
+export interface SessionExportPayload {
+  filename: string
+  markdown: string
 }
 
 /**
@@ -105,6 +93,14 @@ export type ProjectAction =
     previousRoot?: string
   }
   | { action: 'delete'; root: string }
+  /**
+   * Drop bindings whose workspace no longer exists.
+   *
+   * The client sends the live workspace paths it can see; the Host prunes
+   * anything else. Sent on connect, because a workspace deleted through the
+   * official row menu is invisible to this plugin's own store.
+   */
+  | { action: 'prune'; livePaths: string[] }
 
 export function isUnder(child: string, parent: string): boolean {
   const a = normalizeCompare(child)

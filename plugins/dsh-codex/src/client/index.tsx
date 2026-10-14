@@ -11,7 +11,9 @@ import { createSideChatFeature } from './features/side-chat'
 import { createStickyUserBubbleFeature } from './features/sticky-user-bubble'
 import { createTerminalFeature } from './features/terminal'
 import { createTerminalControllerStore } from './features/terminal/controller'
+import { createOfficialTerminalShutdownFeature } from './features/terminal/official-shutdown'
 import { createQuickActionsContribution } from './features/quick-actions/contribution'
+import { createVoiceInputFeature } from './features/voice-input'
 import { CodexSettingsSection } from './settings/CodexSettingsSection'
 import { installCodexSettingsIcon } from './settings/codex-settings-icon'
 import { en, zh, type CodexKey } from './locales'
@@ -66,9 +68,11 @@ export function apply(ctx: ClientContext): void {
     createStickyUserBubbleFeature(ctx, scope, t),
     createSideChatFeature(ctx, scope, t),
     createTerminalFeature(ctx, scope, t, terminalControllers, quickActions),
+    createOfficialTerminalShutdownFeature(ctx, scope, t),
     createGitGraphFeature(ctx, scope, t),
     createFilesFeature(ctx, scope, t),
     createFileMentionsFeature(ctx),
+    createVoiceInputFeature(scope),
   ])
   ctx.effect(() => {
     features.activate()
