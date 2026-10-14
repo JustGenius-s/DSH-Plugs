@@ -1,6 +1,11 @@
 export const SETTINGS_NAMESPACE = 'dsh-codex' as const
 
-export type TerminalShell = 'auto' | 'bash' | 'zsh'
+export const TERMINAL_SHELLS = ['auto', 'pwsh', 'powershell', 'bash', 'zsh'] as const
+export type TerminalShell = typeof TERMINAL_SHELLS[number]
+
+export function parseTerminalShell(value: unknown): TerminalShell | undefined {
+  return TERMINAL_SHELLS.find(shell => shell === value)
+}
 
 export type QuickActionTarget = 'current' | 'new'
 

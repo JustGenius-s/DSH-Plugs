@@ -52,6 +52,7 @@ export type ServerMessage =
 
 export type ClientMessage =
   | { type: 'input'; data: string }
+  | { type: 'command'; command: string }
   | { type: 'complete'; requestId: number; input: string; cursor: number }
   | { type: 'signal'; signal: TerminalSignal }
   | { type: 'resize'; cols: number; rows: number }

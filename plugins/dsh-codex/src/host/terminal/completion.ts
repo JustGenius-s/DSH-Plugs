@@ -2,6 +2,7 @@ import { readdir, stat } from 'node:fs/promises'
 import { delimiter, join, resolve } from 'node:path'
 import type { TerminalCompletionCandidate } from '../../shared/terminal-protocol'
 import { specOptions } from './specs'
+import { environmentValue, type TerminalShellKind } from './shell'
 
 const COMMAND_CACHE_TTL_MS = 30_000
 const MAX_CANDIDATES = 100
@@ -13,6 +14,15 @@ const SHELL_BUILTINS = [
   'shift', 'source', 'suspend', 'test', 'times', 'trap', 'true', 'type',
   'typeset', 'ulimit', 'umask', 'unalias', 'unset', 'wait', 'whence', 'where',
   'which',
+]
+/** PowerShell is case-insensitive and hyphenated; POSIX builtins do not apply. */
+const POWERSHELL_BUILTINS = [
+  'Get-ChildItem', 'Get-Location', 'Set-Location', 'Get-Content', 'Set-Content',
+  'Get-Command', 'Get-Help', 'Get-History', 'Get-Process', 'Stop-Process',
+  'Write-Output', 'Write-Host', 'Select-Object', 'Select-String', 'Where-Object',
+  'ForEach-Object', 'Test-Path', 'New-Item', 'Copy-Item', 'Move-Item', 'Remove-Item',
+  'Get-Item', 'Get-Date', 'Clear-Host', 'Resolve-Path', 'Start-Sleep',
+  'cd', 'dir', 'ls', 'pwd', 'cat', 'type', 'echo', 'cls', 'clear', 'exit', 'help',
 ]
 
 interface CompletionOption {
@@ -43,24 +53,30 @@ export async function completeTerminalInput(
   cursor: number,
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  shell: TerminalShellKind = 'bash',
 ): Promise<TerminalCompletionResult> {
   const safeCursor = Math.max(0, Math.min(input.length, Math.floor(cursor)))
-  const token = tokenAt(input, safeCursor)
-  const query = decodeToken(token.raw)
+  const token = tokenAt(input, safeCursor, shell)
+  const query = decodeToken(token.raw, shell)
   const commandPosition = isCommandPosition(input, token.start)
   const pathLike = query.includes('/') || query.startsWith('.') || query.startsWith('~')
+    || (shell === 'powershell' && (query.includes('\\') || /^[a-z]:/i.test(query)))
   let options: CompletionOption[]
   if (query.startsWith('$')) {
-    options = envOptions(query, env)
+    options = envOptions(query, env, shell)
   } else if (commandPosition && !pathLike) {
-    options = await commandOptions(query, env.PATH)
+    options = await commandOptions(query, env, shell)
   } else {
-    const commandTokens = decodeTokens(input, token.start)
+    const commandTokens = decodeTokens(input, token.start, shell)
     const fromSpec = specOptions(commandTokens, query)
     if (fromSpec.length > 0) {
       options = fromSpec
     } else {
-      options = await pathOptions(query, cwd, env.HOME)
+      // PowerShell has no HOME; USERPROFILE is the user's profile directory.
+      const home = process.platform === 'win32' && shell === 'powershell'
+        ? environmentValue(env, 'USERPROFILE') ?? environmentValue(env, 'HOME')
+        : environmentValue(env, 'HOME') ?? environmentValue(env, 'USERPROFILE')
+      options = await pathOptions(query, cwd, home, shell)
     }
   }
 
@@ -72,18 +88,18 @@ export async function completeTerminalInput(
   const common = commonPrefix(limited.map((option) => option.value))
   const candidates = limited.map((option) => ({
     label: option.label,
-    replacement: encodeToken(option.value, token.quote, option.kind !== 'directory', option.kind),
+    replacement: encodeToken(option.value, token.quote, option.kind !== 'directory', option.kind, shell),
     kind: option.kind,
     description: option.description,
   }))
   const replacement = options.length === 1
     ? candidates[0].replacement
-    : encodeToken(common, token.quote, false, limited[0]?.kind)
+    : encodeToken(common, token.quote, false, limited[0]?.kind, shell)
 
   return { start: token.start, end: token.end, replacement, candidates }
 }
 
-function tokenAt(input: string, cursor: number): TokenRange {
+function tokenAt(input: string, cursor: number, shell: TerminalShellKind): TokenRange {
   let start = 0
   let quote: "'" | '"' | null = null
   let escaped = false
@@ -94,7 +110,7 @@ function tokenAt(input: string, cursor: number): TokenRange {
       escaped = false
       continue
     }
-    if (char === '\\' && quote !== "'") {
+    if (char === (shell === 'powershell' ? '`' : '\\') && quote !== "'") {
       escaped = true
       continue
     }
@@ -119,7 +135,7 @@ function tokenAt(input: string, cursor: number): TokenRange {
       end += 1
       continue
     }
-    if (char === '\\' && endQuote !== "'") {
+    if (char === (shell === 'powershell' ? '`' : '\\') && endQuote !== "'") {
       escaped = true
       end += 1
       continue
@@ -152,13 +168,13 @@ function isCommandPosition(input: string, tokenStart: number): boolean {
   return before.length === 0 || ';|&(\n'.includes(before.at(-1) ?? '')
 }
 
-function decodeTokens(input: string, end: number): string[] {
+function decodeTokens(input: string, end: number, shell: TerminalShellKind): string[] {
   const tokens: string[] = []
   let start = -1
   let quote: "'" | '"' | null = null
   let escaped = false
   const flush = (index: number) => {
-    if (start !== -1 && index > start) tokens.push(decodeToken(input.slice(start, index)))
+    if (start !== -1 && index > start) tokens.push(decodeToken(input.slice(start, index), shell))
     start = -1
   }
   for (let index = 0; index < end; index += 1) {
@@ -167,7 +183,7 @@ function decodeTokens(input: string, end: number): string[] {
       escaped = false
       continue
     }
-    if (char === '\\' && quote !== "'") {
+    if (char === (shell === 'powershell' ? '`' : '\\') && quote !== "'") {
       escaped = true
       if (start === -1) start = index
       continue
@@ -191,21 +207,29 @@ function decodeTokens(input: string, end: number): string[] {
   return tokens
 }
 
-function decodeToken(raw: string): string {
+function decodeToken(raw: string, shell: TerminalShellKind): string {
   let output = ''
   let quote: "'" | '"' | null = null
   let escaped = false
-  for (const char of raw) {
+  for (let index = 0; index < raw.length; index++) {
+    const char = raw[index]
     if (escaped) {
       output += char
       escaped = false
       continue
     }
-    if (char === '\\' && quote !== "'") {
+    if (char === (shell === 'powershell' ? '`' : '\\') && quote !== "'") {
       escaped = true
       continue
     }
     if (quote !== null) {
+      // PowerShell escapes a single quote inside a single-quoted string by
+      // doubling it; POSIX cannot escape it at all.
+      if (shell === 'powershell' && quote === "'" && char === "'" && raw[index + 1] === "'") {
+        output += "'"
+        index++
+        continue
+      }
       if (char === quote) quote = null
       else output += char
       continue
@@ -213,11 +237,17 @@ function decodeToken(raw: string): string {
     if (char === "'" || char === '"') quote = char
     else output += char
   }
-  if (escaped) output += '\\'
+  if (escaped) output += shell === 'powershell' ? '`' : '\\'
   return output
 }
 
-function envOptions(prefix: string, env: NodeJS.ProcessEnv): CompletionOption[] {
+function envOptions(prefix: string, env: NodeJS.ProcessEnv, shell: TerminalShellKind): CompletionOption[] {
+  if (shell === 'powershell') {
+    return [...Object.keys(env).map(name => '$env:' + name), '$HOME', '$PWD', '$true', '$false', '$null']
+      .filter(name => name.toLowerCase().startsWith(prefix.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b))
+      .map(value => ({ value, label: value, kind: 'variable' }))
+  }
   const needle = prefix.startsWith('$') ? prefix.slice(1) : prefix
   return Object.keys(env)
     .filter((name) => name.startsWith(needle))
@@ -226,45 +256,66 @@ function envOptions(prefix: string, env: NodeJS.ProcessEnv): CompletionOption[] 
     .map((name) => ({ value: '$' + name, label: '$' + name, kind: 'variable' }))
 }
 
-async function commandOptions(prefix: string, pathValue: string | undefined): Promise<CompletionOption[]> {
-  const names = await commandNames(pathValue)
+async function commandOptions(
+  prefix: string,
+  env: NodeJS.ProcessEnv,
+  shell: TerminalShellKind,
+): Promise<CompletionOption[]> {
+  const names = await commandNames(env, shell)
   return names
-    .filter((name) => name.startsWith(prefix))
+    .filter((name) => shell === 'powershell'
+      ? name.toLowerCase().startsWith(prefix.toLowerCase())
+      : name.startsWith(prefix))
     .map((name) => ({ value: name, label: name, kind: 'command' }))
 }
 
-async function commandNames(pathValue: string | undefined): Promise<string[]> {
-  const cacheKey = pathValue ?? ''
+async function commandNames(env: NodeJS.ProcessEnv, shell: TerminalShellKind): Promise<string[]> {
+  const pathValue = environmentValue(env, 'PATH') ?? ''
+  const extensions = (environmentValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').toLowerCase().split(';')
+  const cacheKey = JSON.stringify([pathValue, extensions, shell])
   const cached = commandCache.get(cacheKey)
   if (cached !== undefined && cached.expiresAt > Date.now()) return cached.names
 
-  const directories = [...new Set(cacheKey.split(delimiter).filter((entry) => entry.length > 0))]
+  const directories = [...new Set(pathValue.split(delimiter).filter((entry) => entry.length > 0))]
   const batches = await Promise.all(directories.map(async (directory) => {
     try {
       const entries = await readdir(directory, { withFileTypes: true })
-      return entries.filter((entry) => !entry.isDirectory()).map((entry) => entry.name)
+      // Windows lists executables by file name; strip PATHEXT so completions
+      // read like the typed command instead of `git.exe`.
+      return entries.filter((entry) => !entry.isDirectory())
+        .filter(entry => process.platform !== 'win32'
+          || extensions.some(ext => entry.name.toLowerCase().endsWith(ext))
+          || (shell === 'powershell' && entry.name.toLowerCase().endsWith('.ps1')))
+        .map(entry => process.platform === 'win32' ? entry.name.replace(/\.(exe|com|cmd|bat)$/i, '') : entry.name)
     } catch {
       return []
     }
   }))
-  const names = [...new Set([...SHELL_BUILTINS, ...batches.flat()])].sort((a, b) => a.localeCompare(b))
+  const builtins = shell === 'powershell' ? POWERSHELL_BUILTINS : SHELL_BUILTINS
+  const names = [...new Set([...builtins, ...batches.flat()])].sort((a, b) => a.localeCompare(b))
   commandCache.set(cacheKey, { expiresAt: Date.now() + COMMAND_CACHE_TTL_MS, names })
   return names
 }
 
-async function pathOptions(query: string, cwd: string, home: string | undefined): Promise<CompletionOption[]> {
+async function pathOptions(
+  query: string,
+  cwd: string,
+  home: string | undefined,
+  shell: TerminalShellKind,
+): Promise<CompletionOption[]> {
   if (query === '~' && home !== undefined) {
     return [{ value: '~/', label: '~/', kind: 'directory' }]
   }
 
-  const slash = query.lastIndexOf('/')
+  const windows = shell === 'powershell' && process.platform === 'win32'
+  const slash = Math.max(query.lastIndexOf('/'), windows ? query.lastIndexOf('\\') : -1)
   const directoryPrefix = slash === -1 ? '' : query.slice(0, slash + 1)
   const namePrefix = slash === -1 ? query : query.slice(slash + 1)
   let lookupDirectory: string
-  if (directoryPrefix === '~/') {
+  if (directoryPrefix === '~/' || (windows && directoryPrefix === '~\\')) {
     if (home === undefined) return []
     lookupDirectory = home
-  } else if (directoryPrefix.startsWith('~/')) {
+  } else if (directoryPrefix.startsWith('~/') || (windows && directoryPrefix.startsWith('~\\'))) {
     if (home === undefined) return []
     lookupDirectory = resolve(home, directoryPrefix.slice(2))
   } else {
@@ -274,7 +325,9 @@ async function pathOptions(query: string, cwd: string, home: string | undefined)
   try {
     const entries = await readdir(lookupDirectory, { withFileTypes: true })
     const visible = entries.filter((entry) => {
-      if (!entry.name.startsWith(namePrefix)) return false
+      if (!(windows
+        ? entry.name.toLowerCase().startsWith(namePrefix.toLowerCase())
+        : entry.name.startsWith(namePrefix))) return false
       return namePrefix.startsWith('.') || !entry.name.startsWith('.')
     })
     const options = await Promise.all(visible.map(async (entry): Promise<CompletionOption> => {
@@ -284,7 +337,8 @@ async function pathOptions(query: string, cwd: string, home: string | undefined)
           .then((value) => value.isDirectory())
           .catch(() => false)
       }
-      const value = directoryPrefix + entry.name + (isDirectory ? '/' : '')
+      const separator = windows && query.includes('\\') ? '\\' : '/'
+      const value = directoryPrefix + entry.name + (isDirectory ? separator : '')
       return { value, label: value, kind: isDirectory ? 'directory' : 'file' }
     }))
     return options.sort((a, b) => {
@@ -314,7 +368,19 @@ function encodeToken(
   quote: "'" | '"' | null,
   finalize: boolean,
   kind?: TerminalCompletionCandidate['kind'],
+  shell: TerminalShellKind = 'bash',
 ): string {
+  if (shell === 'powershell') {
+    // A variable never needs quoting. Otherwise reuse the quote the user is
+    // already inside, and fall back to single quotes because PowerShell treats
+    // backslash as a literal path separator, not an escape.
+    if (kind === 'variable') return value + (finalize ? ' ' : '')
+    if (quote === '"') return '"' + value.replace(/[`"$]/g, '`$&') + (finalize ? '" ' : '')
+    if (quote === "'" || /[\s'"`$&|;()<>*?\[\]{}]/.test(value)) {
+      return "'" + value.replaceAll("'", "''") + (finalize ? "' " : '')
+    }
+    return value + (finalize ? ' ' : '')
+  }
   if (quote === "'") {
     const escaped = value.replaceAll("'", "'\\''")
     return "'" + escaped + (finalize ? "' " : '')

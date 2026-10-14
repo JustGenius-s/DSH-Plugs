@@ -34,6 +34,8 @@ export const ConfigSchema: Schema<Partial<DshCodexConfig>, DshCodexConfig> = Sch
   highlightThemeDark: Schema.string().default(DEFAULT_CONFIG.highlightThemeDark),
   terminalShell: Schema.union([
     Schema.const('auto'),
+    Schema.const('pwsh'),
+    Schema.const('powershell'),
     Schema.const('bash'),
     Schema.const('zsh'),
   ]).default(DEFAULT_CONFIG.terminalShell),
