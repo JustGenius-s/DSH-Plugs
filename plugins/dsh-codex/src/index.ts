@@ -6,6 +6,7 @@ import { createDshCodexGitGraphServer } from './host/git-graph/server'
 import { createDshCodexFilesServer } from './host/files/server'
 import { createDshCodexSideChatServer } from './host/side-chat/server'
 import { createDshCodexTerminalServer } from './host/terminal/server'
+import { createTerminalOpenBridge } from './host/terminal/open-tool'
 import { createEnabledResourceGate } from './host/enabled-resource'
 import { ConfigSchema, createCodexConfigSource, type CodexConfigInput } from './host/settings'
 
@@ -43,6 +44,11 @@ export function apply(ctx: Context, config?: CodexConfigInput): void {
     const server = createDshCodexTerminalServer(ctx, () => currentConfig)
     return () => server.dispose()
   }, 'dsh-codex: terminal websocket route')
+
+  ctx.effect(() => {
+    const opens = createTerminalOpenBridge(ctx)
+    return () => opens.dispose()
+  }, 'dsh-codex: open_terminal tool')
 
   ctx.effect(() => {
     const server = createDshCodexGitGraphServer(ctx)

@@ -62,11 +62,29 @@ export interface SidebarRightOpenTab {
  * dynamic-seam rule as DynamicSlots above.
  */
 interface SidebarRightInternals {
+  /** On-screen session. The session list snapshot has no current id. */
+  mounted?: {
+    getSnapshot(): string | undefined
+  }
   openTabs: {
     getSnapshot(): readonly SidebarRightOpenTab[]
     subscribe(listener: () => void): () => void
   }
   closeIn(sessionId: string, tabId: string): void
+}
+
+/**
+ * The session whose sidebar is on screen.
+ *
+ * `sessions.list` does not carry a current id, so a caller that reads one
+ * from that snapshot never sees the open conversation.
+ */
+export function mountedSidebarSessionId(sidebar: object): string | undefined {
+  const mounted = (sidebar as {
+    mounted?: { getSnapshot?: () => unknown }
+  }).mounted
+  const id = mounted?.getSnapshot?.()
+  return typeof id === 'string' && id !== '' ? id : undefined
 }
 
 /**

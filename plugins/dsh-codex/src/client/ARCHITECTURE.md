@@ -68,6 +68,28 @@ the retained renderer additionally preserves its presentation state. `tab.signal
 both lifetimes. Terminal cleanup is likewise bound to the official tab
 occurrence's `AbortSignal`, never to the disposable DockSurface holder.
 
+Terminal revive is a client-side record, not a kept process: `running-command.ts`
+persists only the still-running foreground command (text, cwd, shell) under the
+official tab identity the moment it starts. The Host still kills every PTY on
+quit. The record is deleted when the command completes, the shell exits, a
+full-screen program takes the alternate screen, or the tab closes while the
+page lives; once page unload begins (`beforeunload`/`pagehide`, capture phase)
+deletions become no-ops, so an app quit or crash always leaves the record.
+The next launch reconnects with the saved cwd/shell and replays that one
+command after the ready+context gates — scrollback is not restored. A page
+reload instead drops the record without replaying: the detached PTY survives
+under the Host's grace timer, so the command is still running there and a
+replay would duplicate it.
+
+Replay is owned by `revive.ts`, not the view: DockSurface mounts only the
+active tab body, so view-side replay would leave background tabs unrestored
+until clicked. At feature activation the reviver respawns every recorded
+command through a headless connection and holds its socket, keeping the PTY
+past the detach grace timer; a mounting view awaits the reviver's claim and
+takes the live session over (the Host re-handshakes a known token without
+killing the PTY), falling back to its own replay only if the headless revive
+failed.
+
 Side Chat uses the same retained-root path. A feature-owned metadata channel
 shares its temporary session id and first-message title with the separately
 mounted official title seat. Switching tabs only detaches its DOM; aborting the

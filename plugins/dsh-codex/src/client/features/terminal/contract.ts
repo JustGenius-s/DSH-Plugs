@@ -1,3 +1,9 @@
+import {
+  createTerminalResourceAddress,
+  isTerminalResourceAddress,
+  terminalResourceAddress,
+} from '../../../shared/terminal-open'
+
 // Sharing the built-in kind lets DSH select our extension and its guide entry.
 export const TERMINAL_TAB_KIND = 'terminal'
 export const TERMINAL_TAB_ID = '@just-genius/dsh-codex/terminal'
@@ -6,23 +12,10 @@ export const LEGACY_TERMINAL_TAB_KIND = 'dsh-codex-terminal'
 export const LEGACY_TERMINAL_TAB_ID = '@just-genius/dsh-codex/terminal/legacy'
 export const TERMINAL_RESOURCE_PATTERN = 'dsh-resource://dsh-codex-terminal/**'
 
-const TERMINAL_RESOURCE_PREFIX = 'dsh-resource://dsh-codex-terminal/'
-
-/** Give every terminal a resource identity so alpha.2 does not deduplicate it as a page. */
-export function terminalResourceAddress(instanceId: string): string {
-  return `${TERMINAL_RESOURCE_PREFIX}${encodeURIComponent(instanceId)}`
-}
-
-export function createTerminalResourceAddress(): string {
-  const instanceId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-  return terminalResourceAddress(instanceId)
-}
-
-export function isTerminalResourceAddress(address: string): boolean {
-  return address.startsWith(TERMINAL_RESOURCE_PREFIX)
-    && address.length > TERMINAL_RESOURCE_PREFIX.length
+export {
+  createTerminalResourceAddress,
+  isTerminalResourceAddress,
+  terminalResourceAddress,
 }
 
 /** Convert a guide-opened page tab once; real terminal resources pass through. */

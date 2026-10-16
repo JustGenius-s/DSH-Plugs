@@ -1,4 +1,5 @@
 import { terminateTerminalSession } from './connection-controller'
+import { forgetRunningCommand } from './running-command'
 
 export interface TerminalLifetimeRegistry {
   /** Bind one official tab occurrence to its abort signal (idempotent). */
@@ -29,6 +30,11 @@ export function createTerminalLifetimeRegistry(
     stoppedSignals.add(entry.signal)
     entry.signal.removeEventListener('abort', entry.abort)
     entries.delete(entry.signal)
+    // Tab close and feature teardown kill the PTY, so the revive record goes
+    // too — except that forgetRunningCommand is a no-op once page unload has
+    // begun, which is what keeps the record alive across an app quit (and a
+    // crash runs no JS here at all).
+    forgetRunningCommand(entry.terminalId)
     void terminate(entry.terminalId).catch(() => {})
   }
 

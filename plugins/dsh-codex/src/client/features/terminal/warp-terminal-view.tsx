@@ -31,6 +31,13 @@ import {
   TerminalConnectionController,
   type TerminalConnectionState,
 } from './connection-controller'
+import {
+  forgetRunningCommand,
+  isPageReload,
+  readRunningCommand,
+  rememberRunningCommand,
+} from './running-command'
+import type { TerminalReviver } from './revive'
 import { TerminalQueryResponder } from './query-responder'
 import {
   historyGhost,
@@ -189,10 +196,16 @@ export interface WarpTerminalViewProps {
    * composer applied the insertion.
    */
   onAddToContext?: (text: string) => boolean
+  /**
+   * Feature-level headless reviver. When it holds a claim for this tab, the
+   * view takes over the already-revived PTY instead of replaying the command
+   * itself, so a background tab's command comes back before it is opened.
+   */
+  reviver?: TerminalReviver
 }
 
 export function WarpTerminalView(props: WarpTerminalViewProps) {
-  const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t, controllerStore, controllerId, onAddToContext } = props
+  const { sessionId, cwd, terminalShell, terminalScrollback, terminalFontSize, t, controllerStore, controllerId, onAddToContext, reviver } = props
   const fontFamily = fontFamilyStack(props.codeFontFamily, TERMINAL_FONT_FALLBACK)
   const visible = props.visible !== false
   const sessionCwd = cwd
@@ -212,6 +225,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   const selectionRef = useRef<SelectionRange | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const terminalShellRef = useRef<TerminalShell>(terminalShell)
+  const sessionCwdRef = useRef(sessionCwd)
   const terminalScrollbackRef = useRef(terminalScrollback)
   const terminalFontSizeRef = useRef(terminalFontSize)
   const fontFamilyRef = useRef(fontFamily)
@@ -293,6 +307,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
   metricsRef.current = metrics
   altActiveRef.current = altActive
   terminalShellRef.current = terminalShell
+  sessionCwdRef.current = sessionCwd
   terminalScrollbackRef.current = terminalScrollback
   terminalFontSizeRef.current = terminalFontSize
   fontFamilyRef.current = fontFamily
@@ -504,6 +519,9 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     writeToGrid(grid, output, storeOpts(), () => {
       const bufType = grid.term.buffer.active.type
       if (bufType === 'alternate' && !altActiveRef.current) {
+        // Full-screen programs never revive: drop the record written at
+        // submit time so quitting out of vim/less/htop stays quit.
+        forgetRunningCommand(sessionId)
         altTermRef.current = grid.term
         // (Query answers are already wired: newGrid bound term.onData at
         // creation, so vim's startup queries were answered before we even
@@ -519,7 +537,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       rebuildDoc()
       schedulePaint()
     })
-  }, [rebuildDoc, schedulePaint, clearTranscript])
+  }, [rebuildDoc, schedulePaint, clearTranscript, sessionId])
 
   const setDraftWithCaret = useCallback((value: string, caret: number, focus = false) => {
     draftRef.current = value
@@ -646,6 +664,8 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     }
     const targetId = runningIdRef.current
     if (targetId === null) return
+    // The recorded command finished, so there is nothing left to revive.
+    forgetRunningCommand(sessionId)
     const startedAt = startedAtRef.current.get(targetId)
     const durationMs = startedAt === undefined ? null : Date.now() - startedAt
     const status: Block['status'] = exitCode === 0 ? 'completed' : 'failed'
@@ -654,7 +674,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     setRunningId(null)
     rebuildDoc()
     schedulePaint()
-  }, [rebuildDoc, schedulePaint])
+  }, [rebuildDoc, schedulePaint, sessionId])
 
   const handleServerMessage = useCallback((message: ServerMessage) => {
     switch (message.type) {
@@ -716,6 +736,8 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         completeRunning(message.exitCode)
         break
       case 'exit': {
+        // The shell itself is gone; no command may revive on the next launch.
+        forgetRunningCommand(sessionId)
         const targetId = runningIdRef.current
         if (targetId !== null) {
           const status: Block['status'] = message.exitCode === 0 ? 'completed' : 'killed'
@@ -731,7 +753,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
         setError(message.message)
         break
     }
-  }, [appendOutput, completeRunning, refreshHistoryGhost, setDraftWithCaret])
+  }, [appendOutput, completeRunning, refreshHistoryGhost, setDraftWithCaret, sessionId])
 
   // Stabilize the WS handler: it transitively depends on cursorVisible (blink),
   // which would otherwise reconnect the socket every 530ms and kill the PTY.
@@ -799,8 +821,57 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     currentContextRef.current = null
     setCurrentContext(null)
     queryResponderRef.current?.reset()
-    connection.connect({ sessionId, cwd: sessionCwd, shell: terminalShellRef.current })
-  }, [connection, sessionId])
+    // A reload keeps the old PTY alive under the host's detach grace timer,
+    // so the recorded command is still running there: replaying it would
+    // spawn a duplicate. Drop the record instead; the orphaned PTY dies with
+    // the grace timer. A real app launch killed the PTY along with the host,
+    // so only then does the recorded command revive — in its saved directory
+    // and shell, with no scrollback painted.
+    const reloading = isPageReload()
+    if (reloading) forgetRunningCommand(sessionId)
+    // The feature-level reviver already respawned this tab's PTY and replayed
+    // the command headlessly at launch, so a background tab's command comes
+    // back before the tab is ever opened. This view waits for that revive to
+    // settle and then takes the session over; a failed revive falls back to
+    // replaying the record here.
+    const claim = reloading || reviver === undefined ? undefined : reviver.claimFor(sessionId)
+    let cancelled = false
+    const start = async (): Promise<void> => {
+      let handedOff = false
+      if (claim !== undefined) {
+        const sent = await claim.settled
+        if (cancelled) return
+        if (sent) {
+          claim.handoff()
+          handedOff = true
+        }
+      }
+      if (cancelled) return
+      const revive = reloading || handedOff ? null : readRunningCommand(sessionId)
+      connection.connect({
+        sessionId,
+        cwd: revive !== null && revive.cwd !== '' ? revive.cwd : sessionCwd,
+        shell: revive?.shell ?? terminalShellRef.current,
+      })
+      if (revive === null) return
+      void connection
+        .waitUntilOperational()
+        .then(() => {
+          // submitCommand re-records the command with the fresh context, so a
+          // quit during the replayed run still revives on the next launch.
+          if (!cancelled) submitCommandRef.current?.(revive.command)
+        })
+        .catch(() => {
+          // The socket never became operational (view unmounted, or a newer
+          // connection replaced this one): keep the record so the next app
+          // launch can retry the replay.
+        })
+    }
+    void start()
+    return () => {
+      cancelled = true
+    }
+  }, [connection, sessionId, reviver])
 
   useEffect(() => {
     connection.updateShell(terminalShell)
@@ -876,6 +947,16 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
       gridsRef.current.set(id, newGrid(id))
       runningIdRef.current = id
       setRunningId(id)
+      // Record the command the moment it starts, keyed by the official tab
+      // identity: if the app quits while it is still running, the next launch
+      // replays it in this directory. Stdin continuations returned above and
+      // `clear` took the other branch, so only the first line of a foreground
+      // command lands here.
+      rememberRunningCommand(sessionId, {
+        command,
+        cwd: currentContextRef.current?.cwd ?? sessionCwdRef.current ?? '',
+        shell: terminalShellRef.current,
+      })
     }
     draftRef.current = ''
     setDraft('')
@@ -890,7 +971,7 @@ export function WarpTerminalView(props: WarpTerminalViewProps) {
     if (!connection.send(message)) return
     rebuildDoc()
     schedulePaint()
-  }, [connection, rebuildDoc, schedulePaint, clearTranscript, newGrid])
+  }, [connection, rebuildDoc, schedulePaint, clearTranscript, newGrid, sessionId])
   submitCommandRef.current = submitCommand
 
   const runDraft = useCallback(() => {

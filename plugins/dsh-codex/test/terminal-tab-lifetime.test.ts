@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { terminalSessionToken } from '../src/client/features/terminal/connection-controller'
 import { createTerminalLifetimeRegistry } from '../src/client/features/terminal/lifetime'
+import {
+  notePageUnloading,
+  readRunningCommand,
+  rememberRunningCommand,
+  resetPageUnloadingForTest,
+} from '../src/client/features/terminal/running-command'
 
 describe('terminalSessionToken', () => {
   it('is stable for one runtime and official tab identity', () => {
@@ -64,5 +70,63 @@ describe('createTerminalLifetimeRegistry', () => {
     await Promise.resolve()
 
     expect(terminate).toHaveBeenCalledOnce()
+  })
+})
+
+describe('revive record cleanup', () => {
+  afterEach(() => resetPageUnloadingForTest())
+
+  it('drops the recorded command when the tab signal aborts', async () => {
+    rememberRunningCommand('terminal-1', { command: 'pnpm dev', cwd: '/repo', shell: 'auto' })
+    const registry = createTerminalLifetimeRegistry(vi.fn(async () => {}))
+    const controller = new AbortController()
+
+    registry.watch(controller.signal, 'terminal-1')
+    controller.abort()
+    await Promise.resolve()
+
+    expect(readRunningCommand('terminal-1')).toBeNull()
+  })
+
+  it('drops the record when the feature is disposed while the page lives', () => {
+    rememberRunningCommand('terminal-1', { command: 'pnpm dev', cwd: '/repo', shell: 'auto' })
+    const registry = createTerminalLifetimeRegistry(vi.fn(async () => {}))
+    const controller = new AbortController()
+
+    registry.watch(controller.signal, 'terminal-1')
+    registry.dispose()
+
+    expect(readRunningCommand('terminal-1')).toBeNull()
+  })
+
+  it('keeps the record once page unload has begun (app quit)', async () => {
+    rememberRunningCommand('terminal-1', { command: 'pnpm dev', cwd: '/repo', shell: 'auto' })
+    const terminate = vi.fn(async () => {})
+    const registry = createTerminalLifetimeRegistry(terminate)
+    const controller = new AbortController()
+    registry.watch(controller.signal, 'terminal-1')
+
+    notePageUnloading()
+    controller.abort()
+    await Promise.resolve()
+
+    // The PTY is still terminated; only the localStorage record survives, so
+    // the next app launch replays the command in a fresh shell.
+    expect(terminate).toHaveBeenCalledOnce()
+    expect(readRunningCommand('terminal-1')?.command).toBe('pnpm dev')
+  })
+
+  it('keeps the record when the feature is disposed during page unload', () => {
+    rememberRunningCommand('terminal-1', { command: 'pnpm dev', cwd: '/repo', shell: 'auto' })
+    const terminate = vi.fn(async () => {})
+    const registry = createTerminalLifetimeRegistry(terminate)
+    const controller = new AbortController()
+    registry.watch(controller.signal, 'terminal-1')
+
+    notePageUnloading()
+    registry.dispose()
+
+    expect(terminate).toHaveBeenCalledOnce()
+    expect(readRunningCommand('terminal-1')?.command).toBe('pnpm dev')
   })
 })

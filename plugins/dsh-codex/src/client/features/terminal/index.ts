@@ -9,6 +9,7 @@ import type { CodexKey } from '../../locales'
 import type { CodexFeature } from '../../core/feature-manager'
 import { bindEnabledSlot } from '../../bind-enabled-slot'
 import {
+  mountedSidebarSessionId,
   registerSidebarTab,
   sidebarTabTitle,
   type SidebarTabProps,
@@ -18,6 +19,7 @@ import {
   SidebarTabKeepAliveMount,
 } from '../../sidebar-tab-keep-alive'
 import type { QuickActionsContribution } from '../quick-actions/contribution'
+import { openAgentTerminal, startTerminalOpenPoller } from './agent-open'
 import { WarpTerminalView } from './warp-terminal-view'
 import type { TerminalControllerStore } from './controller'
 import {
@@ -28,6 +30,7 @@ import {
   terminalResourceControllerId,
 } from './contract'
 import { createTerminalLifetimeRegistry } from './lifetime'
+import { createTerminalReviver } from './revive'
 import { createTerminalReference } from './reference'
 import { legacyTerminalTabDefinition, terminalTabDefinition } from './definition'
 
@@ -50,6 +53,19 @@ export function createTerminalFeature(
         () => {
           const lifetimes = createTerminalLifetimeRegistry()
           const retainedTabs = createSidebarTabKeepAliveRegistry()
+          // Respawn and replay every recorded still-running command
+          // headlessly: a background tab's command comes back at app launch
+          // without the user opening the tab first. Each view takes over its
+          // revived session when the tab body mounts.
+          const reviver = createTerminalReviver()
+          // Only a live terminal panel claims opens. While this is disposed
+          // (panel off, or no page), the host tool waits out its timeout.
+          // The id is the sidebar's mounted session: the session list has no
+          // current id, and reading one from it never claims the open.
+          const stopAgentOpens = startTerminalOpenPoller({
+            sessionId: () => mountedSidebarSessionId(ctx.sidebarRight),
+            open: request => openAgentTerminal(ctx.sidebarRight, controllerStore, request),
+          })
 
           const TerminalTab = (props: SidebarTabProps) => {
             const { tab } = props.useTabInfo()
@@ -131,6 +147,7 @@ export function createTerminalFeature(
                   t: props.t,
                   onAddToContext: (text: string): boolean =>
                     terminalReference.insert(props.sessionId, text, t('context.chipLabel')),
+                  reviver,
                 }),
               ),
             })
@@ -155,8 +172,10 @@ export function createTerminalFeature(
             ctx, definition, TerminalTab, { locale: NS, title: TerminalTitle },
           ))
           return () => {
+            stopAgentOpens()
             for (const dispose of registrations.reverse()) dispose()
             retainedTabs.dispose()
+            reviver.dispose()
             lifetimes.dispose()
           }
         },
